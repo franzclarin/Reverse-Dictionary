@@ -11,6 +11,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "@clerk/nextjs": "^5.7.5",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.3",
     "next": "14.2.23",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

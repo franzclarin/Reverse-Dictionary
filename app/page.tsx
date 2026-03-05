@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { UserButton } from "@clerk/nextjs";
+import { useAuth, UserButton, SignInButton } from "@clerk/nextjs";
 import SearchInput from "@/components/SearchInput";
 import ResultDisplay from "@/components/ResultDisplay";
 import ExampleQueries from "@/components/ExampleQueries";
-import { ReverseDictionaryResponse } from "@/types";
+import { ReverseDictionaryResponse, RateLimitInfo } from "@/types";
 
 export default function Home() {
+  const { isSignedIn } = useAuth();
   const [result, setResult] = useState<ReverseDictionaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
 
   const handleSearch = async (description: string) => {
     setIsLoading(true);
@@ -29,22 +31,44 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to fetch word");
+        if (response.status === 429) {
+          setError(data.error);
+          if (data.rateLimit) setRateLimit(data.rateLimit);
+        } else {
+          throw new Error(data.error || "Failed to fetch word");
+        }
+        return;
       }
 
+      if (data.rateLimit) setRateLimit(data.rateLimit);
       setResult(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+      setError(
+        err instanceof Error ? err.message : "An unexpected error occurred"
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
+  const showGuestBanner =
+    !isSignedIn && rateLimit !== null && rateLimit.isGuest;
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-8 pb-20 gap-6">
+      {/* Auth controls */}
       <div className="absolute top-4 right-4">
-        <UserButton afterSignOutUrl="/sign-in" />
+        {isSignedIn ? (
+          <UserButton afterSignOutUrl="/" />
+        ) : (
+          <SignInButton mode="redirect">
+            <button className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">
+              Sign in
+            </button>
+          </SignInButton>
+        )}
       </div>
+
       <main className="flex flex-col gap-8 items-center w-full">
         {/* Header */}
         <div className="text-center mb-4">
@@ -52,7 +76,8 @@ export default function Home() {
             Reverse Dictionary
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl">
-            Describe a concept in plain language, and discover the exact word you're looking for
+            Describe a concept in plain language, and discover the exact word
+            you&apos;re looking for
           </p>
         </div>
 
@@ -62,13 +87,28 @@ export default function Home() {
         {/* Example Queries */}
         <ExampleQueries onSelectExample={handleSearch} isLoading={isLoading} />
 
+        {/* Guest nudge banner — shown after first lookup */}
+        {showGuestBanner && (
+          <div className="w-full max-w-2xl flex items-center justify-between gap-4 px-4 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400">
+            <span>
+              {rateLimit.remaining} of {rateLimit.limit} free lookups remaining
+              today
+            </span>
+            <SignInButton mode="redirect">
+              <button className="shrink-0 text-blue-600 dark:text-blue-400 hover:underline font-medium">
+                Sign in for 50/day &rarr;
+              </button>
+            </SignInButton>
+          </div>
+        )}
+
         {/* Results */}
         <ResultDisplay result={result} error={error} />
       </main>
 
       {/* Footer */}
       <footer className="mt-16 text-center text-sm text-gray-500 dark:text-gray-400">
-        <p>Powered by Claude AI • Built with Next.js</p>
+        <p>Powered by Claude AI &bull; Built with Next.js</p>
       </footer>
     </div>
   );

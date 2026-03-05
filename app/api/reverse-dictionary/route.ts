@@ -1,11 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { auth } from "@clerk/nextjs/server";
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
 import { ReverseDictionaryRequest, ReverseDictionaryResponse } from "@/types";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+// Rate limiters — only created when Upstash env vars are present
+function getRatelimiters() {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+
+  const redis = new Redis({ url, token });
+  return {
+    guest: new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(3, "1 d"),
+      prefix: "rl:guest",
+    }),
+    user: new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(50, "1 d"),
+      prefix: "rl:user",
+    }),
+  };
+}
+
+const ratelimiters = getRatelimiters();
 
 const SYSTEM_PROMPT = `You are a precise reverse dictionary. When given a description or concept, return the exact word or phrase that matches.
 
@@ -37,8 +62,33 @@ Rules:
 
 export async function POST(request: NextRequest) {
   const { userId } = auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Rate limiting
+  if (ratelimiters) {
+    if (userId) {
+      const result = await ratelimiters.user.limit(userId);
+      if (!result.success) {
+        return NextResponse.json(
+          { error: "Daily limit of 50 lookups reached. Try again tomorrow." },
+          { status: 429 }
+        );
+      }
+    } else {
+      const ip =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        "127.0.0.1";
+      const result = await ratelimiters.guest.limit(ip);
+      if (!result.success) {
+        return NextResponse.json(
+          {
+            error:
+              "Daily limit of 3 free lookups reached. Sign in for 50 lookups/day.",
+            rateLimitExceeded: true,
+          },
+          { status: 429 }
+        );
+      }
+    }
   }
 
   try {
@@ -80,15 +130,18 @@ export async function POST(request: NextRequest) {
       ],
     });
 
-    const responseText = message.content[0].type === "text" ? message.content[0].text : "";
+    const responseText =
+      message.content[0].type === "text" ? message.content[0].text : "";
 
     let parsedResponse: ReverseDictionaryResponse;
     try {
       parsedResponse = JSON.parse(responseText);
-    } catch (parseError) {
+    } catch {
       console.error("Failed to parse Claude response:", responseText);
       const wordMatch = responseText.match(/"word"\s*:\s*"([^"]+)"/);
-      const definitionMatch = responseText.match(/"definition"\s*:\s*"([^"]+)"/);
+      const definitionMatch = responseText.match(
+        /"definition"\s*:\s*"([^"]+)"/
+      );
 
       if (wordMatch && definitionMatch) {
         parsedResponse = {
@@ -108,6 +161,21 @@ export async function POST(request: NextRequest) {
         { error: "Invalid response format from AI" },
         { status: 500 }
       );
+    }
+
+    // Attach rate limit info if Upstash is configured
+    if (ratelimiters) {
+      const ip =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        "127.0.0.1";
+      const key = userId ?? ip;
+      const limiter = userId ? ratelimiters.user : ratelimiters.guest;
+      const { remaining, limit } = await limiter.getRemaining(key);
+      parsedResponse.rateLimit = {
+        remaining,
+        limit,
+        isGuest: !userId,
+      };
     }
 
     return NextResponse.json(parsedResponse);
