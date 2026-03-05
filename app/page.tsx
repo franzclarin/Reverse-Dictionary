@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { UserButton } from "@clerk/nextjs";
 import SearchInput from "@/components/SearchInput";
 import ResultDisplay from "@/components/ResultDisplay";
 import ExampleQueries from "@/components/ExampleQueries";
@@ -41,6 +42,9 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-8 pb-20 gap-6">
+      <div className="absolute top-4 right-4">
+        <UserButton afterSignOutUrl="/sign-in" />
+      </div>
       <main className="flex flex-col gap-8 items-center w-full">
         {/* Header */}
         <div className="text-center mb-4">

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@clerk/nextjs": "^5.7.5",
     "next": "14.2.23",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

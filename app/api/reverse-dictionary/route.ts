@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { auth } from "@clerk/nextjs/server";
 import { ReverseDictionaryRequest, ReverseDictionaryResponse } from "@/types";
 
 const anthropic = new Anthropic({
@@ -35,6 +36,11 @@ Rules:
 - Ensure the JSON is valid and properly formatted`;
 
 export async function POST(request: NextRequest) {
+  const { userId } = auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body: ReverseDictionaryRequest = await request.json();
     const { description } = body;
