@@ -27,16 +27,19 @@ export default function CollectionGrid({ words }: { words: SavedWordItem[] }) {
 
   if (items.length === 0) {
     return (
-      <div className="text-center py-16">
-        <p className="text-gray-500 dark:text-gray-400 mb-4">
-          No saved words yet. Search for a word and click{" "}
-          <strong>Save to collection</strong>.
+      <div className="text-center py-24">
+        <p
+          className="font-serif text-2xl italic"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          Your collection is empty. Search for a word to begin.
         </p>
         <Link
           href="/"
-          className="text-blue-600 dark:text-blue-400 hover:underline"
+          className="mt-6 inline-block font-mono text-sm hover:underline"
+          style={{ color: "var(--accent-gold)" }}
         >
-          Start searching &rarr;
+          Start searching →
         </Link>
       </div>
     );
@@ -47,26 +50,64 @@ export default function CollectionGrid({ words }: { words: SavedWordItem[] }) {
       {items.map(({ word, savedAt }) => (
         <div
           key={word.id}
-          className="p-5 border border-gray-200 dark:border-gray-800 rounded-xl hover:border-blue-300 dark:hover:border-blue-700 transition-colors bg-white dark:bg-gray-900"
+          className="p-5 rounded-lg transition-all"
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "rgba(201,168,76,0.4)";
+            e.currentTarget.style.transform = "scale(1.01)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "var(--border)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
         >
-          <Link href={`/word/${word.word}`} className="block">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-1">
+          <Link href={`/word/${word.word}`} className="block mb-4">
+            <h2
+              className="font-serif text-2xl mb-1.5"
+              style={{ color: "var(--text-primary)" }}
+            >
               {word.word}
             </h2>
-            <p className="text-xs text-gray-400 italic mb-2">
+            <span
+              className="font-mono text-[10px] px-2 py-0.5 rounded"
+              style={{
+                background: "var(--accent-gold-dim)",
+                color: "var(--accent-gold)",
+              }}
+            >
               {word.partOfSpeech}
-            </p>
-            <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-3">
+            </span>
+            <p
+              className="mt-3 font-light text-sm leading-relaxed line-clamp-3"
+              style={{ color: "var(--text-secondary)" }}
+            >
               {word.definition}
             </p>
           </Link>
-          <div className="mt-3 flex items-center justify-between">
-            <p className="text-xs text-gray-400">
-              Saved {new Date(savedAt).toLocaleDateString()}
+
+          <div
+            className="flex items-center justify-between pt-3"
+            style={{ borderTop: "1px solid var(--border)" }}
+          >
+            <p
+              className="font-mono text-[10px]"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {new Date(savedAt).toLocaleDateString()}
             </p>
             <button
               onClick={() => handleUnsave(word.word)}
-              className="text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+              className="font-mono text-[10px] transition-colors"
+              style={{ color: "var(--text-secondary)" }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.color = "var(--confidence-low)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.color = "var(--text-secondary)")
+              }
             >
               Remove
             </button>

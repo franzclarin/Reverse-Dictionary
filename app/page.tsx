@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAuth, UserButton, SignInButton } from "@clerk/nextjs";
-import Link from "next/link";
+import { useAuth, SignInButton } from "@clerk/nextjs";
 import SearchInput from "@/components/SearchInput";
 import ResultDisplay from "@/components/ResultDisplay";
 import ExampleQueries from "@/components/ExampleQueries";
@@ -23,9 +22,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/reverse-dictionary", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description }),
       });
 
@@ -56,69 +53,69 @@ export default function Home() {
     !isSignedIn && rateLimit !== null && rateLimit.isGuest;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8 pb-20 gap-6">
-      {/* Auth controls */}
-      <div className="absolute top-4 right-4 flex items-center gap-3">
-        {isSignedIn ? (
-          <>
-            <Link
-              href="/collection"
-              className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
-            >
-              My Words
-            </Link>
-            <UserButton afterSignOutUrl="/" />
-          </>
-        ) : (
-          <SignInButton mode="redirect">
-            <button className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">
-              Sign in
-            </button>
-          </SignInButton>
-        )}
+    <main className="max-w-3xl mx-auto px-6 py-20 flex flex-col items-center gap-10">
+      {/* Hero */}
+      <div className="text-center">
+        <h1
+          className="font-serif leading-tight mb-4"
+          style={{
+            fontSize: "clamp(2.5rem,6vw,4rem)",
+            color: "var(--text-primary)",
+          }}
+        >
+          Find the word you can&apos;t remember.
+        </h1>
+        <p
+          className="font-light text-lg"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          Describe it. We&apos;ll find it.
+        </p>
       </div>
 
-      <main className="flex flex-col gap-8 items-center w-full">
-        {/* Header */}
-        <div className="text-center mb-4">
-          <h1 className="text-6xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">
-            Reverse Dictionary
-          </h1>
-          <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl">
-            Describe a concept in plain language, and discover the exact word
-            you&apos;re looking for
-          </p>
+      {/* Search bar */}
+      <SearchInput onSearch={handleSearch} isLoading={isLoading} />
+
+      {/* Loading dots */}
+      {isLoading && (
+        <div className="dot-pulse flex gap-2 items-center justify-center h-6">
+          <span />
+          <span />
+          <span />
         </div>
+      )}
 
-        {/* Search Input */}
-        <SearchInput onSearch={handleSearch} isLoading={isLoading} />
-
-        {/* Example Queries */}
+      {/* Example chips — hidden while loading or after result */}
+      {!isLoading && !result && !error && (
         <ExampleQueries onSelectExample={handleSearch} isLoading={isLoading} />
+      )}
 
-        {/* Guest nudge banner — shown after first lookup */}
-        {showGuestBanner && (
-          <div className="w-full max-w-2xl flex items-center justify-between gap-4 px-4 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400">
-            <span>
-              {rateLimit.remaining} of {rateLimit.limit} free lookups remaining
-              today
-            </span>
-            <SignInButton mode="redirect">
-              <button className="shrink-0 text-blue-600 dark:text-blue-400 hover:underline font-medium">
-                Sign in for 50/day &rarr;
-              </button>
-            </SignInButton>
-          </div>
-        )}
+      {/* Guest rate limit banner */}
+      {showGuestBanner && (
+        <div
+          className="w-full flex items-center justify-between gap-4 px-4 py-3 rounded-lg text-sm"
+          style={{
+            background: "var(--accent-gold-dim)",
+            border: "1px solid rgba(201,168,76,0.2)",
+          }}
+        >
+          <span className="font-mono" style={{ color: "var(--accent-gold)" }}>
+            {rateLimit.remaining} of {rateLimit.limit} free lookups remaining
+            today
+          </span>
+          <SignInButton mode="redirect">
+            <button
+              className="shrink-0 font-mono hover:underline font-medium"
+              style={{ color: "var(--accent-gold)" }}
+            >
+              Sign in for 50/day →
+            </button>
+          </SignInButton>
+        </div>
+      )}
 
-        {/* Results */}
-        <ResultDisplay result={result} error={error} />
-      </main>
-
-      {/* Footer */}
-      <footer className="mt-16 text-center text-sm text-gray-500 dark:text-gray-400">
-        <p>Powered by Claude AI &bull; Built with Next.js</p>
-      </footer>
-    </div>
+      {/* Results */}
+      <ResultDisplay result={result} error={error} />
+    </main>
   );
 }

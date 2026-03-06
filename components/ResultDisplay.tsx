@@ -11,60 +11,81 @@ interface ResultDisplayProps {
 export default function ResultDisplay({ result, error }: ResultDisplayProps) {
   if (error) {
     return (
-      <div className="w-full max-w-3xl mt-8 p-6 bg-red-50 border-2 border-red-200 rounded-2xl dark:bg-red-900/20 dark:border-red-800">
-        <h3 className="text-xl font-semibold text-red-800 dark:text-red-200 mb-2">Error</h3>
-        <p className="text-red-700 dark:text-red-300">{error}</p>
+      <div
+        className="w-full p-6 rounded-lg"
+        style={{
+          border: "1px solid rgba(224,82,82,0.25)",
+          background: "rgba(224,82,82,0.05)",
+        }}
+      >
+        <p className="font-serif text-xl italic mb-1" style={{ color: "var(--text-primary)" }}>
+          We couldn&apos;t find a word for that.
+        </p>
+        <p className="font-mono text-sm" style={{ color: "var(--text-secondary)" }}>
+          {error}
+        </p>
       </div>
     );
   }
 
-  if (!result) {
-    return null;
-  }
+  if (!result) return null;
 
   return (
-    <div className="w-full max-w-3xl mt-8 animate-fadeIn">
-      <div className="p-8 bg-gradient-to-br from-blue-50 to-purple-50 border-2 border-blue-200 rounded-2xl shadow-lg dark:from-blue-900/20 dark:to-purple-900/20 dark:border-blue-700">
-        {/* Main Word */}
-        <div className="mb-6">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <h2 className="text-5xl font-bold text-blue-900 dark:text-blue-100 mb-2">
-              {result.word}
-            </h2>
-            <Link
-              href={`/word/${encodeURIComponent(result.word.toLowerCase())}`}
-              className="shrink-0 mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-            >
-              Full page
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </Link>
-          </div>
-          <div className="h-1 w-20 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"></div>
+    <div className="w-full">
+      <div
+        className="p-7 rounded-lg animate-fade-up"
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          animationDelay: "0ms",
+        }}
+      >
+        {/* Word + full page link */}
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <h2
+            className="font-serif leading-tight"
+            style={{ fontSize: "clamp(2.5rem,6vw,3.5rem)", color: "var(--text-primary)" }}
+          >
+            {result.word}
+          </h2>
+          <Link
+            href={`/word/${encodeURIComponent(result.word.toLowerCase())}`}
+            className="shrink-0 mt-2 font-mono text-xs px-2.5 py-1 rounded transition-colors"
+            style={{
+              color: "var(--accent-gold)",
+              border: "1px solid rgba(201,168,76,0.3)",
+            }}
+          >
+            Full page ↗
+          </Link>
         </div>
 
         {/* Definition */}
-        <div className="mb-6">
-          <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
-            Definition
-          </h3>
-          <p className="text-lg text-gray-800 dark:text-gray-200 leading-relaxed">
-            {result.definition}
-          </p>
-        </div>
+        <p
+          className="font-light text-lg leading-relaxed mb-6"
+          style={{ color: "var(--text-primary)" }}
+        >
+          {result.definition}
+        </p>
 
         {/* Examples */}
         {result.examples && result.examples.length > 0 && (
           <div className="mb-6">
-            <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
-              Usage Examples
-            </h3>
+            <p
+              className="font-mono text-[10px] uppercase tracking-widest mb-3"
+              style={{ color: "var(--accent-gold)" }}
+            >
+              Examples
+            </p>
             <ul className="space-y-2">
-              {result.examples.map((example, index) => (
+              {result.examples.map((example, i) => (
                 <li
-                  key={index}
-                  className="text-gray-700 dark:text-gray-300 pl-4 border-l-2 border-blue-300 dark:border-blue-600"
+                  key={i}
+                  className="flex gap-3 font-light italic text-sm leading-relaxed pl-4"
+                  style={{
+                    color: "var(--text-secondary)",
+                    borderLeft: "1px solid var(--border)",
+                  }}
                 >
                   {example}
                 </li>
@@ -76,17 +97,33 @@ export default function ResultDisplay({ result, error }: ResultDisplayProps) {
         {/* Alternatives */}
         {result.alternatives && result.alternatives.length > 0 && (
           <div>
-            <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">
-              Alternative Words
-            </h3>
+            <p
+              className="font-mono text-[10px] uppercase tracking-widest mb-3"
+              style={{ color: "var(--accent-gold)" }}
+            >
+              Related Words
+            </p>
             <div className="flex flex-wrap gap-2">
-              {result.alternatives.map((alt, index) => (
-                <span
-                  key={index}
-                  className="px-4 py-2 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded-full text-sm font-medium text-gray-700 dark:text-gray-300"
+              {result.alternatives.map((alt, i) => (
+                <Link
+                  key={i}
+                  href={`/word/${encodeURIComponent(alt.toLowerCase())}`}
+                  className="px-3 py-1 font-mono text-xs rounded-full transition-colors"
+                  style={{
+                    color: "var(--text-secondary)",
+                    border: "1px solid var(--border)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = "rgba(201,168,76,0.4)";
+                    e.currentTarget.style.color = "var(--accent-gold)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = "var(--border)";
+                    e.currentTarget.style.color = "var(--text-secondary)";
+                  }}
                 >
                   {alt}
-                </span>
+                </Link>
               ))}
             </div>
           </div>

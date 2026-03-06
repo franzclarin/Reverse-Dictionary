@@ -18,24 +18,49 @@ export default function SearchInput({ onSearch, isLoading }: SearchInputProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-3xl">
-      <div className="flex flex-col gap-4">
-        <div className="relative">
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe a concept... (e.g., 'the smell of rain on dry earth')"
-            className="w-full px-6 py-4 text-lg border-2 border-gray-300 rounded-2xl focus:border-blue-500 focus:outline-none resize-none transition-colors dark:bg-gray-800 dark:border-gray-600 dark:text-white"
-            rows={3}
-            disabled={isLoading}
-          />
-        </div>
+    <form onSubmit={handleSubmit} className="w-full">
+      <div
+        className="flex items-center rounded-lg transition-colors"
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+        }}
+        onFocusCapture={(e) => {
+          e.currentTarget.style.borderColor = "var(--accent-gold)";
+        }}
+        onBlurCapture={(e) => {
+          e.currentTarget.style.borderColor = "var(--border)";
+        }}
+      >
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder='"the smell of rain on dry earth"'
+          className="flex-1 bg-transparent px-5 py-4 text-base font-mono outline-none"
+          style={{
+            color: "var(--text-primary)",
+          }}
+          disabled={isLoading}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (description.trim() && !isLoading) {
+                onSearch(description.trim());
+              }
+            }
+          }}
+        />
         <button
           type="submit"
           disabled={!description.trim() || isLoading}
-          className="px-8 py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-lg"
+          className="shrink-0 m-1.5 px-5 py-2.5 font-mono text-sm font-medium rounded transition-opacity hover:opacity-90 disabled:opacity-30"
+          style={{
+            background: "var(--accent-gold)",
+            color: "var(--bg)",
+          }}
         >
-          {isLoading ? "Searching..." : "Find Word"}
+          →
         </button>
       </div>
     </form>

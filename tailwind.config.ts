@@ -8,9 +8,10 @@ const config: Config = {
   ],
   theme: {
     extend: {
-      colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+      fontFamily: {
+        serif: ["DM Serif Display", "Georgia", "serif"],
+        mono: ["DM Mono", "Courier New", "monospace"],
+        sans: ["Inter", "system-ui", "sans-serif"],
       },
     },
   },
