@@ -16,13 +16,13 @@ interface PageProps {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   try {
     const wordData = await getWordData(params.word);
-    if (!wordData) return { title: "Word not found — Tip of Tongue" };
+    if (!wordData) return { title: "Word not found — Reverse Dictionary" };
 
     return {
-      title: `${wordData.word} — Tip of Tongue`,
+      title: `${wordData.word} — Reverse Dictionary`,
       description: wordData.definition,
       openGraph: {
-        title: `${wordData.word} | Tip of Tongue Reverse Dictionary`,
+        title: `${wordData.word} | Reverse Dictionary`,
         description: wordData.definition,
         url: `https://tip-of-tongue.app/word/${wordData.word}`,
         type: "article",
@@ -34,7 +34,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       },
     };
   } catch {
-    return { title: "Tip of Tongue" };
+    return { title: "Reverse Dictionary" };
   }
 }
 

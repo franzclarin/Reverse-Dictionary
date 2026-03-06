@@ -5,7 +5,13 @@
       "Bash(npm run build:*)",
       "Bash(git add:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nComplete Reverse Dictionary application\n\n- Next.js 14 with TypeScript and Tailwind CSS\n- Claude AI integration for reverse dictionary lookups\n- Beautiful, responsive UI with dark mode support\n- Example queries and usage examples\n- Comprehensive error handling\n- Production-ready with Vercel deployment config\n\nFeatures:\n- AI-powered word search from concept descriptions\n- Real-time results with definitions and examples\n- Alternative word suggestions\n- Mobile-responsive design\n- Full documentation and deployment guides\n\nEOF\n)\")",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(npm install:*)",
+      "Bash(vercel:*)",
+      "Bash(node:*)",
+      "Bash(npx tsc:*)",
+      "Bash(mkdir:*)",
+      "Bash(npx prisma:*)"
     ]
   }
 }
