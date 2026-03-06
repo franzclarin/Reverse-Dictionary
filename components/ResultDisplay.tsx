@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ReverseDictionaryResponse } from "@/types";
 
 interface ResultDisplayProps {
@@ -26,9 +27,20 @@ export default function ResultDisplay({ result, error }: ResultDisplayProps) {
       <div className="p-8 bg-gradient-to-br from-blue-50 to-purple-50 border-2 border-blue-200 rounded-2xl shadow-lg dark:from-blue-900/20 dark:to-purple-900/20 dark:border-blue-700">
         {/* Main Word */}
         <div className="mb-6">
-          <h2 className="text-5xl font-bold text-blue-900 dark:text-blue-100 mb-2">
-            {result.word}
-          </h2>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <h2 className="text-5xl font-bold text-blue-900 dark:text-blue-100 mb-2">
+              {result.word}
+            </h2>
+            <Link
+              href={`/word/${encodeURIComponent(result.word.toLowerCase())}`}
+              className="shrink-0 mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+            >
+              Full page
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </Link>
+          </div>
           <div className="h-1 w-20 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"></div>
         </div>
 

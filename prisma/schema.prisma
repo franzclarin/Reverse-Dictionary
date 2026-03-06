@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Word {
+  id            String      @id @default(cuid())
+  word          String      @unique
+  partOfSpeech  String
+  definition    String
+  pronunciation String
+  etymology     String
+  examples      String[]
+  synonyms      String[]
+  domain        String
+  createdAt     DateTime    @default(now())
+  savedBy       SavedWord[]
+}
+
+model SavedWord {
+  id      String   @id @default(cuid())
+  userId  String
+  wordId  String
+  word    Word     @relation(fields: [wordId], references: [id])
+  savedAt DateTime @default(now())
+
+  @@unique([userId, wordId])
+}
