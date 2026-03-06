@@ -29,7 +29,7 @@ export default function RootLayout({
               className="font-mono text-xs"
               style={{ color: "var(--text-secondary)" }}
             >
-              © Reverse Dictionary · Built with Claude
+              © Reverse Dictionary
             </p>
           </footer>
         </body>
