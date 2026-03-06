@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAuth, UserButton, SignInButton } from "@clerk/nextjs";
+import Link from "next/link";
 import SearchInput from "@/components/SearchInput";
 import ResultDisplay from "@/components/ResultDisplay";
 import ExampleQueries from "@/components/ExampleQueries";
@@ -57,9 +58,17 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-8 pb-20 gap-6">
       {/* Auth controls */}
-      <div className="absolute top-4 right-4">
+      <div className="absolute top-4 right-4 flex items-center gap-3">
         {isSignedIn ? (
-          <UserButton afterSignOutUrl="/" />
+          <>
+            <Link
+              href="/collection"
+              className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+            >
+              My Words
+            </Link>
+            <UserButton afterSignOutUrl="/" />
+          </>
         ) : (
           <SignInButton mode="redirect">
             <button className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">

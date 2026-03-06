@@ -55,16 +55,24 @@ export default async function WordPage({ params }: PageProps) {
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950">
       {/* Nav */}
-      <nav className="border-b border-gray-100 dark:border-gray-800 px-6 py-4">
+      <nav className="border-b border-gray-100 dark:border-gray-800 px-6 py-4 flex items-center justify-between">
         <Link
           href="/"
-          className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex items-center gap-1.5 w-fit"
+          className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors flex items-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
           Reverse Dictionary
         </Link>
+        {userId && (
+          <Link
+            href="/collection"
+            className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+          >
+            My Words
+          </Link>
+        )}
       </nav>
 
       <main className="max-w-3xl mx-auto px-6 py-12">
