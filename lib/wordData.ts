@@ -60,10 +60,13 @@ export async function getWordData(wordSlug: string): Promise<Word | null> {
     throw new Error("Failed to parse Claude word profile response");
   }
 
-  // 3. Save to DB
-  const saved = await prisma.word.create({
-    data: {
-      word: profile.word.toLowerCase().trim(),
+  // 3. Upsert — safe if two requests race past the findUnique check simultaneously
+  const wordKey = profile.word.toLowerCase().trim();
+  const saved = await prisma.word.upsert({
+    where: { word: wordKey },
+    update: {},
+    create: {
+      word: wordKey,
       partOfSpeech: profile.part_of_speech,
       pronunciation: profile.pronunciation,
       definition: profile.definition,
