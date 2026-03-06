@@ -1,6 +1,6 @@
 # Reverse Dictionary
 
-A production-ready reverse dictionary application powered by Claude AI. Describe a concept in plain language and discover the exact word you're looking for.
+A reverse dictionary powered by Claude AI. Describe a concept in plain language and discover the exact word you're looking for.
 
 ## Examples
 
@@ -12,26 +12,32 @@ A production-ready reverse dictionary application powered by Claude AI. Describe
 ## Features
 
 - **AI-Powered Search**: Uses Claude Sonnet 4 for accurate word matching
-- **Beautiful UI**: Modern, responsive design with dark mode support
-- **Fast & Reliable**: Built with Next.js for optimal performance
-- **Example Queries**: Pre-loaded examples to get you started
-- **Alternative Words**: Suggests related words when applicable
-- **Usage Examples**: Shows how to use the word in context
+- **Word Pages**: Each result has a dedicated SEO-optimized page at `/word/[word]`
+- **Saved Collection**: Authenticated users can save words to a personal collection
+- **Rate Limiting**: 3 lookups/day for guests, 50/day for signed-in users
+- **Auth**: Sign in with Clerk to unlock higher limits and word saving
+- **Share**: Copy link or share results directly to X
 
 ## Tech Stack
 
 - **Framework**: Next.js 14 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
-- **AI**: Anthropic Claude API (claude-sonnet-4-20250514)
+- **AI**: Anthropic Claude API (`claude-sonnet-4-20250514`)
+- **Auth**: Clerk (`@clerk/nextjs` v5)
+- **Rate Limiting**: Upstash Redis + `@upstash/ratelimit`
+- **Database**: PostgreSQL via Prisma v5
 - **Deployment**: Vercel
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ installed
-- An Anthropic API key ([Get one here](https://console.anthropic.com/))
+- Node.js 18+
+- An Anthropic API key ([console.anthropic.com](https://console.anthropic.com/))
+- A Clerk account ([dashboard.clerk.com](https://dashboard.clerk.com/))
+- An Upstash Redis database ([console.upstash.com](https://console.upstash.com/))
+- A PostgreSQL database
 
 ### Installation
 
@@ -46,14 +52,11 @@ cd reverse-dictionary
 npm install
 ```
 
-3. Create a `.env.local` file in the root directory:
-```bash
-cp .env.example .env.local
-```
+3. Create a `.env.local` file and add your environment variables (see below).
 
-4. Add your Anthropic API key to `.env.local`:
-```env
-ANTHROPIC_API_KEY=your_api_key_here
+4. Run the Prisma migration:
+```bash
+npx prisma db push
 ```
 
 5. Run the development server:
@@ -67,7 +70,12 @@ npm run dev
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key | Yes |
+| `ANTHROPIC_API_KEY` | Anthropic API key | Yes |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key | Yes |
+| `CLERK_SECRET_KEY` | Clerk secret key | Yes |
+| `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL | Yes (rate limiting) |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token | Yes (rate limiting) |
 
 ## Project Structure
 
@@ -75,67 +83,41 @@ npm run dev
 reverse-dictionary/
 ├── app/
 │   ├── api/
-│   │   └── reverse-dictionary/
-│   │       └── route.ts          # Claude API integration
-│   ├── layout.tsx                 # Root layout
-│   ├── page.tsx                   # Main page
-│   └── globals.css                # Global styles
+│   │   ├── reverse-dictionary/
+│   │   │   └── route.ts          # Main search endpoint
+│   │   └── word/[word]/
+│   │       ├── route.ts          # Word profile fetch/generate
+│   │       └── save/route.ts     # Save/unsave toggle
+│   ├── word/[word]/
+│   │   └── page.tsx              # SSR word detail page
+│   ├── collection/
+│   │   └── page.tsx              # Saved words collection
+│   ├── sign-in/[[...sign-in]]/
+│   │   └── page.tsx              # Clerk sign-in
+│   ├── sign-up/[[...sign-up]]/
+│   │   └── page.tsx              # Clerk sign-up
+│   ├── sitemap.ts                # Auto-generated sitemap
+│   ├── layout.tsx                # Root layout (ClerkProvider)
+│   └── page.tsx                  # Main search page
 ├── components/
-│   ├── SearchInput.tsx            # Search input component
-│   ├── ResultDisplay.tsx          # Results display
-│   └── ExampleQueries.tsx         # Example query chips
-├── types/
-│   └── index.ts                   # TypeScript types
-└── ARCHITECTURE.md                # Architecture documentation
+│   ├── ResultDisplay.tsx         # Search results with word links
+│   ├── SaveWordButton.tsx        # Save/unsave toggle (client)
+│   └── WordShareButtons.tsx      # Copy link + share on X (client)
+├── lib/
+│   ├── prisma.ts                 # Singleton PrismaClient
+│   └── wordData.ts               # Word profile: DB cache → Claude
+├── prisma/
+│   └── schema.prisma             # Word + SavedWord models
+└── middleware.ts                 # Clerk middleware (all routes public)
 ```
-
-## Deployment
-
-### Deploy to Vercel (Recommended)
-
-1. Push your code to GitHub
-
-2. Import your repository to Vercel:
-   - Go to [vercel.com](https://vercel.com)
-   - Click "Import Project"
-   - Select your repository
-
-3. Configure environment variables:
-   - Add `ANTHROPIC_API_KEY` in the Vercel dashboard
-   - Settings → Environment Variables
-
-4. Deploy:
-   - Vercel will automatically deploy your app
-   - You'll get a production URL
-
-### Manual Deployment
-
-1. Build the project:
-```bash
-npm run build
-```
-
-2. Start the production server:
-```bash
-npm start
-```
-
-## Usage
-
-1. Enter a description of the concept you're thinking of
-2. Click "Find Word" or press Enter
-3. View the result with definition and examples
-4. Try the example queries for inspiration
 
 ## API Reference
 
 ### POST /api/reverse-dictionary
 
-Request body:
+Request:
 ```json
-{
-  "description": "the smell of rain on dry earth"
-}
+{ "description": "the smell of rain on dry earth" }
 ```
 
 Response:
@@ -145,33 +127,38 @@ Response:
   "definition": "The pleasant smell that accompanies the first rain after a dry spell.",
   "alternatives": ["geosmin"],
   "examples": [
-    "The petrichor after the storm was incredibly refreshing.",
-    "Nothing beats the petrichor of a summer rain."
-  ]
+    "The petrichor after the storm was incredibly refreshing."
+  ],
+  "rateLimit": { "remaining": 49, "limit": 50, "isGuest": false }
 }
 ```
 
+Returns `429` when the rate limit is exceeded.
+
+### GET /api/word/[word]
+
+Returns a full word profile (fetched from DB or generated by Claude).
+
+### POST /api/word/[word]/save
+
+Saves a word to the authenticated user's collection. DELETE removes it. Requires auth.
+
 ## Development
 
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm start` - Start production server
-- `npm run lint` - Run ESLint
+```bash
+npm run dev      # Start development server
+npm run build    # Build for production
+npm start        # Start production server
+npm run lint     # Run ESLint
+npx prisma studio  # Browse the database
+```
 
-## Contributing
+## Deployment (Vercel)
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Push your code to GitHub and import the repo on [vercel.com](https://vercel.com).
+2. Add all environment variables under Settings → Environment Variables.
+3. Deploy — Vercel runs `prisma generate` automatically on build.
 
 ## License
 
-MIT License - feel free to use this project for any purpose.
-
-## Credits
-
-- Built with [Next.js](https://nextjs.org/)
-- Powered by [Claude AI](https://www.anthropic.com/claude)
-- Styled with [Tailwind CSS](https://tailwindcss.com/)
-
-## Support
-
-If you encounter any issues or have questions, please [open an issue](https://github.com/yourusername/reverse-dictionary/issues).
+MIT
