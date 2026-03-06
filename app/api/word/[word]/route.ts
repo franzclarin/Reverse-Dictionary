@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWordData } from "@/lib/wordData";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: { word: string } }

@@ -1,5 +1,7 @@
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { getWordData } from "@/lib/wordData";
