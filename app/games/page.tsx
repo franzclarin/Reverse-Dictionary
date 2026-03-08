@@ -14,34 +14,74 @@ type LeaderboardEntry = {
 
 const GAMES = [
   {
+    slug: "blackjack",
+    emoji: "🃏",
+    name: "Blackjack",
+    desc: "Beat the dealer. BJ pays 3:2.",
+    section: "casino",
+  },
+  {
+    slug: "dice",
+    emoji: "🎲",
+    name: "Dice — Craps Lite",
+    desc: "Pass line only. Roll your point.",
+    section: "casino",
+  },
+  {
+    slug: "roulette",
+    emoji: "🎡",
+    name: "Roulette",
+    desc: "European wheel. Single zero.",
+    section: "casino",
+  },
+  {
+    slug: "hilo",
+    emoji: "🃏",
+    name: "Hi-Lo",
+    desc: "Higher or lower? Build a streak.",
+    section: "casino",
+  },
+  {
+    slug: "coinflip",
+    emoji: "🪙",
+    name: "Coin Flip",
+    desc: "Double or nothing. 50/50.",
+    section: "casino",
+  },
+  {
     slug: "word-roulette",
     emoji: "🎰",
     name: "Word Roulette",
     desc: "Guess the word from a cryptic clue",
+    section: "lexical",
   },
   {
     slug: "definition-bluff",
-    emoji: "🃏",
+    emoji: "📖",
     name: "Definition Bluff",
     desc: "Spot the real definition among fakes",
+    section: "lexical",
   },
   {
     slug: "lexical-slots",
     emoji: "🎰",
     name: "Lexical Slots",
     desc: "Spin for matching words",
+    section: "lexical",
   },
   {
     slug: "higher-lower",
     emoji: "📈",
     name: "Higher or Lower",
     desc: "Which word is more obscure?",
+    section: "lexical",
   },
   {
     slug: "speed-round",
     emoji: "⚡",
     name: "Speed Round",
     desc: "10 definitions, 5 seconds each",
+    section: "lexical",
   },
 ];
 
@@ -88,47 +128,78 @@ export default function GamesPage() {
       </div>
 
       {/* Game list */}
-      <div
-        className="mb-10"
-        style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
-      >
-        {GAMES.map((game, i) => (
-          <div
-            key={game.slug}
-            style={{
-              borderBottom: i < GAMES.length - 1 ? "1px solid var(--border)" : undefined,
-            }}
-          >
-            <div className="flex items-center justify-between py-4">
-              <div>
-                <p className="font-mono text-sm" style={{ color: "var(--text-primary)" }}>
-                  {game.emoji} {game.name}
-                </p>
-                <p className="font-mono text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                  {game.desc}
-                </p>
-              </div>
-              {isSignedIn ? (
-                <Link
-                  href={`/games/${game.slug}`}
-                  className="font-mono text-xs px-3 py-1.5 rounded transition-opacity hover:opacity-80"
-                  style={{ background: "var(--accent-gold)", color: "var(--bg)" }}
-                >
-                  PLAY →
-                </Link>
-              ) : (
-                <SignInButton mode="redirect">
-                  <button
-                    className="font-mono text-xs px-3 py-1.5 rounded"
-                    style={{ border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+      <div className="mb-10">
+        {/* Casino games */}
+        <p className="font-mono text-xs mb-3" style={{ color: "var(--accent-gold)", letterSpacing: "0.1em" }}>
+          CASINO
+        </p>
+        <div style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", marginBottom: 24 }}>
+          {GAMES.filter(g => g.section === "casino").map((game, i, arr) => (
+            <div key={game.slug} style={{ borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : undefined }}>
+              <div className="flex items-center justify-between py-4">
+                <div>
+                  <p className="font-mono text-sm" style={{ color: "var(--text-primary)" }}>
+                    {game.emoji} {game.name}
+                  </p>
+                  <p className="font-mono text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                    {game.desc}
+                  </p>
+                </div>
+                {isSignedIn ? (
+                  <Link
+                    href={`/games/${game.slug}`}
+                    className="font-mono text-xs px-3 py-1.5 rounded transition-opacity hover:opacity-80"
+                    style={{ background: "var(--accent-gold)", color: "var(--bg)" }}
                   >
-                    Sign in
-                  </button>
-                </SignInButton>
-              )}
+                    PLAY →
+                  </Link>
+                ) : (
+                  <SignInButton mode="redirect">
+                    <button className="font-mono text-xs px-3 py-1.5 rounded" style={{ border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                      Sign in
+                    </button>
+                  </SignInButton>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        {/* Lexical games */}
+        <p className="font-mono text-xs mb-3" style={{ color: "var(--accent-gold)", letterSpacing: "0.1em" }}>
+          LEXICAL
+        </p>
+        <div style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
+          {GAMES.filter(g => g.section === "lexical").map((game, i, arr) => (
+            <div key={game.slug} style={{ borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : undefined }}>
+              <div className="flex items-center justify-between py-4">
+                <div>
+                  <p className="font-mono text-sm" style={{ color: "var(--text-primary)" }}>
+                    {game.emoji} {game.name}
+                  </p>
+                  <p className="font-mono text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                    {game.desc}
+                  </p>
+                </div>
+                {isSignedIn ? (
+                  <Link
+                    href={`/games/${game.slug}`}
+                    className="font-mono text-xs px-3 py-1.5 rounded transition-opacity hover:opacity-80"
+                    style={{ background: "var(--accent-gold)", color: "var(--bg)" }}
+                  >
+                    PLAY →
+                  </Link>
+                ) : (
+                  <SignInButton mode="redirect">
+                    <button className="font-mono text-xs px-3 py-1.5 rounded" style={{ border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                      Sign in
+                    </button>
+                  </SignInButton>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* How to earn credits */}
