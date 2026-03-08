@@ -20,8 +20,11 @@ const WORD_PROFILE_SYSTEM_PROMPT = `You are a lexicographer. Given a word, retur
     "Scientists have identified geosmin as the compound responsible for petrichor."
   ],
   "synonyms": ["rain scent", "rain smell", "after-rain fragrance"],
-  "domain": "meteorology"
+  "domain": "meteorology",
+  "obscurity_score": 72
 }
+
+obscurity_score: integer 1-100. 1 = extremely common (the, run, happy). 100 = known only by specialists (vellichor, apophenia, hiraeth).
 
 Return ONLY valid JSON. No preamble.`;
 
@@ -52,6 +55,7 @@ export async function getWordData(wordSlug: string): Promise<Word | null> {
     examples: string[];
     synonyms: string[];
     domain: string;
+    obscurity_score?: number;
   };
 
   try {
@@ -74,6 +78,10 @@ export async function getWordData(wordSlug: string): Promise<Word | null> {
       examples: profile.examples,
       synonyms: profile.synonyms,
       domain: profile.domain,
+      obscurityScore:
+        typeof profile.obscurity_score === "number"
+          ? Math.max(1, Math.min(100, profile.obscurity_score))
+          : 50,
     },
   });
 

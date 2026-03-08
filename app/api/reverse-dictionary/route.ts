@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { ReverseDictionaryRequest, ReverseDictionaryResponse } from "@/types";
+import { awardDailyLookup, getOrCreateUser } from "@/lib/credits";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -176,6 +177,19 @@ export async function POST(request: NextRequest) {
         limit,
         isGuest: !userId,
       };
+    }
+
+    // Award daily lookup credits for signed-in users
+    if (userId) {
+      try {
+        await getOrCreateUser(userId);
+        const awarded = await awardDailyLookup(userId);
+        if (awarded > 0) {
+          parsedResponse.creditsAwarded = awarded;
+        }
+      } catch {
+        // Non-critical — don't fail the lookup over credit errors
+      }
     }
 
     return NextResponse.json(parsedResponse);

@@ -14,6 +14,7 @@ export interface ReverseDictionaryResponse {
   alternatives?: string[];
   examples?: string[];
   rateLimit?: RateLimitInfo;
+  creditsAwarded?: number;
 }
 
 export interface ErrorResponse {

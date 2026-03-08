@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useAuth, UserButton, SignInButton, SignUpButton } from "@clerk/nextjs";
+import CreditsDisplay from "./CreditsDisplay";
 
 export default function Navbar() {
   const { isSignedIn } = useAuth();
@@ -29,6 +30,20 @@ export default function Navbar() {
         <div className="flex items-center gap-4">
           {isSignedIn ? (
             <>
+              <CreditsDisplay />
+              <Link
+                href="/games"
+                className="font-mono text-sm transition-colors"
+                style={{ color: "var(--text-secondary)" }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.color = "var(--text-primary)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.color = "var(--text-secondary)")
+                }
+              >
+                Games
+              </Link>
               <Link
                 href="/collection"
                 className="font-mono text-sm transition-colors"
