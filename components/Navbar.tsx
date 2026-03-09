@@ -28,6 +28,24 @@ export default function Navbar() {
 
         {/* Auth controls */}
         <div className="flex items-center gap-4">
+          <a
+            href="https://streamlined-songs.vercel.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-sm transition-colors"
+            style={{ color: "var(--text-secondary)", textDecoration: "none" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "var(--text-primary)";
+              e.currentTarget.style.textDecoration = "underline";
+              e.currentTarget.style.textDecorationColor = "var(--accent-gold)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--text-secondary)";
+              e.currentTarget.style.textDecoration = "none";
+            }}
+          >
+            StreamlinedSongs ↗
+          </a>
           {isSignedIn ? (
             <>
               <CreditsDisplay />
