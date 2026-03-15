@@ -18,11 +18,6 @@ function getRatelimiters() {
 
   const redis = new Redis({ url, token });
   return {
-    guest: new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(3, "1 d"),
-      prefix: "rl:guest",
-    }),
     user: new Ratelimit({
       redis,
       limiter: Ratelimit.slidingWindow(50, "1 d"),
@@ -64,31 +59,14 @@ Rules:
 export async function POST(request: NextRequest) {
   const { userId } = auth();
 
-  // Rate limiting
-  if (ratelimiters) {
-    if (userId) {
-      const result = await ratelimiters.user.limit(userId);
-      if (!result.success) {
-        return NextResponse.json(
-          { error: "Daily limit of 50 lookups reached. Try again tomorrow." },
-          { status: 429 }
-        );
-      }
-    } else {
-      const ip =
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-        "127.0.0.1";
-      const result = await ratelimiters.guest.limit(ip);
-      if (!result.success) {
-        return NextResponse.json(
-          {
-            error:
-              "Daily limit of 3 free lookups reached. Sign in for 50 lookups/day.",
-            rateLimitExceeded: true,
-          },
-          { status: 429 }
-        );
-      }
+  // Rate limiting (signed-in users only)
+  if (ratelimiters && userId) {
+    const result = await ratelimiters.user.limit(userId);
+    if (!result.success) {
+      return NextResponse.json(
+        { error: "Daily limit of 50 lookups reached. Try again tomorrow." },
+        { status: 429 }
+      );
     }
   }
 
@@ -164,18 +142,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Attach rate limit info if Upstash is configured
-    if (ratelimiters) {
-      const ip =
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-        "127.0.0.1";
-      const key = userId ?? ip;
-      const limiter = userId ? ratelimiters.user : ratelimiters.guest;
-      const { remaining, limit } = await limiter.getRemaining(key);
+    // Attach rate limit info for signed-in users
+    if (ratelimiters && userId) {
+      const { remaining, limit } = await ratelimiters.user.getRemaining(userId);
       parsedResponse.rateLimit = {
         remaining,
         limit,
-        isGuest: !userId,
+        isGuest: false,
       };
     }
 
