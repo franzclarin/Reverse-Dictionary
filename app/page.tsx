@@ -1,15 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { useAuth, SignInButton } from "@clerk/nextjs";
 import SearchInput from "@/components/SearchInput";
 import ResultDisplay from "@/components/ResultDisplay";
 import ExampleQueries from "@/components/ExampleQueries";
-import { ReverseDictionaryResponse } from "@/types";
+import { ReverseDictionaryResponse, RateLimitInfo } from "@/types";
 
 export default function Home() {
+  const { isSignedIn } = useAuth();
   const [result, setResult] = useState<ReverseDictionaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
 
   const handleSearch = async (description: string) => {
     setIsLoading(true);
@@ -26,10 +29,16 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || "Failed to fetch word");
+        if (response.status === 429) {
+          setError(data.error);
+          if (data.rateLimit) setRateLimit(data.rateLimit);
+        } else {
+          throw new Error(data.error || "Failed to fetch word");
+        }
         return;
       }
 
+      if (data.rateLimit) setRateLimit(data.rateLimit);
       setResult(data);
     } catch (err) {
       setError(
@@ -39,6 +48,9 @@ export default function Home() {
       setIsLoading(false);
     }
   };
+
+  const showGuestBanner =
+    !isSignedIn && rateLimit !== null && rateLimit.isGuest;
 
   return (
     <main className="max-w-3xl mx-auto px-6 py-20 flex flex-col items-center gap-10">
@@ -76,6 +88,30 @@ export default function Home() {
       {/* Example chips — hidden while loading or after result */}
       {!isLoading && !result && !error && (
         <ExampleQueries onSelectExample={handleSearch} isLoading={isLoading} />
+      )}
+
+      {/* Guest rate limit banner */}
+      {showGuestBanner && (
+        <div
+          className="w-full flex items-center justify-between gap-4 px-4 py-3 rounded-lg text-sm"
+          style={{
+            background: "var(--accent-gold-dim)",
+            border: "1px solid rgba(201,168,76,0.2)",
+          }}
+        >
+          <span className="font-mono" style={{ color: "var(--accent-gold)" }}>
+            {rateLimit.remaining} of {rateLimit.limit} free lookups remaining
+            today
+          </span>
+          <SignInButton mode="redirect">
+            <button
+              className="shrink-0 font-mono hover:underline font-medium"
+              style={{ color: "var(--accent-gold)" }}
+            >
+              Sign in for 200/day →
+            </button>
+          </SignInButton>
+        </div>
       )}
 
       {/* Results */}
