@@ -1,15 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth, SignInButton } from "@clerk/nextjs";
 import SearchInput from "@/components/SearchInput";
-import ResultDisplay from "@/components/ResultDisplay";
 import ExampleQueries from "@/components/ExampleQueries";
-import { ReverseDictionaryResponse, RateLimitInfo } from "@/types";
+import { RateLimitInfo } from "@/types";
 
 export default function Home() {
+  const router = useRouter();
   const { isSignedIn } = useAuth();
-  const [result, setResult] = useState<ReverseDictionaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
@@ -17,7 +17,6 @@ export default function Home() {
   const handleSearch = async (description: string) => {
     setIsLoading(true);
     setError(null);
-    setResult(null);
 
     try {
       const response = await fetch("/api/reverse-dictionary", {
@@ -39,7 +38,13 @@ export default function Home() {
       }
 
       if (data.rateLimit) setRateLimit(data.rateLimit);
-      setResult(data);
+
+      const topWord = data.results[0]?.word;
+      if (!topWord) throw new Error("No results found");
+
+      const alts = [data.results[1]?.word, data.results[2]?.word].filter(Boolean);
+      const query = alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
+      router.push(`/word/${encodeURIComponent(topWord)}${query}`);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "An unexpected error occurred"
@@ -85,8 +90,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* Example chips — hidden while loading or after result */}
-      {!isLoading && !result && !error && (
+      {/* Example chips — hidden while loading */}
+      {!isLoading && !error && (
         <ExampleQueries onSelectExample={handleSearch} isLoading={isLoading} />
       )}
 
@@ -114,8 +119,12 @@ export default function Home() {
         </div>
       )}
 
-      {/* Results */}
-      <ResultDisplay result={result} error={error} />
+      {/* Error */}
+      {error && (
+        <p className="font-mono text-sm" style={{ color: "var(--text-secondary)" }}>
+          {error}
+        </p>
+      )}
     </main>
   );
 }

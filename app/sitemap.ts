@@ -14,7 +14,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }
 
   const wordEntries: MetadataRoute.Sitemap = words.map((w) => ({
-    url: `https://tip-of-tongue.app/word/${encodeURIComponent(w.word)}`,
+    url: `https://reverse-dictionary-three.vercel.app/word/${encodeURIComponent(w.word)}`,
     lastModified: w.createdAt,
     changeFrequency: "monthly",
     priority: 0.8,
@@ -22,7 +22,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     {
-      url: "https://tip-of-tongue.app",
+      url: "https://reverse-dictionary-three.vercel.app",
       lastModified: new Date(),
       changeFrequency: "daily",
       priority: 1,

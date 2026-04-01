@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: { word: string };
+  searchParams: { alternatives?: string };
 }
 
 export async function generateMetadata({
@@ -39,9 +40,11 @@ export async function generateMetadata({
   }
 }
 
-export default async function WordPage({ params }: PageProps) {
+export default async function WordPage({ params, searchParams }: PageProps) {
   const wordData = await getWordData(params.word);
   if (!wordData) notFound();
+
+  const alternatives = searchParams.alternatives?.split(",").filter(Boolean) ?? [];
 
   const { userId } = auth();
   let isSaved = false;
@@ -192,6 +195,33 @@ export default async function WordPage({ params }: PageProps) {
                 }}
               >
                 {syn}
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Other results from search */}
+      {alternatives.length > 0 && (
+        <section className="mb-10">
+          <p
+            className="font-mono text-[10px] uppercase tracking-widest mb-4"
+            style={{ color: "var(--accent-gold)" }}
+          >
+            See Other Results
+          </p>
+          <div className="flex flex-col gap-2">
+            {alternatives.map((alt, i) => (
+              <Link
+                key={i}
+                href={`/word/${encodeURIComponent(alt)}`}
+                className="px-4 py-3 rounded-lg font-mono text-sm transition-opacity hover:opacity-80"
+                style={{
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {alt} →
               </Link>
             ))}
           </div>
