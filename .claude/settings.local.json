@@ -11,7 +11,8 @@
       "Bash(node:*)",
       "Bash(npx tsc:*)",
       "Bash(mkdir:*)",
-      "Bash(npx prisma:*)"
+      "Bash(npx prisma:*)",
+      "Bash(cd:*)"
     ]
   }
 }

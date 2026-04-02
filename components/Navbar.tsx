@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useAuth, UserButton, SignInButton, SignUpButton } from "@clerk/nextjs";
-import CreditsDisplay from "./CreditsDisplay";
 
 export default function Navbar() {
   const { isSignedIn } = useAuth();
@@ -28,40 +27,8 @@ export default function Navbar() {
 
         {/* Auth controls */}
         <div className="flex items-center gap-4">
-          <a
-            href="https://streamlined-songs.vercel.app"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-mono text-sm transition-colors"
-            style={{ color: "var(--text-secondary)", textDecoration: "none" }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = "var(--text-primary)";
-              e.currentTarget.style.textDecoration = "underline";
-              e.currentTarget.style.textDecorationColor = "var(--accent-gold)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "var(--text-secondary)";
-              e.currentTarget.style.textDecoration = "none";
-            }}
-          >
-            StreamlinedSongs ↗
-          </a>
           {isSignedIn ? (
             <>
-              <CreditsDisplay />
-              <Link
-                href="/games"
-                className="font-mono text-sm transition-colors"
-                style={{ color: "var(--text-secondary)" }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.color = "var(--text-primary)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.color = "var(--text-secondary)")
-                }
-              >
-                Games
-              </Link>
               <Link
                 href="/collection"
                 className="font-mono text-sm transition-colors"
