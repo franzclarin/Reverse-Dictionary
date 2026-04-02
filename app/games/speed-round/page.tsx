@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
+import WordLink from "@/components/WordLink";
 
 type Phase = "bet" | "playing" | "result";
 
@@ -329,7 +330,7 @@ export default function SpeedRoundPage() {
                   <span style={{ color: r.correct ? "var(--confidence-high)" : "var(--confidence-low)" }}>
                     {r.correct ? "✓" : "✗"}
                   </span>
-                  <span className="font-mono text-xs" style={{ color: "var(--text-primary)" }}>{r.word}</span>
+                  <WordLink word={r.word} className="font-mono text-xs hover:underline" style={{ color: "var(--text-primary)" }}>{r.word}</WordLink>
                 </div>
                 {!r.correct && r.guess && (
                   <span className="font-mono text-xs" style={{ color: "var(--text-secondary)" }}>

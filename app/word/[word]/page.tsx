@@ -2,6 +2,7 @@ import { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
+import WordLink from "@/components/WordLink";
 import { getWordData } from "@/lib/wordData";
 import { prisma } from "@/lib/prisma";
 import WordShareButtons from "@/components/WordShareButtons";
@@ -185,9 +186,9 @@ export default async function WordPage({ params, searchParams }: PageProps) {
           </p>
           <div className="flex flex-wrap gap-2">
             {wordData.synonyms.map((syn, i) => (
-              <Link
+              <WordLink
                 key={i}
-                href={`/word/${encodeURIComponent(syn.toLowerCase())}`}
+                word={syn.toLowerCase()}
                 className="px-3 py-1.5 font-mono text-xs rounded-full transition-colors"
                 style={{
                   color: "var(--text-secondary)",
@@ -195,7 +196,7 @@ export default async function WordPage({ params, searchParams }: PageProps) {
                 }}
               >
                 {syn}
-              </Link>
+              </WordLink>
             ))}
           </div>
         </section>
@@ -212,9 +213,9 @@ export default async function WordPage({ params, searchParams }: PageProps) {
           </p>
           <div className="flex flex-col gap-2">
             {alternatives.map((alt, i) => (
-              <Link
+              <WordLink
                 key={i}
-                href={`/word/${encodeURIComponent(alt)}`}
+                word={alt}
                 className="px-4 py-3 rounded-lg font-mono text-sm transition-opacity hover:opacity-80"
                 style={{
                   color: "var(--text-primary)",
@@ -222,7 +223,7 @@ export default async function WordPage({ params, searchParams }: PageProps) {
                 }}
               >
                 {alt} →
-              </Link>
+              </WordLink>
             ))}
           </div>
         </section>

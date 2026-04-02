@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
 import Navbar from "@/components/Navbar";
+import { LoadingProvider } from "@/context/LoadingContext";
 
 export const metadata: Metadata = {
   title: "Reverse Dictionary - Find Words from Descriptions",
@@ -19,19 +20,21 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body className="antialiased min-h-screen flex flex-col">
-          <Navbar />
-          <div className="flex-1">{children}</div>
-          <footer
-            className="py-5 text-center"
-            style={{ borderTop: "1px solid var(--border)" }}
-          >
-            <p
-              className="font-mono text-xs"
-              style={{ color: "var(--text-secondary)" }}
+          <LoadingProvider>
+            <Navbar />
+            <div className="flex-1">{children}</div>
+            <footer
+              className="py-5 text-center"
+              style={{ borderTop: "1px solid var(--border)" }}
             >
-              © Reverse Dictionary
-            </p>
-          </footer>
+              <p
+                className="font-mono text-xs"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                © Reverse Dictionary
+              </p>
+            </footer>
+          </LoadingProvider>
         </body>
       </html>
     </ClerkProvider>

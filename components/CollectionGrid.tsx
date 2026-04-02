@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import WordLink from "@/components/WordLink";
 
 type SavedWordItem = {
   word: {
@@ -64,7 +64,7 @@ export default function CollectionGrid({ words }: { words: SavedWordItem[] }) {
             e.currentTarget.style.transform = "scale(1)";
           }}
         >
-          <Link href={`/word/${word.word}`} className="block mb-4">
+          <WordLink word={word.word} className="block mb-4">
             <h2
               className="font-serif text-2xl mb-1.5"
               style={{ color: "var(--text-primary)" }}
@@ -86,7 +86,7 @@ export default function CollectionGrid({ words }: { words: SavedWordItem[] }) {
             >
               {word.definition}
             </p>
-          </Link>
+          </WordLink>
 
           <div
             className="flex items-center justify-between pt-3"

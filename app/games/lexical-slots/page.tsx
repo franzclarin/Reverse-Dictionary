@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
+import WordLink from "@/components/WordLink";
 
 type Phase = "bet" | "spinning" | "result";
 
@@ -120,9 +121,15 @@ export default function LexicalSlotsPage() {
                 {spinning && !isRevealed ? (
                   <div className="dot-pulse"><span/><span/><span/></div>
                 ) : isRevealed ? (
+                  result ? (
+                    <WordLink word={reel.word} className="font-mono text-xs break-words hover:underline" style={{ color: "var(--text-primary)" }}>
+                      {reel.word}
+                    </WordLink>
+                  ) : (
                   <p className="font-mono text-xs break-words" style={{ color: "var(--text-primary)" }}>
                     {reel.word}
                   </p>
+                  )
                 ) : (
                   <p className="font-mono text-2xl" style={{ color: "var(--border)" }}>?</p>
                 )}

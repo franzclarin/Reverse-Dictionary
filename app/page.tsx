@@ -1,39 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, SignInButton } from "@clerk/nextjs";
 import SearchInput from "@/components/SearchInput";
 import ExampleQueries from "@/components/ExampleQueries";
+import { useLoading } from "@/context/LoadingContext";
 import { RateLimitInfo } from "@/types";
-
-const LOADING_MESSAGES = [
-  "Searching the lexicon",
-  "Consulting the archives",
-  "Parsing your description",
-  "Scanning 171,476 words",
-  "Almost there",
-];
 
 export default function Home() {
   const router = useRouter();
   const { isSignedIn } = useAuth();
+  const { startLoading, stopLoading, isLoading } = useLoading();
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
-  const [messageIndex, setMessageIndex] = useState(0);
-
-  useEffect(() => {
-    if (!isLoading) return;
-    const interval = setInterval(() => {
-      setMessageIndex((i) => (i + 1) % LOADING_MESSAGES.length);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [isLoading]);
 
   const handleSearch = async (description: string) => {
-    setIsLoading(true);
+    startLoading();
     setError(null);
+    let navigated = false;
 
     try {
       const response = await fetch("/api/reverse-dictionary", {
@@ -62,12 +47,13 @@ export default function Home() {
       const alts: string[] = (data.alternatives ?? []).slice(0, 2);
       const query = alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
       router.push(`/word/${encodeURIComponent(topWord)}${query}`);
+      navigated = true;
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "An unexpected error occurred"
       );
     } finally {
-      setIsLoading(false);
+      if (!navigated) stopLoading();
     }
   };
 
@@ -75,21 +61,6 @@ export default function Home() {
     !isSignedIn && rateLimit !== null && rateLimit.isGuest;
 
   return (
-    <>
-    {isLoading && (
-      <div className="loading-overlay">
-        <div className="loading-content">
-          <div className="loading-symbol">◈</div>
-          <div className="loading-dots">
-            <span>Finding</span>
-            <span className="dot">.</span>
-            <span className="dot">.</span>
-            <span className="dot">.</span>
-          </div>
-          <p className="loading-subtext">{LOADING_MESSAGES[messageIndex]}</p>
-        </div>
-      </div>
-    )}
     <main className="max-w-3xl mx-auto px-6 py-20 flex flex-col items-center gap-10">
       {/* Hero */}
       <div className="text-center">
@@ -149,6 +120,5 @@ export default function Home() {
         </p>
       )}
     </main>
-    </>
   );
 }

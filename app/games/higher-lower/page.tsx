@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
+import WordLink from "@/components/WordLink";
 
 type Phase = "bet" | "playing" | "result";
 
@@ -176,7 +177,7 @@ export default function HigherLowerPage() {
             )}
             <div className="grid grid-cols-2 gap-4 mb-4">
               {game.words.map((w, i) => (
-                <div key={i} className="p-3 rounded" style={{
+                <WordLink key={i} word={w.word} className="block p-3 rounded text-left" style={{
                   background: "var(--surface-2)",
                   border: `1px solid ${i === result.higherIdx ? "var(--accent-gold)" : "var(--border)"}`,
                 }}>
@@ -187,7 +188,7 @@ export default function HigherLowerPage() {
                   {i === result.higherIdx && (
                     <p className="font-mono text-xs mt-1" style={{ color: "var(--accent-gold)" }}>← more obscure</p>
                   )}
-                </div>
+                </WordLink>
               ))}
             </div>
             <p className="font-mono text-sm" style={{ color: result.correct ? "var(--confidence-high)" : "var(--confidence-low)" }}>

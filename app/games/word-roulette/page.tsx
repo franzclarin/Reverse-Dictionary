@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
+import WordLink from "@/components/WordLink";
 
 type Phase = "bet" | "playing" | "result";
 
@@ -292,7 +293,7 @@ export default function WordRoulettePage() {
             </p>
           </div>
 
-          <div className="flex gap-3 justify-center">
+          <div className="flex gap-3 justify-center flex-wrap">
             <button
               onClick={reset}
               className="font-mono text-sm px-5 py-2 rounded transition-opacity hover:opacity-90"
@@ -300,6 +301,13 @@ export default function WordRoulettePage() {
             >
               Play Again
             </button>
+            <WordLink
+              word={result.word}
+              className="font-mono text-sm px-5 py-2 rounded"
+              style={{ border: "1px solid var(--accent-gold)", color: "var(--accent-gold)" }}
+            >
+              View "{result.word}" →
+            </WordLink>
             <Link
               href="/games"
               className="font-mono text-sm px-5 py-2 rounded"
