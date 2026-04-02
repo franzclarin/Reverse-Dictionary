@@ -39,10 +39,10 @@ export default function Home() {
 
       if (data.rateLimit) setRateLimit(data.rateLimit);
 
-      const topWord = data.results[0]?.word;
+      const topWord = data.word;
       if (!topWord) throw new Error("No results found");
 
-      const alts = [data.results[1]?.word, data.results[2]?.word].filter(Boolean);
+      const alts: string[] = (data.alternatives ?? []).slice(0, 2);
       const query = alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
       router.push(`/word/${encodeURIComponent(topWord)}${query}`);
     } catch (err) {
