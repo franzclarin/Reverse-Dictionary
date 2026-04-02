@@ -105,3 +105,90 @@ body {
     text-wrap: balance;
   }
 }
+
+/* Loading overlay */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(0.95); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 0; }
+  50%       { opacity: 1; }
+}
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 15, 0.92);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.loading-symbol {
+  font-family: 'DM Serif Display', serif;
+  font-size: 64px;
+  color: var(--accent-gold);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.loading-dots {
+  display: flex;
+  gap: 2px;
+  font-family: 'DM Mono', monospace;
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+
+.loading-dots .dot {
+  animation: blink 1.2s infinite;
+}
+
+.loading-dots .dot:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots .dot:nth-child(3) { animation-delay: 0.4s; }
+.loading-dots .dot:nth-child(4) { animation-delay: 0.6s; }
+
+.loading-subtext {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+/* Skeleton shapes for word page loading */
+.skeleton {
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface)   50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.skeleton-word-heading { height: 72px; width: 40%; margin-bottom: 16px; }
+.skeleton-badge        { height: 24px; width: 80px; margin-bottom: 32px; }
+.skeleton-divider      { height: 1px;  width: 100%; margin: 24px 0; }
+.skeleton-definition   { height: 20px; width: 90%; margin-bottom: 12px; }
+.skeleton-definition.short { width: 60%; }
+.skeleton-label        { height: 14px; width: 120px; margin-bottom: 16px; }
+.skeleton-etymology    { height: 20px; width: 75%; }
