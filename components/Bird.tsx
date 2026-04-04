@@ -7,9 +7,7 @@ type BirdState =
   | "alert"
   | "startled"
   | "dancing"
-  | "sleeping"
-  | "flying-out"
-  | "flying-in";
+  | "sleeping";
 
 interface Floater {
   id: number;
@@ -63,16 +61,6 @@ const BIRD_KEYFRAMES = `
     90%  { transform: rotate(360deg) scale(1.08); }
     100% { transform: rotate(360deg) scale(1); }
   }
-  @keyframes bird-fly-out {
-    0%   { transform: translateX(0) translateY(0); opacity: 1; }
-    100% { transform: translateX(280px) translateY(-40px); opacity: 0; }
-  }
-  @keyframes bird-fly-in {
-    0%   { transform: translateX(-130vw) translateY(-20px); opacity: 0; }
-    80%  { transform: translateX(6px) translateY(0); opacity: 1; }
-    90%  { transform: translateX(-4px) translateY(0); }
-    100% { transform: translateX(0) translateY(0); opacity: 1; }
-  }
   @keyframes bird-perk {
     0%   { transform: translateY(0) scale(1); }
     100% { transform: translateY(-5px) scale(1.06); }
@@ -113,12 +101,24 @@ const BIRD_KEYFRAMES = `
   }
 `;
 
+const getRandomPos = () => {
+  const vw = typeof window !== "undefined" ? window.innerWidth : 800;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 600;
+  return {
+    bottom: 40 + Math.random() * Math.min(vh * 0.55, 340),
+    right: 20 + Math.random() * Math.min(vw * 0.72, 520),
+  };
+};
+
 export function Bird() {
   const birdRef = useRef<HTMLDivElement>(null);
 
   /* ---------- state ---------- */
   const stateRef = useRef<BirdState>("idle");
   const [birdState, _setBirdState] = useState<BirdState>("idle");
+
+  const [pos, setPos] = useState({ bottom: 48, right: 32 });
+  const [isMoving, setIsMoving] = useState(false);
 
   const [pupilOffset, setPupilOffset] = useState({ x: 0, y: 0 });
   const [isBlinking, setIsBlinking] = useState(false);
@@ -131,11 +131,12 @@ export function Bird() {
   /* ---------- refs ---------- */
   const floaterIdRef = useRef(0);
   const isHoveringRef = useRef(false);
-  const inactivityTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const isMovingRef = useRef(false);
   const hoverSleepTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const idleBehaviorTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const blinkTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const clickTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const flightTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const clickCountRef = useRef(0);
 
   /* ---------- helpers ---------- */
@@ -181,25 +182,21 @@ export function Bird() {
     idleBehaviorTimerRef.current = setTimeout(
       () => {
         const s = stateRef.current;
-        if (s === "idle" || s === "alert") {
+        if ((s === "idle" || s === "alert") && !isMovingRef.current) {
           const pick = Math.floor(Math.random() * 4);
           if (pick === 0) {
-            // Ruffle — quick head jitter
             setHeadTilt(9);
             setTimeout(() => setHeadTilt(-9), 80);
             setTimeout(() => setHeadTilt(5), 160);
             setTimeout(() => setHeadTilt(0), 240);
           } else if (pick === 1) {
-            // Look left then right
             setHeadTilt(-14);
             setTimeout(() => setHeadTilt(14), 550);
             setTimeout(() => setHeadTilt(0), 1100);
           } else if (pick === 2) {
-            // Preen — head dips
             setHeadTilt(22);
             setTimeout(() => setHeadTilt(0), 750);
           } else {
-            // Chirp with floating note
             playChirp();
             addFloater("♪", "var(--accent-gold)", 14, -14, 1400);
           }
@@ -210,48 +207,52 @@ export function Bird() {
     );
   }, [addFloater]);
 
-  /* ---------- 60 s inactivity fly-away ---------- */
-  const resetInactivityTimer = useCallback(() => {
-    clearTimeout(inactivityTimerRef.current);
-    inactivityTimerRef.current = setTimeout(() => {
-      const s = stateRef.current;
-      if (s === "idle" || s === "sleeping" || s === "alert") {
-        setShowZzz(false);
-        setState("flying-out");
-        setIsWingFlapping(true);
-        // After fly-out anim (1 s), wait 10 s then fly back
-        setTimeout(() => {
+  /* ---------- autonomous flight ---------- */
+  const scheduleFlight = useCallback(() => {
+    clearTimeout(flightTimerRef.current);
+    flightTimerRef.current = setTimeout(
+      () => {
+        const s = stateRef.current;
+        // Don't interrupt interactions or hover
+        if (s !== "dancing" && s !== "startled" && !isHoveringRef.current) {
+          const newPos = getRandomPos();
+          setShowZzz(false);
+          isMovingRef.current = true;
+          setIsMoving(true);
+          setIsWingFlapping(true);
+          setState("idle");
+          setPos(newPos);
+
           setTimeout(() => {
-            setState("flying-in");
-            setTimeout(() => {
-              setIsWingFlapping(false);
-              setState("idle");
-              resetInactivityTimer();
-            }, 950);
-          }, 10000);
-        }, 1000);
-      }
-    }, 60000);
+            isMovingRef.current = false;
+            setIsMoving(false);
+            setIsWingFlapping(false);
+            setState(isHoveringRef.current ? "alert" : "idle");
+          }, 1500);
+        }
+        scheduleFlight();
+      },
+      14000 + Math.random() * 16000 // 14–30 s between flights
+    );
   }, [setState]);
 
   /* ---------- mount ---------- */
   useEffect(() => {
     scheduleBlink();
     scheduleIdleBehavior();
-    resetInactivityTimer();
+    scheduleFlight();
     return () => {
       clearTimeout(blinkTimerRef.current);
       clearTimeout(idleBehaviorTimerRef.current);
-      clearTimeout(inactivityTimerRef.current);
       clearTimeout(hoverSleepTimerRef.current);
       clearTimeout(clickTimerRef.current);
+      clearTimeout(flightTimerRef.current);
     };
-  }, [scheduleBlink, scheduleIdleBehavior, resetInactivityTimer]);
+  }, [scheduleBlink, scheduleIdleBehavior, scheduleFlight]);
 
-  /* ---------- global mouse tracking (pupil + sleep reset) ---------- */
+  /* ---------- global mouse tracking (pupil) ---------- */
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      // Pupil tracking — always
       const rect = birdRef.current?.getBoundingClientRect();
       if (rect) {
         const dx = e.clientX - (rect.left + rect.width / 2);
@@ -264,17 +265,14 @@ export function Bird() {
         });
       }
 
-      // While hovering: reset the 3 s sleep timer on every move
       if (isHoveringRef.current) {
         clearTimeout(hoverSleepTimerRef.current);
 
-        // Wake up if sleeping
         if (stateRef.current === "sleeping") {
           setShowZzz(false);
           setState("alert");
         }
 
-        // Restart sleep countdown
         hoverSleepTimerRef.current = setTimeout(() => {
           if (isHoveringRef.current && stateRef.current === "alert") {
             setState("sleeping");
@@ -292,25 +290,16 @@ export function Bird() {
   const handleMouseEnter = useCallback(() => {
     isHoveringRef.current = true;
     const s = stateRef.current;
-    if (
-      s === "flying-out" ||
-      s === "flying-in" ||
-      s === "startled" ||
-      s === "dancing"
-    )
-      return;
+    if (s === "startled" || s === "dancing") return;
 
     setState("alert");
-    resetInactivityTimer();
 
-    // First-ever hover tooltip
     if (!sessionStorage.getItem("bird-seen")) {
       sessionStorage.setItem("bird-seen", "1");
       setShowTooltip(true);
       setTimeout(() => setShowTooltip(false), 2400);
     }
 
-    // Start 3 s sleep timer
     clearTimeout(hoverSleepTimerRef.current);
     hoverSleepTimerRef.current = setTimeout(() => {
       if (isHoveringRef.current && stateRef.current === "alert") {
@@ -318,7 +307,7 @@ export function Bird() {
         setShowZzz(true);
       }
     }, 3000);
-  }, [setState, resetInactivityTimer]);
+  }, [setState]);
 
   const handleMouseLeave = useCallback(() => {
     isHoveringRef.current = false;
@@ -338,8 +327,7 @@ export function Bird() {
   /* ---------- click interactions ---------- */
   const doClick = useCallback(() => {
     const s = stateRef.current;
-    if (s === "dancing" || s === "flying-out" || s === "flying-in") return;
-    resetInactivityTimer();
+    if (s === "dancing") return;
     setState("startled");
     setIsWingFlapping(true);
     playChirp();
@@ -348,19 +336,15 @@ export function Bird() {
       setIsWingFlapping(false);
       setState(isHoveringRef.current ? "alert" : "idle");
     }, 560);
-  }, [setState, resetInactivityTimer, addFloater]);
+  }, [setState, addFloater]);
 
   const doDoubleClick = useCallback(() => {
-    const s = stateRef.current;
-    if (s === "flying-out" || s === "flying-in") return;
-    resetInactivityTimer();
     setState("dancing");
     setIsWingFlapping(true);
     playChirp();
 
     addFloater("!!", "var(--accent-gold)", 0, -26, 1800);
 
-    // Confetti burst — staggered ◈ in a fan
     const xPositions = [-28, -18, -8, 2, 12, 22, -22, -12, 2, 16];
     xPositions.forEach((x, i) => {
       setTimeout(() => {
@@ -372,9 +356,8 @@ export function Bird() {
       setIsWingFlapping(false);
       setState(isHoveringRef.current ? "alert" : "idle");
     }, 2200);
-  }, [setState, resetInactivityTimer, addFloater]);
+  }, [setState, addFloater]);
 
-  // Distinguish single vs double click
   const handleClick = useCallback(() => {
     clickCountRef.current += 1;
     clearTimeout(clickTimerRef.current);
@@ -393,15 +376,11 @@ export function Bird() {
   const containerAnimation = (() => {
     if (birdState === "startled") return "bird-jump 0.56s cubic-bezier(.36,.07,.19,.97) both";
     if (birdState === "dancing") return "bird-dance 2s ease both";
-    if (birdState === "flying-out") return "bird-fly-out 1s ease forwards";
-    if (birdState === "flying-in") return "bird-fly-in 0.95s ease forwards";
     return undefined;
   })();
 
   const containerTransform =
-    birdState === "alert" ? "translateY(-5px) scale(1.06)" : undefined;
-
-  const isFlying = birdState === "flying-out" || birdState === "flying-in";
+    !isMoving && birdState === "alert" ? "translateY(-5px) scale(1.06)" : undefined;
 
   /* ---------- render ---------- */
   return (
@@ -412,14 +391,17 @@ export function Bird() {
         ref={birdRef}
         style={{
           position: "fixed",
-          bottom: "48px",
-          right: "32px",
+          bottom: `${pos.bottom}px`,
+          right: `${pos.right}px`,
           zIndex: 100,
-          cursor: isFlying ? "default" : "pointer",
+          cursor: isMoving ? "default" : "pointer",
           userSelect: "none",
-          pointerEvents: isFlying ? "none" : "auto",
-          transition:
-            birdState === "alert" ? "transform 0.2s ease" : "transform 0.3s ease",
+          pointerEvents: isMoving ? "none" : "auto",
+          transition: isMoving
+            ? "bottom 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94), right 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)"
+            : birdState === "alert"
+            ? "transform 0.2s ease"
+            : "transform 0.3s ease",
           transform: containerTransform,
           animation: containerAnimation,
         }}
