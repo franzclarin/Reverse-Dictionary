@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type BirdState =
-  | "idle"
-  | "alert"
-  | "startled"
-  | "dancing"
-  | "sleeping";
+type BirdState = "flying" | "alert" | "startled" | "dancing" | "sleeping";
 
 interface Floater {
   id: number;
@@ -21,7 +16,9 @@ interface Floater {
 const playChirp = () => {
   try {
     const AudioCtx =
-      window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
     const osc = ctx.createOscillator();
@@ -37,9 +34,7 @@ const playChirp = () => {
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.3);
     setTimeout(() => ctx.close(), 600);
-  } catch (_) {
-    // Web Audio not supported — silent fail
-  }
+  } catch (_) {}
 };
 
 const BIRD_KEYFRAMES = `
@@ -60,10 +55,6 @@ const BIRD_KEYFRAMES = `
     72%  { transform: translateX(0) translateY(0) rotate(0deg); }
     90%  { transform: rotate(360deg) scale(1.08); }
     100% { transform: rotate(360deg) scale(1); }
-  }
-  @keyframes bird-perk {
-    0%   { transform: translateY(0) scale(1); }
-    100% { transform: translateY(-5px) scale(1.06); }
   }
   @keyframes wing-flap {
     0%   { transform: rotate(0deg); }
@@ -95,6 +86,10 @@ const BIRD_KEYFRAMES = `
     animation: wing-flap 0.13s ease-in-out infinite;
     transform-origin: 20px 25px;
   }
+  .bird-wing-flap-slow {
+    animation: wing-flap 0.22s ease-in-out infinite;
+    transform-origin: 20px 25px;
+  }
   .bird-body-breathe {
     animation: breathe 3.4s ease-in-out infinite;
     transform-origin: 20px 32px;
@@ -113,33 +108,27 @@ const getRandomPos = () => {
 export function Bird() {
   const birdRef = useRef<HTMLDivElement>(null);
 
-  /* ---------- state ---------- */
-  const stateRef = useRef<BirdState>("idle");
-  const [birdState, _setBirdState] = useState<BirdState>("idle");
+  const stateRef = useRef<BirdState>("flying");
+  const [birdState, _setBirdState] = useState<BirdState>("flying");
 
   const [pos, setPos] = useState({ bottom: 48, right: 32 });
-  const [isMoving, setIsMoving] = useState(false);
+  const [flightDuration, setFlightDuration] = useState(1200);
 
   const [pupilOffset, setPupilOffset] = useState({ x: 0, y: 0 });
   const [isBlinking, setIsBlinking] = useState(false);
-  const [headTilt, setHeadTilt] = useState(0);
-  const [isWingFlapping, setIsWingFlapping] = useState(false);
   const [floaters, setFloaters] = useState<Floater[]>([]);
   const [showZzz, setShowZzz] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
 
-  /* ---------- refs ---------- */
   const floaterIdRef = useRef(0);
   const isHoveringRef = useRef(false);
-  const isMovingRef = useRef(false);
+  const pendingFlightRef = useRef(false);
+  const flightTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const hoverSleepTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const idleBehaviorTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const blinkTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const clickTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const flightTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const clickCountRef = useRef(0);
 
-  /* ---------- helpers ---------- */
   const setState = useCallback((s: BirdState) => {
     stateRef.current = s;
     _setBirdState(s);
@@ -157,100 +146,72 @@ export function Bird() {
     []
   );
 
-  /* ---------- blink scheduler ---------- */
+  /* ---------- blink ---------- */
   const scheduleBlink = useCallback(() => {
     clearTimeout(blinkTimerRef.current);
-    blinkTimerRef.current = setTimeout(
-      () => {
-        if (stateRef.current !== "sleeping") {
-          setIsBlinking(true);
-          setTimeout(() => {
-            setIsBlinking(false);
-            scheduleBlink();
-          }, 180);
-        } else {
+    blinkTimerRef.current = setTimeout(() => {
+      if (stateRef.current !== "sleeping") {
+        setIsBlinking(true);
+        setTimeout(() => {
+          setIsBlinking(false);
           scheduleBlink();
-        }
-      },
-      3000 + Math.random() * 1200
-    );
+        }, 180);
+      } else {
+        scheduleBlink();
+      }
+    }, 3000 + Math.random() * 1200);
   }, []);
 
-  /* ---------- idle behaviour scheduler ---------- */
-  const scheduleIdleBehavior = useCallback(() => {
-    clearTimeout(idleBehaviorTimerRef.current);
-    idleBehaviorTimerRef.current = setTimeout(
-      () => {
-        const s = stateRef.current;
-        if ((s === "idle" || s === "alert") && !isMovingRef.current) {
-          const pick = Math.floor(Math.random() * 4);
-          if (pick === 0) {
-            setHeadTilt(9);
-            setTimeout(() => setHeadTilt(-9), 80);
-            setTimeout(() => setHeadTilt(5), 160);
-            setTimeout(() => setHeadTilt(0), 240);
-          } else if (pick === 1) {
-            setHeadTilt(-14);
-            setTimeout(() => setHeadTilt(14), 550);
-            setTimeout(() => setHeadTilt(0), 1100);
-          } else if (pick === 2) {
-            setHeadTilt(22);
-            setTimeout(() => setHeadTilt(0), 750);
-          } else {
-            playChirp();
-            addFloater("♪", "var(--accent-gold)", 14, -14, 1400);
-          }
-        }
-        scheduleIdleBehavior();
-      },
-      15000 + Math.random() * 5000
-    );
-  }, [addFloater]);
-
-  /* ---------- autonomous flight ---------- */
-  const scheduleFlight = useCallback(() => {
+  /* ---------- continuous flight loop ---------- */
+  const scheduleNextFlight = useCallback(() => {
     clearTimeout(flightTimerRef.current);
-    flightTimerRef.current = setTimeout(
-      () => {
-        const s = stateRef.current;
-        // Don't interrupt interactions or hover
-        if (s !== "dancing" && s !== "startled" && !isHoveringRef.current) {
-          const newPos = getRandomPos();
-          setShowZzz(false);
-          isMovingRef.current = true;
-          setIsMoving(true);
-          setIsWingFlapping(true);
-          setState("idle");
-          setPos(newPos);
 
-          setTimeout(() => {
-            isMovingRef.current = false;
-            setIsMoving(false);
-            setIsWingFlapping(false);
-            setState(isHoveringRef.current ? "alert" : "idle");
-          }, 1500);
-        }
-        scheduleFlight();
-      },
-      14000 + Math.random() * 16000 // 14–30 s between flights
-    );
+    const duration = 800 + Math.random() * 1200; // 0.8–2 s per leg
+    const pause = 100 + Math.random() * 400;     // 0.1–0.5 s gap
+
+    flightTimerRef.current = setTimeout(() => {
+      const s = stateRef.current;
+      if (isHoveringRef.current || s === "startled" || s === "dancing") {
+        // Pause flight — will resume from handleMouseLeave or after interaction
+        pendingFlightRef.current = true;
+        return;
+      }
+      setFlightDuration(duration);
+      setPos(getRandomPos());
+      setState("flying");
+      scheduleNextFlight();
+    }, duration + pause);
   }, [setState]);
+
+  const resumeFlight = useCallback(() => {
+    pendingFlightRef.current = false;
+    const duration = 800 + Math.random() * 1200;
+    const pause = 100 + Math.random() * 300;
+    clearTimeout(flightTimerRef.current);
+    flightTimerRef.current = setTimeout(() => {
+      setFlightDuration(duration);
+      setPos(getRandomPos());
+      setState("flying");
+      scheduleNextFlight();
+    }, pause);
+  }, [setState, scheduleNextFlight]);
 
   /* ---------- mount ---------- */
   useEffect(() => {
     scheduleBlink();
-    scheduleIdleBehavior();
-    scheduleFlight();
+    // Kick off first flight after a short delay
+    flightTimerRef.current = setTimeout(() => {
+      scheduleNextFlight();
+    }, 600);
     return () => {
       clearTimeout(blinkTimerRef.current);
-      clearTimeout(idleBehaviorTimerRef.current);
+      clearTimeout(flightTimerRef.current);
       clearTimeout(hoverSleepTimerRef.current);
       clearTimeout(clickTimerRef.current);
-      clearTimeout(flightTimerRef.current);
     };
-  }, [scheduleBlink, scheduleIdleBehavior, scheduleFlight]);
+  }, [scheduleBlink, scheduleNextFlight]);
 
-  /* ---------- global mouse tracking (pupil) ---------- */
+  /* ---------- pupil tracking ---------- */
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const rect = birdRef.current?.getBoundingClientRect();
@@ -259,20 +220,15 @@ export function Bird() {
         const dy = e.clientY - (rect.top + rect.height / 2);
         const angle = Math.atan2(dy, dx);
         const dist = Math.min(3, Math.hypot(dx, dy) / 50);
-        setPupilOffset({
-          x: Math.cos(angle) * dist,
-          y: Math.sin(angle) * dist,
-        });
+        setPupilOffset({ x: Math.cos(angle) * dist, y: Math.sin(angle) * dist });
       }
 
       if (isHoveringRef.current) {
         clearTimeout(hoverSleepTimerRef.current);
-
         if (stateRef.current === "sleeping") {
           setShowZzz(false);
           setState("alert");
         }
-
         hoverSleepTimerRef.current = setTimeout(() => {
           if (isHoveringRef.current && stateRef.current === "alert") {
             setState("sleeping");
@@ -281,18 +237,16 @@ export function Bird() {
         }, 3000);
       }
     };
-
     window.addEventListener("mousemove", onMove, { passive: true });
     return () => window.removeEventListener("mousemove", onMove);
   }, [setState]);
 
-  /* ---------- hover ---------- */
+  /* ---------- hover — pause/resume flight ---------- */
   const handleMouseEnter = useCallback(() => {
     isHoveringRef.current = true;
+    clearTimeout(flightTimerRef.current);
     const s = stateRef.current;
-    if (s === "startled" || s === "dancing") return;
-
-    setState("alert");
+    if (s !== "startled" && s !== "dancing") setState("alert");
 
     if (!sessionStorage.getItem("bird-seen")) {
       sessionStorage.setItem("bird-seen", "1");
@@ -312,51 +266,39 @@ export function Bird() {
   const handleMouseLeave = useCallback(() => {
     isHoveringRef.current = false;
     clearTimeout(hoverSleepTimerRef.current);
-
-    const s = stateRef.current;
-    if (s === "sleeping") {
-      setShowZzz(false);
-      setState("idle");
-    } else if (s === "alert") {
-      setState("idle");
-    }
-
+    setShowZzz(false);
     setPupilOffset({ x: 0, y: 0 });
-  }, [setState]);
+    // Resume flying
+    resumeFlight();
+  }, [resumeFlight]);
 
-  /* ---------- click interactions ---------- */
+  /* ---------- clicks ---------- */
   const doClick = useCallback(() => {
-    const s = stateRef.current;
-    if (s === "dancing") return;
+    if (stateRef.current === "dancing") return;
     setState("startled");
-    setIsWingFlapping(true);
     playChirp();
     addFloater("♥", "#e05252", 0, -12, 1200);
     setTimeout(() => {
-      setIsWingFlapping(false);
-      setState(isHoveringRef.current ? "alert" : "idle");
+      setState(isHoveringRef.current ? "alert" : "flying");
+      if (!isHoveringRef.current) resumeFlight();
     }, 560);
-  }, [setState, addFloater]);
+  }, [setState, addFloater, resumeFlight]);
 
   const doDoubleClick = useCallback(() => {
     setState("dancing");
-    setIsWingFlapping(true);
     playChirp();
-
     addFloater("!!", "var(--accent-gold)", 0, -26, 1800);
-
     const xPositions = [-28, -18, -8, 2, 12, 22, -22, -12, 2, 16];
     xPositions.forEach((x, i) => {
       setTimeout(() => {
         addFloater("◈", "var(--accent-gold)", x, -6 - Math.abs(x) * 0.3, 1600);
       }, i * 55);
     });
-
     setTimeout(() => {
-      setIsWingFlapping(false);
-      setState(isHoveringRef.current ? "alert" : "idle");
+      setState(isHoveringRef.current ? "alert" : "flying");
+      if (!isHoveringRef.current) resumeFlight();
     }, 2200);
-  }, [setState, addFloater]);
+  }, [setState, addFloater, resumeFlight]);
 
   const handleClick = useCallback(() => {
     clickCountRef.current += 1;
@@ -372,17 +314,13 @@ export function Bird() {
     }
   }, [doClick, doDoubleClick]);
 
-  /* ---------- derived animation / transform ---------- */
+  const isPerched = birdState === "alert" || birdState === "sleeping";
   const containerAnimation = (() => {
     if (birdState === "startled") return "bird-jump 0.56s cubic-bezier(.36,.07,.19,.97) both";
     if (birdState === "dancing") return "bird-dance 2s ease both";
     return undefined;
   })();
 
-  const containerTransform =
-    !isMoving && birdState === "alert" ? "translateY(-5px) scale(1.06)" : undefined;
-
-  /* ---------- render ---------- */
   return (
     <>
       <style>{BIRD_KEYFRAMES}</style>
@@ -394,22 +332,18 @@ export function Bird() {
           bottom: `${pos.bottom}px`,
           right: `${pos.right}px`,
           zIndex: 100,
-          cursor: isMoving ? "default" : "pointer",
+          cursor: "pointer",
           userSelect: "none",
-          pointerEvents: isMoving ? "none" : "auto",
-          transition: isMoving
-            ? "bottom 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94), right 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)"
-            : birdState === "alert"
+          transition: isPerched || birdState === "startled" || birdState === "dancing"
             ? "transform 0.2s ease"
-            : "transform 0.3s ease",
-          transform: containerTransform,
+            : `bottom ${flightDuration}ms cubic-bezier(0.45, 0.05, 0.55, 0.95), right ${flightDuration}ms cubic-bezier(0.45, 0.05, 0.55, 0.95)`,
+          transform: isPerched ? "translateY(-5px) scale(1.06)" : undefined,
           animation: containerAnimation,
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         onClick={handleClick}
       >
-        {/* First-hover tooltip */}
         {showTooltip && (
           <div
             style={{
@@ -428,7 +362,6 @@ export function Bird() {
           </div>
         )}
 
-        {/* Zzz */}
         {showZzz && (
           <div
             style={{
@@ -446,7 +379,6 @@ export function Bird() {
           </div>
         )}
 
-        {/* Floaters: hearts, notes, !!, confetti */}
         {floaters.map((f) => (
           <div
             key={f.id}
@@ -467,9 +399,7 @@ export function Bird() {
           </div>
         ))}
 
-        {/* Bird + Branch wrapper */}
         <div style={{ position: "relative" }}>
-          {/* SVG */}
           <svg
             viewBox="0 0 40 40"
             width="54"
@@ -480,17 +410,15 @@ export function Bird() {
               display: "block",
             }}
           >
-            {/* Wing — behind body */}
             <ellipse
               cx="13"
               cy="26"
               rx="7.5"
               ry="4.5"
               fill="var(--border)"
-              className={isWingFlapping ? "bird-wing-flap" : undefined}
+              className={isPerched ? "bird-wing-flap-slow" : "bird-wing-flap"}
             />
 
-            {/* Body */}
             <ellipse
               cx="20"
               cy="26"
@@ -500,52 +428,28 @@ export function Bird() {
               className="bird-body-breathe"
             />
 
-            {/* Tail */}
             <polygon points="10,30 6,37 15,32" fill="var(--surface-2)" />
 
-            {/* Head group — head tilt applied here */}
             <g
               style={{
-                transform: `rotate(${headTilt}deg)`,
                 transformOrigin: "20px 18px",
-                transition: "transform 0.42s ease",
+                transition: "transform 0.3s ease",
               }}
             >
               <circle cx="21" cy="14" r="7.5" fill="var(--surface-2)" />
 
-              {/* Beak */}
-              <polygon
-                points="28,12.5 35,15 28,17.5"
-                fill="var(--accent-gold)"
-              />
+              <polygon points="28,12.5 35,15 28,17.5" fill="var(--accent-gold)" />
 
-              {/* Eye white */}
               <circle cx="24" cy="12" r="2.4" fill="var(--text-primary)" />
 
-              {/* Blink eyelid */}
               {isBlinking && (
-                <ellipse
-                  cx="24"
-                  cy="12"
-                  rx="2.4"
-                  ry="2.4"
-                  fill="var(--surface-2)"
-                />
+                <ellipse cx="24" cy="12" rx="2.4" ry="2.4" fill="var(--surface-2)" />
               )}
 
-              {/* Half-closed eye when sleeping */}
               {birdState === "sleeping" && !isBlinking && (
-                <rect
-                  x="21.6"
-                  y="9.6"
-                  width="4.8"
-                  height="2.6"
-                  rx="1.2"
-                  fill="var(--surface-2)"
-                />
+                <rect x="21.6" y="9.6" width="4.8" height="2.6" rx="1.2" fill="var(--surface-2)" />
               )}
 
-              {/* Pupil + shine */}
               {birdState !== "sleeping" && !isBlinking && (
                 <>
                   <circle
@@ -564,74 +468,31 @@ export function Bird() {
               )}
             </g>
 
-            {/* Feet */}
-            <line
-              x1="16"
-              y1="34"
-              x2="13"
-              y2="38"
-              stroke="var(--accent-gold)"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="16"
-              y1="35"
-              x2="11"
-              y2="36.5"
-              stroke="var(--accent-gold)"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-            />
-            <line
-              x1="23"
-              y1="34"
-              x2="26"
-              y2="38"
-              stroke="var(--accent-gold)"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="23"
-              y1="35"
-              x2="28"
-              y2="36.5"
-              stroke="var(--accent-gold)"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-            />
+            <line x1="16" y1="34" x2="13" y2="38" stroke="var(--accent-gold)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="16" y1="35" x2="11" y2="36.5" stroke="var(--accent-gold)" strokeWidth="1.2" strokeLinecap="round" />
+            <line x1="23" y1="34" x2="26" y2="38" stroke="var(--accent-gold)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="23" y1="35" x2="28" y2="36.5" stroke="var(--accent-gold)" strokeWidth="1.2" strokeLinecap="round" />
           </svg>
 
-          {/* Branch */}
-          <svg
-            viewBox="0 0 80 12"
-            width="82"
-            height="12"
-            style={{
-              position: "absolute",
-              bottom: "-6px",
-              left: "50%",
-              transform: "translateX(-50%)",
-              pointerEvents: "none",
-              overflow: "visible",
-            }}
-          >
-            <path
-              d="M0,6 Q40,2 80,6"
-              stroke="#3a2e1e"
-              strokeWidth="4"
-              fill="none"
-              strokeLinecap="round"
-            />
-            <path
-              d="M0,6 Q40,2 80,6"
-              stroke="#4a3a28"
-              strokeWidth="2"
-              fill="none"
-              strokeLinecap="round"
-            />
-          </svg>
+          {/* Branch — only shown when perched */}
+          {isPerched && (
+            <svg
+              viewBox="0 0 80 12"
+              width="82"
+              height="12"
+              style={{
+                position: "absolute",
+                bottom: "-6px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                pointerEvents: "none",
+                overflow: "visible",
+              }}
+            >
+              <path d="M0,6 Q40,2 80,6" stroke="#3a2e1e" strokeWidth="4" fill="none" strokeLinecap="round" />
+              <path d="M0,6 Q40,2 80,6" stroke="#4a3a28" strokeWidth="2" fill="none" strokeLinecap="round" />
+            </svg>
+          )}
         </div>
       </div>
     </>
