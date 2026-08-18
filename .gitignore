@@ -40,3 +40,8 @@ next-env.d.ts
 _model_tmp/
 reverse_dict_model.zip
 .env*
+
+# Agent skill docs auto-installed by `vercel integration add` — regenerable
+.agents/
+.claude/skills/
+skills-lock.json

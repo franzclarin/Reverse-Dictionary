@@ -10,11 +10,8 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 
 **Claude: at the start of a session, briefly note any unchecked box, then get on with the task.** When one is done, **delete the line** rather than ticking it — this file loads into context every session, so a stale list costs tokens and eventually misleads. Each item carries a recommended default so it doesn't get re-litigated. Last reviewed 2026-08-18.
 
-- [ ] Delete `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` from Vercel, every environment (`vercel env rm <name> <env>`) — orphaned credentials for a database deleted ~166 days ago, unused since the code moved to `KV_*`. **Recommended: do it.** Exactly this kind of orphan caused the 2026-08-18 outage.
-- [ ] Delete `HF_API_TOKEN` from Vercel — nothing reads it. **Recommended: do it.**
-- [ ] Resolve `/api/reverse-dictionary`, the last Claude reference and the only reason `@anthropic-ai/sdk` and `ANTHROPIC_API_KEY` are still needed. **Recommended: delete the route and drop the dependency** — it is unwired and inert.
-- [ ] Commit or `.gitignore` the untracked `.agents/`, `.claude/skills/`, `skills-lock.json` (Upstash docs auto-installed by `vercel integration add`). **Recommended: gitignore** — regenerable tooling docs, not app code. Leave `.claude/settings.local.json` uncommitted either way; `.local` means machine-specific.
 - [ ] Restore written definitions for new words, if wanted — wire a free source (Wiktionary, dictionaryapi.dev) into `getWordData()`. Mind the `definition === ""` trap under "Word pages". **No recommendation; this is a product call.**
+- [ ] `app/sitemap.ts` hardcodes `https://reverse-dictionary-three.vercel.app`, but the site is served from `https://www.reversedictionary.xyz`. Every sitemap URL points at the wrong host. **Recommended: fix to the real domain**, ideally from an env var rather than a literal.
 
 ## Stack
 
@@ -23,7 +20,7 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 - **Clerk** auth (middleware runs on all routes; app is usable signed-out)
 - **Upstash Redis + Ratelimit** — Vercel Marketplace resource (`upstash/upstash-kv`). Built lazily by `getRatelimiters()`, no-op when env vars are absent, and **fails open** when the limiter itself errors
 - **@xenova/transformers** (Transformers.js) — in-function ONNX embedding
-- **Anthropic Claude** — **not used by any live feature.** Search never called it; word pages stopped on 2026-08-18 (see "Word pages"). Only the unwired legacy `/api/reverse-dictionary` route still imports the SDK
+- **No generative AI dependency.** Claude was removed entirely on 2026-08-18 — search never used it, and word pages no longer do (see "Word pages"). There is no `@anthropic-ai/sdk` and no `ANTHROPIC_API_KEY`
 - Deployed on **Vercel** (region `iad1`); GitHub `franzclarin/Reverse-Dictionary`, branch `main`
 
 ## How search works (the core flow)
@@ -65,7 +62,6 @@ Models: `Word`, `SavedWord`, `User`, `Lookup`, `GameRound`, `VocabEmbedding`.
 ## API routes (`app/api/`)
 
 - `lookup/` — embedding search (primary).
-- `reverse-dictionary/` — Claude-based lookup (legacy; not wired to UI).
 - `word/[word]/`, `word/[word]/save/` — word page data + saving.
 - `credits/`, `leaderboard/` — user credits / leaderboard.
 
@@ -84,7 +80,7 @@ Models: `Word`, `SavedWord`, `User`, `Lookup`, `GameRound`, `VocabEmbedding`.
 - Observed cause codes: `ENOTFOUND` (bad/stale host), `ECONNREFUSED` (host up, nothing listening), plus `EAI_AGAIN` / `UND_ERR_CONNECT_TIMEOUT` for DNS and CDN stalls.
 - The error `detail` returned to the client includes `subsystem` + `code`, but **`hostname` only outside production** (an Upstash REST host identifies a private DB). The full shape is always in the server logs.
 - Migrations: Neon pooled connections break `prisma migrate deploy`'s advisory lock — apply SQL via `prisma db execute --file` instead.
-- Env: local `.env.local` needs `DATABASE_URL` (Neon owner role), Clerk keys, and optionally Upstash + `ANTHROPIC_API_KEY`. Vercel needs the same for the deployed app.
+- Env: local `.env.local` needs `DATABASE_URL` (Neon owner role), Clerk keys, and optionally Upstash (`KV_REST_API_URL` / `KV_REST_API_TOKEN`). Vercel needs the same for the deployed app.
 - **Redis creds come from `KV_*`, not `UPSTASH_*`.** The Upstash Redis DB is a Vercel Marketplace resource (`upstash/upstash-kv`), which writes `KV_REST_API_URL` / `KV_REST_API_TOKEN` and keeps them in sync with the resource. `getRatelimiters()` reads those first and only falls back to `UPSTASH_REDIS_REST_URL` / `_TOKEN`. Don't hand-copy credentials into the `UPSTASH_*` pair — a hand-set pair outlived its deleted database by 166 days and caused the outage above. Re-provision with `vercel integration add upstash/upstash-kv`; `vercel integration list` shows whether a resource actually exists (env vars alone prove nothing).
 
 ## Commands
