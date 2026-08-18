@@ -3,7 +3,6 @@ import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
 import Navbar from "@/components/Navbar";
 import { LoadingProvider } from "@/context/LoadingContext";
-import { Bird } from "@/components/Bird";
 
 export const metadata: Metadata = {
   title: "Reverse Dictionary - Find Words from Descriptions",
@@ -24,7 +23,6 @@ export default function RootLayout({
           <LoadingProvider>
             <Navbar />
             <div className="flex-1">{children}</div>
-            <Bird />
             <footer
               className="py-5 text-center"
               style={{ borderTop: "1px solid var(--border)" }}
