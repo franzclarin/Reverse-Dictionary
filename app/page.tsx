@@ -25,29 +25,35 @@ export default function Home() {
     let navigated = false;
 
     try {
-      // Step 1: try the fast embedding-based lookup
-      const embRes = await fetch("/api/lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: description, k: 5 }),
-      });
+      // Step 1: try the fast embedding-based lookup.
+      // Isolated try/catch so any failure (timeout, empty body, JSON error)
+      // falls through silently to the Claude fallback below.
+      try {
+        const embRes = await fetch("/api/lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: description, k: 5 }),
+        });
 
-      if (embRes.ok) {
-        const embData = await embRes.json();
-        const top = embData.results?.[0] as
-          | { word: string; similarity: number }
-          | undefined;
+        if (embRes.ok) {
+          const embData = await embRes.json();
+          const top = embData.results?.[0] as
+            | { word: string; similarity: number }
+            | undefined;
 
-        if (top && top.similarity >= SIMILARITY_THRESHOLD) {
-          const alts: string[] = (embData.results as { word: string }[])
-            .slice(1, 3)
-            .map((r) => r.word);
-          const query =
-            alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
-          router.push(`/word/${encodeURIComponent(top.word)}${query}`);
-          navigated = true;
-          return;
+          if (top && top.similarity >= SIMILARITY_THRESHOLD) {
+            const alts: string[] = (embData.results as { word: string }[])
+              .slice(1, 3)
+              .map((r) => r.word);
+            const query =
+              alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
+            router.push(`/word/${encodeURIComponent(top.word)}${query}`);
+            navigated = true;
+            return;
+          }
         }
+      } catch {
+        // embedding path failed — fall through to Claude
       }
 
       // Step 2: fall back to Claude when embedding confidence is low
