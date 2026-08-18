@@ -11,7 +11,6 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 **Claude: at the start of a session, briefly note any unchecked box, then get on with the task.** When one is done, **delete the line** rather than ticking it — this file loads into context every session, so a stale list costs tokens and eventually misleads. Each item carries a recommended default so it doesn't get re-litigated. Last reviewed 2026-08-18.
 
 - [ ] Restore written definitions for new words, if wanted — wire a free source (Wiktionary, dictionaryapi.dev) into `getWordData()`. Mind the `definition === ""` trap under "Word pages". **No recommendation; this is a product call.**
-- [ ] `app/sitemap.ts` hardcodes `https://reverse-dictionary-three.vercel.app`, but the site is served from `https://www.reversedictionary.xyz`. Every sitemap URL points at the wrong host. **Recommended: fix to the real domain**, ideally from an env var rather than a literal.
 
 ## Stack
 
