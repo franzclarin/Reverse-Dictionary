@@ -58,3 +58,9 @@ model GameRound {
   outcome   Int
   createdAt DateTime @default(now())
 }
+
+model VocabEmbedding {
+  id        Int                        @id @default(autoincrement())
+  word      String                     @unique
+  embedding Unsupported("vector(384)")
+}

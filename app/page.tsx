@@ -15,12 +15,42 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
 
+  // Below this cosine similarity the embedding result is considered uncertain
+  // and we fall back to Claude. Tune after reviewing real query results.
+  const SIMILARITY_THRESHOLD = 0.2;
+
   const handleSearch = async (description: string) => {
     startLoading();
     setError(null);
     let navigated = false;
 
     try {
+      // Step 1: try the fast embedding-based lookup
+      const embRes = await fetch("/api/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: description, k: 5 }),
+      });
+
+      if (embRes.ok) {
+        const embData = await embRes.json();
+        const top = embData.results?.[0] as
+          | { word: string; similarity: number }
+          | undefined;
+
+        if (top && top.similarity >= SIMILARITY_THRESHOLD) {
+          const alts: string[] = (embData.results as { word: string }[])
+            .slice(1, 3)
+            .map((r) => r.word);
+          const query =
+            alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
+          router.push(`/word/${encodeURIComponent(top.word)}${query}`);
+          navigated = true;
+          return;
+        }
+      }
+
+      // Step 2: fall back to Claude when embedding confidence is low
       const response = await fetch("/api/reverse-dictionary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
