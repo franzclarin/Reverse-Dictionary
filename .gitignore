@@ -39,3 +39,4 @@ next-env.d.ts
 # Model artifacts (large files, generated)
 _model_tmp/
 reverse_dict_model.zip
+.env*

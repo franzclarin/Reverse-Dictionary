@@ -52,6 +52,15 @@ Models: `Word`, `SavedWord`, `User`, `Lookup`, `GameRound`, `VocabEmbedding`.
 - **Read `response.json()` defensively**: parse in a try/catch, THEN check `response.ok`. An empty body (Vercel gateway 401/502, crashed function) otherwise throws "Unexpected end of JSON input". Both search routes and the client already do this.
 - Keep `auth()` and rate-limiting **inside** the route's top-level try/catch so failures return JSON, never an empty-body 500.
 - Rate limiters are optional — always null-check `getRatelimiters()`.
+- **"fetch failed" is never the real error.** Node/undici throws a bare `TypeError: fetch failed` for every network fault and hides the reason on `error.cause` (`code`, `errno`, `hostname`) — sometimes nested, sometimes inside an `AggregateError.errors`. Never log or return `err.message` alone. Use `describeError()` / `formatErrorShape()` from `lib/errors.ts`, which flatten the whole cause chain.
+- **Tag failures by subsystem.** `/api/lookup` has exactly three outbound-fetch dependencies; each one produces an identical "fetch failed". Wrap each and throw `SubsystemError(subsystem, …)` so the log line (`[lookup] FAILED subsystem=…`) and the client's `detail` name the culprit:
+  - `model` — Transformers.js pulling `franzclarin/ReverseDictionary` from the HF CDN on cold start.
+  - `database` — the pgvector query. (Prisma here is **plain TCP**, not `@prisma/adapter-neon` / `@neondatabase/serverless`, so it does *not* use fetch. It only appears as "fetch failed" if someone swaps in a fetch-based driver.)
+  - `ratelimit` — `@upstash/redis` is REST-over-`fetch`.
+- **Rate limiting must fail open.** `getRatelimiters()` guards *absent* env vars, but a **present-but-stale** `UPSTASH_REDIS_REST_URL` (deleted DB, rotated creds) makes `.limit()` throw `fetch failed` / `ENOTFOUND` *before* the model is ever touched — it took down all of search. `checkRateLimit()` now catches, logs `FAILING OPEN`, and allows the request. Build the limiters **lazily**, not at module scope: a malformed URL makes `new Redis()` throw during route init, which yields an empty-body 500 that the client can't parse.
+- **Never cache a rejected promise.** `globalThis._embedderPromise` memoises the model load. If a rejected promise stays in that slot, every later request on the same warm instance fails instantly with the same stale error forever, even after the network heals. `getEmbedder()` clears the slot on rejection (guarded by identity check); `loadEmbedder()` retries 3× with exponential backoff and bails early on non-network errors so it doesn't burn the 60s budget.
+- Observed cause codes: `ENOTFOUND` (bad/stale host), `ECONNREFUSED` (host up, nothing listening), plus `EAI_AGAIN` / `UND_ERR_CONNECT_TIMEOUT` for DNS and CDN stalls.
+- The error `detail` returned to the client includes `subsystem` + `code`, but **`hostname` only outside production** (an Upstash REST host identifies a private DB). The full shape is always in the server logs.
 - Migrations: Neon pooled connections break `prisma migrate deploy`'s advisory lock — apply SQL via `prisma db execute --file` instead.
 - Env: local `.env.local` needs `DATABASE_URL` (Neon owner role), Clerk keys, and optionally Upstash + `ANTHROPIC_API_KEY`. Vercel needs the same for the deployed app.
 
@@ -67,4 +76,6 @@ npx tsc --noEmit       # type-check (run before committing)
 ## Repo hygiene
 
 - Platform: Windows / PowerShell. `_model_tmp/` and `reverse_dict_model.zip` are gitignored (large model/seed artifacts).
+- The repo lives under OneDrive. Its placeholder files make Next's startup cleanup of `.next` fail with `EINVAL: readlink …`, and `next dev` then **exits 0 without serving**. If dev dies instantly, `rm -rf .next` and restart.
+- ESLint config is `.eslintrc.json` (`next/core-web-vitals`). Without it `npm run lint` drops into an interactive setup wizard and hangs non-interactive shells.
 - Other docs: `ARCHITECTURE.md`, `DEPLOYMENT.md`, `GETTING_STARTED.md`, `SETUP.md`, `README.md`.

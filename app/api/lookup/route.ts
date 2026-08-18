@@ -4,63 +4,128 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { embed } from "@/lib/embedder";
 import { prisma } from "@/lib/prisma";
+import {
+  Subsystem,
+  SubsystemError,
+  describeError,
+  formatErrorShape,
+} from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // model cold-start needs up to ~20s; default 10s is too short
 
-function getRatelimiters() {
+type Ratelimiters = { guest: Ratelimit; user: Ratelimit };
+
+let ratelimitersCache: Ratelimiters | null | undefined;
+
+/**
+ * Built lazily (not at module scope): a malformed UPSTASH_REDIS_REST_URL makes
+ * `new Redis()` throw, and at module scope that crashes route initialisation
+ * into an empty-body 500 before our try/catch can return JSON.
+ */
+function getRatelimiters(): Ratelimiters | null {
+  if (ratelimitersCache !== undefined) return ratelimitersCache;
+
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
+  if (!url || !token) {
+    ratelimitersCache = null;
+    return null;
+  }
 
-  const redis = new Redis({ url, token });
-  return {
-    guest: new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(50, "1 d"),
-      prefix: "rl:lookup:guest",
-    }),
-    user: new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(200, "1 d"),
-      prefix: "rl:lookup:user",
-    }),
-  };
+  try {
+    const redis = new Redis({ url, token });
+    ratelimitersCache = {
+      guest: new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(50, "1 d"),
+        prefix: "rl:lookup:guest",
+      }),
+      user: new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(200, "1 d"),
+        prefix: "rl:lookup:user",
+      }),
+    };
+  } catch (error) {
+    console.error(
+      `[lookup] rate limiter construction failed; continuing without rate limiting. ${formatErrorShape(describeError(error))}`
+    );
+    ratelimitersCache = null;
+  }
+  return ratelimitersCache;
 }
-
-const ratelimiters = getRatelimiters();
 
 type ResultRow = { word: string; similarity: number };
 
+type LimitOutcome = { allowed: true } | { allowed: false; message: string; guest: boolean };
+
+/**
+ * @upstash/redis talks REST over `fetch`, so stale credentials or a deleted
+ * database throw "fetch failed" here — long before we touch the model.
+ * Rate limiting must never take down search, so we fail open.
+ */
+async function checkRateLimit(
+  request: NextRequest,
+  userId: string | null
+): Promise<LimitOutcome> {
+  const ratelimiters = getRatelimiters();
+  if (!ratelimiters) return { allowed: true };
+
+  try {
+    if (userId) {
+      const result = await ratelimiters.user.limit(userId);
+      return result.success
+        ? { allowed: true }
+        : {
+            allowed: false,
+            guest: false,
+            message: "Daily limit of 200 lookups reached. Try again tomorrow.",
+          };
+    }
+
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "127.0.0.1";
+    const result = await ratelimiters.guest.limit(ip);
+    return result.success
+      ? { allowed: true }
+      : {
+          allowed: false,
+          guest: true,
+          message: "Daily limit of 50 free lookups reached. Sign in for 200 lookups/day.",
+        };
+  } catch (error) {
+    const shape = describeError(error);
+    console.error(
+      `[lookup] rate limit check failed — FAILING OPEN. ${formatErrorShape(shape)}`
+    );
+    return { allowed: true };
+  }
+}
+
+const SUBSYSTEM_MESSAGES: Record<Subsystem, string> = {
+  model:
+    "The embedding model could not be loaded. This is usually a temporary network problem reaching the model host — please try again in a moment.",
+  ratelimit: "The rate limiter is unavailable.",
+  database:
+    "The word database is unreachable. Please try again in a moment.",
+  unknown: "An unexpected error occurred.",
+};
+
 export async function POST(request: NextRequest) {
   try {
+    // auth() stays inside the try so a Clerk failure returns JSON, not an
+    // empty-body 500 that breaks the client's response.json().
     const { userId } = auth();
 
-    if (ratelimiters) {
-      if (userId) {
-        const result = await ratelimiters.user.limit(userId);
-        if (!result.success) {
-          return NextResponse.json(
-            { error: "Daily limit of 200 lookups reached. Try again tomorrow." },
-            { status: 429 }
-          );
-        }
-      } else {
-        const ip =
-          request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-          "127.0.0.1";
-        const result = await ratelimiters.guest.limit(ip);
-        if (!result.success) {
-          return NextResponse.json(
-            {
-              error:
-                "Daily limit of 50 free lookups reached. Sign in for 200 lookups/day.",
-              rateLimitExceeded: true,
-            },
-            { status: 429 }
-          );
-        }
-      }
+    const limit = await checkRateLimit(request, userId);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        limit.guest
+          ? { error: limit.message, rateLimitExceeded: true }
+          : { error: limit.message },
+        { status: 429 }
+      );
     }
 
     const body = await request.json();
@@ -79,27 +144,64 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Timed separately so a cold-start model download (seconds) is
+    // distinguishable from an instant failure in the logs.
+    const embedStartedAt = Date.now();
     const embedding = await embed(query);
+    console.log(`[lookup] embed ok ms=${Date.now() - embedStartedAt} dims=${embedding.length}`);
+
     const vectorLiteral = `[${embedding.join(",")}]`;
 
-    // SET LOCAL ivfflat.probes inside a transaction so it applies only to this query
-    const rows = await prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(`SET LOCAL ivfflat.probes = 10`);
-      return tx.$queryRawUnsafe<ResultRow[]>(
-        `SELECT word, 1 - (embedding <=> $1::vector) AS similarity
-         FROM "VocabEmbedding"
-         ORDER BY embedding <=> $1::vector
-         LIMIT $2`,
-        vectorLiteral,
-        k
-      );
-    });
+    const dbStartedAt = Date.now();
+    let rows: ResultRow[];
+    try {
+      // SET LOCAL ivfflat.probes inside a transaction so it applies only to this query
+      rows = await prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL ivfflat.probes = 10`);
+        return tx.$queryRawUnsafe<ResultRow[]>(
+          `SELECT word, 1 - (embedding <=> $1::vector) AS similarity
+           FROM "VocabEmbedding"
+           ORDER BY embedding <=> $1::vector
+           LIMIT $2`,
+          vectorLiteral,
+          k
+        );
+      });
+    } catch (error) {
+      throw new SubsystemError("database", `pgvector query failed: ${describeError(error).message}`, {
+        cause: error,
+      });
+    }
+    console.log(`[lookup] db ok ms=${Date.now() - dbStartedAt} rows=${rows.length}`);
 
     return NextResponse.json({ results: rows });
   } catch (error) {
-    console.error("Error in /api/lookup:", error);
+    const subsystem: Subsystem =
+      error instanceof SubsystemError ? error.subsystem : "unknown";
+    const shape = describeError(error);
+
+    console.error(`[lookup] FAILED subsystem=${subsystem} ${formatErrorShape(shape)}`);
+    if (shape.stack) console.error(`[lookup] stack: ${shape.stack}`);
+
+    // Name the subsystem and the network code so the client never again sees a
+    // bare "fetch failed". The hostname can identify a private Upstash
+    // database, so it is only echoed outside production (the full shape is
+    // always in the server logs regardless).
+    const detailParts = [
+      `${subsystem}: ${shape.message}`,
+      shape.code ? `code=${shape.code}` : undefined,
+      shape.hostname && process.env.NODE_ENV !== "production"
+        ? `host=${shape.hostname}`
+        : undefined,
+    ].filter(Boolean);
+
     return NextResponse.json(
-      { error: "An unexpected error occurred", detail: error instanceof Error ? error.message : String(error) },
+      {
+        error: SUBSYSTEM_MESSAGES[subsystem],
+        subsystem,
+        code: shape.code,
+        detail: detailParts.join(" "),
+      },
       { status: 500 }
     );
   }
