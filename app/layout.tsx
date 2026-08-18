@@ -7,8 +7,15 @@ import { LoadingProvider } from "@/context/LoadingContext";
 export const metadata: Metadata = {
   title: "Reverse Dictionary - Find Words from Descriptions",
   description:
-    "Describe a concept and discover the exact word you're looking for. Powered by Claude AI.",
-  keywords: ["reverse dictionary", "word finder", "vocabulary", "AI", "Claude"],
+    "Describe a concept and find the exact word. Semantic search over a 141,000-word vocabulary, powered by a fine-tuned sentence-embedding model.",
+  keywords: [
+    "reverse dictionary",
+    "word finder",
+    "vocabulary",
+    "semantic search",
+    "sentence embeddings",
+    "find the word",
+  ],
 };
 
 export default function RootLayout({
