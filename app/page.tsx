@@ -17,7 +17,7 @@ export default function Home() {
 
   // Below this cosine similarity the embedding result is considered uncertain
   // and we fall back to Claude. Tune after reviewing real query results.
-  const SIMILARITY_THRESHOLD = 0.2;
+  const SIMILARITY_THRESHOLD = 0;
 
   const handleSearch = async (description: string) => {
     startLoading();
