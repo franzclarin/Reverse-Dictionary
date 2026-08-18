@@ -34,6 +34,18 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 - **Do NOT switch to the HF serverless Inference API.** The free `hf-inference` provider returns `"Model not supported by provider hf-inference"` for this custom model regardless of metadata. A paid HF Inference Endpoint would work; the project deliberately uses free in-function embedding instead.
 - Original model artifacts: `reverse_dict_model.zip` (gitignored, repo root) contains the full sentence-transformers model incl. `model.safetensors`.
 
+## Word pages — no generative API
+
+`/word/[word]` is powered **entirely by the embedding model**; there is no Claude call anywhere in the flow.
+
+- An embedding model has no decoder, so it **cannot** produce a definition, etymology, pronunciation, or examples. Don't try to restore those from it.
+- `getRelatedWords()` (`lib/wordData.ts`) is the core of the page: nearest neighbours by cosine distance over `VocabEmbedding`. It reads the word's **stored** vector via a subquery, so it never loads ONNX — pure pgvector, fast.
+- `getWordData()` returns an existing `Word` row if present (words profiled before Claude was removed keep their definition — reading them is free), otherwise creates a **minimal row with empty text fields** so the word has a stable id for `SavedWord`. The page renders around whatever is empty.
+- **Gotcha:** those minimal rows are indistinguishable from a real profile by presence alone. If a generative source is ever added back, regenerate on `definition === ""`, not on row-absence, or every word visited during this era will stay blank forever.
+- Both `getWordData` and `getRelatedWords` are wrapped in React `cache()` so the page and `generateMetadata` share one query per request instead of duplicating it.
+- `app/word/[word]/error.tsx` is the boundary that keeps a server-side exception from surfacing as Next's bare "Application error … Digest: …".
+- **Known cosmetic issue:** with `dynamic = "force-dynamic"`, `notFound()` renders the correct 404 page but the HTTP status is already committed as 200. Pre-existing; matters only for SEO.
+
 ## Data model (`prisma/schema.prisma`)
 
 Models: `Word`, `SavedWord`, `User`, `Lookup`, `GameRound`, `VocabEmbedding`.

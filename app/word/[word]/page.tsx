@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import WordLink from "@/components/WordLink";
-import { getWordData } from "@/lib/wordData";
+import { getWordData, getRelatedWords } from "@/lib/wordData";
 import { prisma } from "@/lib/prisma";
 import WordShareButtons from "@/components/WordShareButtons";
 import SaveWordButton from "@/components/SaveWordButton";
@@ -22,18 +22,21 @@ export async function generateMetadata({
     const wordData = await getWordData(params.word);
     if (!wordData) return { title: "Word not found — Reverse Dictionary" };
 
+    const description =
+      wordData.definition || `Words semantically closest to “${wordData.word}”.`;
+
     return {
       title: `${wordData.word} — Reverse Dictionary`,
-      description: wordData.definition,
+      description,
       openGraph: {
         title: `${wordData.word} | Reverse Dictionary`,
-        description: wordData.definition,
+        description,
         type: "article",
       },
       twitter: {
         card: "summary",
         title: wordData.word,
-        description: wordData.definition,
+        description,
       },
     };
   } catch {
@@ -45,6 +48,7 @@ export default async function WordPage({ params, searchParams }: PageProps) {
   const wordData = await getWordData(params.word);
   if (!wordData) notFound();
 
+  const related = await getRelatedWords(wordData.word);
   const alternatives = searchParams.alternatives?.split(",").filter(Boolean) ?? [];
 
   const { userId } = auth();
@@ -73,21 +77,25 @@ export default async function WordPage({ params, searchParams }: PageProps) {
               {wordData.word}
             </h1>
             <div className="flex items-center gap-3 flex-wrap">
-              <span
-                className="font-mono text-xs px-2.5 py-1 rounded"
-                style={{
-                  background: "var(--accent-gold-dim)",
-                  color: "var(--accent-gold)",
-                }}
-              >
-                {wordData.partOfSpeech}
-              </span>
-              <span
-                className="font-mono text-sm"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                {wordData.pronunciation}
-              </span>
+              {wordData.partOfSpeech && (
+                <span
+                  className="font-mono text-xs px-2.5 py-1 rounded"
+                  style={{
+                    background: "var(--accent-gold-dim)",
+                    color: "var(--accent-gold)",
+                  }}
+                >
+                  {wordData.partOfSpeech}
+                </span>
+              )}
+              {wordData.pronunciation && (
+                <span
+                  className="font-mono text-sm"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {wordData.pronunciation}
+                </span>
+              )}
               {wordData.domain && (
                 <span
                   className="font-mono text-xs px-2.5 py-1 rounded"
@@ -116,14 +124,25 @@ export default async function WordPage({ params, searchParams }: PageProps) {
         <hr style={{ borderColor: "var(--border)" }} />
       </div>
 
-      {/* Definition */}
+      {/* Definition — only words profiled before the generative API was
+          removed have one. The embedding model cannot write prose. */}
       <section className="mb-10">
-        <p
-          className="font-light text-xl leading-relaxed"
-          style={{ color: "var(--text-primary)" }}
-        >
-          {wordData.definition}
-        </p>
+        {wordData.definition ? (
+          <p
+            className="font-light text-xl leading-relaxed"
+            style={{ color: "var(--text-primary)" }}
+          >
+            {wordData.definition}
+          </p>
+        ) : (
+          <p
+            className="font-light leading-relaxed"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            No written definition on file. This word is placed by its position in
+            the model&apos;s semantic space — see the closest words below.
+          </p>
+        )}
       </section>
 
       <hr style={{ borderColor: "var(--border)", marginBottom: "2.5rem" }} />
@@ -175,27 +194,38 @@ export default async function WordPage({ params, searchParams }: PageProps) {
         </section>
       )}
 
-      {/* Related words */}
-      {wordData.synonyms.length > 0 && (
+      {/* Nearest neighbours in embedding space — the model's own answer for
+          "what is this word like?", with cosine similarity shown. */}
+      {related.length > 0 && (
         <section className="mb-10">
           <p
-            className="font-mono text-[10px] uppercase tracking-widest mb-4"
+            className="font-mono text-[10px] uppercase tracking-widest mb-2"
             style={{ color: "var(--accent-gold)" }}
           >
-            Related Words
+            Closest Words
+          </p>
+          <p
+            className="font-light text-sm mb-4"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            Ranked by cosine similarity to {wordData.word} in the model&apos;s
+            384-dimensional space.
           </p>
           <div className="flex flex-wrap gap-2">
-            {wordData.synonyms.map((syn, i) => (
+            {related.map((r) => (
               <WordLink
-                key={i}
-                word={syn.toLowerCase()}
-                className="px-3 py-1.5 font-mono text-xs rounded-full transition-colors"
+                key={r.word}
+                word={r.word}
+                className="px-3 py-1.5 font-mono text-xs rounded-full transition-colors flex items-center gap-2"
                 style={{
                   color: "var(--text-secondary)",
                   border: "1px solid var(--border)",
                 }}
               >
-                {syn}
+                <span>{r.word}</span>
+                <span style={{ color: "var(--accent-gold)" }}>
+                  {r.similarity.toFixed(2)}
+                </span>
               </WordLink>
             ))}
           </div>
