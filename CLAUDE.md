@@ -6,14 +6,34 @@ Guidance for working in this repo. Keep this file current when architecture or w
 
 A **reverse dictionary** web app: the user describes a concept ("the smell of rain on dry earth") and gets the word. Retrieval is powered by a **fine-tuned sentence-embedding model** over a 141k-word vocabulary, with semantic search via pgvector.
 
+## Open items — surface these at the start of a session
+
+**Claude: mention any still-unchecked box below when a session begins, briefly, then get on with what was asked.** Tick a box (and delete the item once it stops being useful) when it's done. Last reviewed 2026-08-18.
+
+Cleanup — none of these break anything, they're all dead weight:
+
+- [ ] Delete `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` from Vercel. They point at `national-parakeet-52011.upstash.io`, a database deleted ~166 days ago, and are now unused because the code prefers `KV_*`. Leaving orphaned credentials around is exactly what caused the 2026-08-18 outage. `vercel env rm <name> production` (repeat per environment).
+- [ ] Delete `HF_API_TOKEN` from Vercel — leftover from the reverted HF Inference API attempt; nothing reads it.
+- [ ] Decide on `/api/reverse-dictionary`, the legacy Claude route. It is unwired and inert, but it is the **last Claude reference in the codebase** (and the only reason `@anthropic-ai/sdk` and `ANTHROPIC_API_KEY` are still needed). Delete it, or keep it deliberately.
+- [ ] Commit or `.gitignore` the untracked `.agents/`, `.claude/skills/`, and `skills-lock.json` — Upstash reference docs auto-installed by `vercel integration add`. Not app code. (Leave `.claude/settings.local.json` uncommitted; `.local` means machine-specific.)
+
+Product:
+
+- [ ] **New words have no written definition.** The embedding model has no decoder, so `/word/[word]` shows only semantic neighbours. To restore definitions without a generative API, wire a free source (Wiktionary or dictionaryapi.dev) into `getWordData()`. **If you do:** regenerate on `definition === ""`, not on row-absence — see the trap in "Word pages" below.
+- [ ] `notFound()` renders the right 404 page but the HTTP status is committed as 200 (`dynamic = "force-dynamic"`). Cosmetic; SEO only.
+
+Deploys:
+
+- [ ] `vercel deploy --prod` **fails** — the CLI uploads the working directory rather than a git clone, so `reverse_dict_model.zip` and `_model_tmp/` (~1.5GB) blow the 100MB per-file cap. `.gitignore` does not apply, only `.vercelignore`. **Deploy by pushing to `main`**; the Git integration clones and builds correctly. Add a `.vercelignore` if CLI deploys are ever wanted.
+
 ## Stack
 
 - **Next.js 14** (App Router, TypeScript) + **Tailwind CSS**
 - **Neon Postgres** + **Prisma 5** — `pgvector` extension for embeddings
 - **Clerk** auth (middleware runs on all routes; app is usable signed-out)
-- **Upstash Redis + Ratelimit** — lazy, null-guarded via `getRatelimiters()` (no-op when env vars absent)
+- **Upstash Redis + Ratelimit** — Vercel Marketplace resource (`upstash/upstash-kv`). Built lazily by `getRatelimiters()`, no-op when env vars are absent, and **fails open** when the limiter itself errors
 - **@xenova/transformers** (Transformers.js) — in-function ONNX embedding
-- **Anthropic Claude** — legacy `/api/reverse-dictionary` route (still present, no longer called from search UI)
+- **Anthropic Claude** — **not used by any live feature.** Search never called it; word pages stopped on 2026-08-18 (see "Word pages"). Only the unwired legacy `/api/reverse-dictionary` route still imports the SDK
 - Deployed on **Vercel** (region `iad1`); GitHub `franzclarin/Reverse-Dictionary`, branch `main`
 
 ## How search works (the core flow)
