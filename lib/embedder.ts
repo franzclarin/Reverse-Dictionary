@@ -1,6 +1,10 @@
 import { pipeline, env } from "@xenova/transformers";
 
 env.allowLocalModels = false;
+// On Vercel (and other serverless runtimes) the home dir is read-only;
+// /tmp is the only writable path. Point the HF cache there so warm
+// invocations reuse the downloaded model instead of re-fetching 90 MB.
+env.cacheDir = "/tmp/transformers_cache";
 
 // Store the loading promise on globalThis so dev hot-reloads don't re-download
 const g = globalThis as typeof globalThis & {

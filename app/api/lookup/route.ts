@@ -6,6 +6,7 @@ import { embed } from "@/lib/embedder";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
+export const maxDuration = 60; // model cold-start needs up to ~20s; default 10s is too short
 
 function getRatelimiters() {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -32,36 +33,36 @@ const ratelimiters = getRatelimiters();
 type ResultRow = { word: string; similarity: number };
 
 export async function POST(request: NextRequest) {
-  const { userId } = auth();
+  try {
+    const { userId } = auth();
 
-  if (ratelimiters) {
-    if (userId) {
-      const result = await ratelimiters.user.limit(userId);
-      if (!result.success) {
-        return NextResponse.json(
-          { error: "Daily limit of 200 lookups reached. Try again tomorrow." },
-          { status: 429 }
-        );
-      }
-    } else {
-      const ip =
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-        "127.0.0.1";
-      const result = await ratelimiters.guest.limit(ip);
-      if (!result.success) {
-        return NextResponse.json(
-          {
-            error:
-              "Daily limit of 50 free lookups reached. Sign in for 200 lookups/day.",
-            rateLimitExceeded: true,
-          },
-          { status: 429 }
-        );
+    if (ratelimiters) {
+      if (userId) {
+        const result = await ratelimiters.user.limit(userId);
+        if (!result.success) {
+          return NextResponse.json(
+            { error: "Daily limit of 200 lookups reached. Try again tomorrow." },
+            { status: 429 }
+          );
+        }
+      } else {
+        const ip =
+          request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+          "127.0.0.1";
+        const result = await ratelimiters.guest.limit(ip);
+        if (!result.success) {
+          return NextResponse.json(
+            {
+              error:
+                "Daily limit of 50 free lookups reached. Sign in for 200 lookups/day.",
+              rateLimitExceeded: true,
+            },
+            { status: 429 }
+          );
+        }
       }
     }
-  }
 
-  try {
     const body = await request.json();
     const { query, k = 10 } = body as { query: string; k?: number };
 
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Error in /api/lookup:", error);
     return NextResponse.json(
-      { error: "An unexpected error occurred" },
+      { error: "An unexpected error occurred", detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
