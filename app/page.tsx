@@ -15,52 +15,18 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
 
-  // Below this cosine similarity the embedding result is considered uncertain
-  // and we fall back to Claude. Tune after reviewing real query results.
-  const SIMILARITY_THRESHOLD = 0;
-
   const handleSearch = async (description: string) => {
     startLoading();
     setError(null);
     let navigated = false;
 
     try {
-      // Step 1: try the fast embedding-based lookup.
-      // Isolated try/catch so any failure (timeout, empty body, JSON error)
-      // falls through silently to the Claude fallback below.
-      try {
-        const embRes = await fetch("/api/lookup", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: description, k: 5 }),
-        });
-
-        if (embRes.ok) {
-          const embData = await embRes.json();
-          const top = embData.results?.[0] as
-            | { word: string; similarity: number }
-            | undefined;
-
-          if (top && top.similarity >= SIMILARITY_THRESHOLD) {
-            const alts: string[] = (embData.results as { word: string }[])
-              .slice(1, 3)
-              .map((r) => r.word);
-            const query =
-              alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
-            router.push(`/word/${encodeURIComponent(top.word)}${query}`);
-            navigated = true;
-            return;
-          }
-        }
-      } catch {
-        // embedding path failed — fall through to Claude
-      }
-
-      // Step 2: fall back to Claude when embedding confidence is low
-      const response = await fetch("/api/reverse-dictionary", {
+      // Embedding-based lookup via the fine-tuned model. The Claude fallback
+      // is disabled — errors are surfaced directly instead of being swallowed.
+      const response = await fetch("/api/lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description }),
+        body: JSON.stringify({ query: description, k: 5 }),
       });
 
       // Parse body safely — an empty body (e.g. a gateway 401/502) must not
@@ -85,14 +51,13 @@ export default function Home() {
         return;
       }
 
-      if (data.rateLimit) setRateLimit(data.rateLimit as typeof rateLimit);
+      const results = (data.results as { word: string; similarity: number }[]) ?? [];
+      const top = results[0];
+      if (!top) throw new Error("No results found");
 
-      const topWord = data.word as string;
-      if (!topWord) throw new Error("No results found");
-
-      const alts: string[] = ((data.alternatives as string[] | undefined) ?? []).slice(0, 2);
+      const alts: string[] = results.slice(1, 3).map((r) => r.word);
       const query = alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
-      router.push(`/word/${encodeURIComponent(topWord)}${query}`);
+      router.push(`/word/${encodeURIComponent(top.word)}${query}`);
       navigated = true;
     } catch (err) {
       setError(
