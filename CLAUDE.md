@@ -6,25 +6,15 @@ Guidance for working in this repo. Keep this file current when architecture or w
 
 A **reverse dictionary** web app: the user describes a concept ("the smell of rain on dry earth") and gets the word. Retrieval is powered by a **fine-tuned sentence-embedding model** over a 141k-word vocabulary, with semantic search via pgvector.
 
-## Open items — surface these at the start of a session
+## Open items
 
-**Claude: mention any still-unchecked box below when a session begins, briefly, then get on with what was asked.** Tick a box (and delete the item once it stops being useful) when it's done. Last reviewed 2026-08-18.
+**Claude: at the start of a session, briefly note any unchecked box, then get on with the task.** When one is done, **delete the line** rather than ticking it — this file loads into context every session, so a stale list costs tokens and eventually misleads. Each item carries a recommended default so it doesn't get re-litigated. Last reviewed 2026-08-18.
 
-Cleanup — none of these break anything, they're all dead weight:
-
-- [ ] Delete `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` from Vercel. They point at `national-parakeet-52011.upstash.io`, a database deleted ~166 days ago, and are now unused because the code prefers `KV_*`. Leaving orphaned credentials around is exactly what caused the 2026-08-18 outage. `vercel env rm <name> production` (repeat per environment).
-- [ ] Delete `HF_API_TOKEN` from Vercel — leftover from the reverted HF Inference API attempt; nothing reads it.
-- [ ] Decide on `/api/reverse-dictionary`, the legacy Claude route. It is unwired and inert, but it is the **last Claude reference in the codebase** (and the only reason `@anthropic-ai/sdk` and `ANTHROPIC_API_KEY` are still needed). Delete it, or keep it deliberately.
-- [ ] Commit or `.gitignore` the untracked `.agents/`, `.claude/skills/`, and `skills-lock.json` — Upstash reference docs auto-installed by `vercel integration add`. Not app code. (Leave `.claude/settings.local.json` uncommitted; `.local` means machine-specific.)
-
-Product:
-
-- [ ] **New words have no written definition.** The embedding model has no decoder, so `/word/[word]` shows only semantic neighbours. To restore definitions without a generative API, wire a free source (Wiktionary or dictionaryapi.dev) into `getWordData()`. **If you do:** regenerate on `definition === ""`, not on row-absence — see the trap in "Word pages" below.
-- [ ] `notFound()` renders the right 404 page but the HTTP status is committed as 200 (`dynamic = "force-dynamic"`). Cosmetic; SEO only.
-
-Deploys:
-
-- [ ] `vercel deploy --prod` **fails** — the CLI uploads the working directory rather than a git clone, so `reverse_dict_model.zip` and `_model_tmp/` (~1.5GB) blow the 100MB per-file cap. `.gitignore` does not apply, only `.vercelignore`. **Deploy by pushing to `main`**; the Git integration clones and builds correctly. Add a `.vercelignore` if CLI deploys are ever wanted.
+- [ ] Delete `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` from Vercel, every environment (`vercel env rm <name> <env>`) — orphaned credentials for a database deleted ~166 days ago, unused since the code moved to `KV_*`. **Recommended: do it.** Exactly this kind of orphan caused the 2026-08-18 outage.
+- [ ] Delete `HF_API_TOKEN` from Vercel — nothing reads it. **Recommended: do it.**
+- [ ] Resolve `/api/reverse-dictionary`, the last Claude reference and the only reason `@anthropic-ai/sdk` and `ANTHROPIC_API_KEY` are still needed. **Recommended: delete the route and drop the dependency** — it is unwired and inert.
+- [ ] Commit or `.gitignore` the untracked `.agents/`, `.claude/skills/`, `skills-lock.json` (Upstash docs auto-installed by `vercel integration add`). **Recommended: gitignore** — regenerable tooling docs, not app code. Leave `.claude/settings.local.json` uncommitted either way; `.local` means machine-specific.
+- [ ] Restore written definitions for new words, if wanted — wire a free source (Wiktionary, dictionaryapi.dev) into `getWordData()`. Mind the `definition === ""` trap under "Word pages". **No recommendation; this is a product call.**
 
 ## Stack
 
@@ -109,6 +99,7 @@ npx tsc --noEmit       # type-check (run before committing)
 ## Repo hygiene
 
 - Platform: Windows / PowerShell. `_model_tmp/` and `reverse_dict_model.zip` are gitignored (large model/seed artifacts).
+- **Deploy by pushing to `main`** — the Git integration clones the repo, so `.gitignore` applies and the build is correct. `vercel deploy --prod` **fails**: the CLI uploads the working directory instead, sweeping in `reverse_dict_model.zip` and `_model_tmp/` (~1.5GB) and blowing the 100MB per-file cap. `.gitignore` does not apply to CLI deploys — only `.vercelignore` does, and there isn't one.
 - The repo lives under OneDrive. Its placeholder files make Next's startup cleanup of `.next` fail with `EINVAL: readlink …`, and `next dev` then **exits 0 without serving**. If dev dies instantly, `rm -rf .next` and restart.
 - ESLint config is `.eslintrc.json` (`next/core-web-vitals`). Without it `npm run lint` drops into an interactive setup wizard and hangs non-interactive shells.
 - Other docs: `ARCHITECTURE.md`, `DEPLOYMENT.md`, `GETTING_STARTED.md`, `SETUP.md`, `README.md`.
