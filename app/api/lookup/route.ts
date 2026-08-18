@@ -26,8 +26,12 @@ let ratelimitersCache: Ratelimiters | null | undefined;
 function getRatelimiters(): Ratelimiters | null {
   if (ratelimitersCache !== undefined) return ratelimitersCache;
 
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  // Prefer KV_* — those are written and rotated by the Vercel/Upstash
+  // Marketplace integration, so they can't go stale the way a hand-copied
+  // UPSTASH_REDIS_REST_URL did (it outlived its database by 166 days and
+  // took down search). UPSTASH_* stays as a fallback for local/self-managed.
+  const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) {
     ratelimitersCache = null;
     return null;

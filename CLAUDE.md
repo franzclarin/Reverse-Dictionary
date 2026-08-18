@@ -63,6 +63,7 @@ Models: `Word`, `SavedWord`, `User`, `Lookup`, `GameRound`, `VocabEmbedding`.
 - The error `detail` returned to the client includes `subsystem` + `code`, but **`hostname` only outside production** (an Upstash REST host identifies a private DB). The full shape is always in the server logs.
 - Migrations: Neon pooled connections break `prisma migrate deploy`'s advisory lock — apply SQL via `prisma db execute --file` instead.
 - Env: local `.env.local` needs `DATABASE_URL` (Neon owner role), Clerk keys, and optionally Upstash + `ANTHROPIC_API_KEY`. Vercel needs the same for the deployed app.
+- **Redis creds come from `KV_*`, not `UPSTASH_*`.** The Upstash Redis DB is a Vercel Marketplace resource (`upstash/upstash-kv`), which writes `KV_REST_API_URL` / `KV_REST_API_TOKEN` and keeps them in sync with the resource. `getRatelimiters()` reads those first and only falls back to `UPSTASH_REDIS_REST_URL` / `_TOKEN`. Don't hand-copy credentials into the `UPSTASH_*` pair — a hand-set pair outlived its deleted database by 166 days and caused the outage above. Re-provision with `vercel integration add upstash/upstash-kv`; `vercel integration list` shows whether a resource actually exists (env vars alone prove nothing).
 
 ## Commands
 
