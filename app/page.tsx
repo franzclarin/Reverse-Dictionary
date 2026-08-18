@@ -77,8 +77,9 @@ export default function Home() {
           setError((data.error as string) || "Rate limit exceeded");
           if (data.rateLimit) setRateLimit(data.rateLimit as typeof rateLimit);
         } else {
+          const detail = data.detail ? ` — ${data.detail as string}` : "";
           throw new Error(
-            `${(data.error as string) || "Failed to fetch word"} (HTTP ${response.status})`
+            `${(data.error as string) || "Failed to fetch word"} (HTTP ${response.status})${detail}`
           );
         }
         return;

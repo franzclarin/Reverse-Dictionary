@@ -204,7 +204,10 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: "An unexpected error occurred" },
+      {
+        error: "An unexpected error occurred",
+        detail: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }
