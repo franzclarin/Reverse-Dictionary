@@ -62,37 +62,37 @@ Rules:
 - Ensure the JSON is valid and properly formatted`;
 
 export async function POST(request: NextRequest) {
-  const { userId } = auth();
+  try {
+    const { userId } = auth();
 
-  // Rate limiting
-  if (ratelimiters) {
-    if (userId) {
-      const result = await ratelimiters.user.limit(userId);
-      if (!result.success) {
-        return NextResponse.json(
-          { error: "Daily limit of 200 lookups reached. Try again tomorrow." },
-          { status: 429 }
-        );
-      }
-    } else {
-      const ip =
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-        "127.0.0.1";
-      const result = await ratelimiters.guest.limit(ip);
-      if (!result.success) {
-        return NextResponse.json(
-          {
-            error:
-              "Daily limit of 50 free lookups reached. Sign in for 200 lookups/day.",
-            rateLimitExceeded: true,
-          },
-          { status: 429 }
-        );
+    // Rate limiting
+    if (ratelimiters) {
+      if (userId) {
+        const result = await ratelimiters.user.limit(userId);
+        if (!result.success) {
+          return NextResponse.json(
+            { error: "Daily limit of 200 lookups reached. Try again tomorrow." },
+            { status: 429 }
+          );
+        }
+      } else {
+        const ip =
+          request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+          "127.0.0.1";
+        const result = await ratelimiters.guest.limit(ip);
+        if (!result.success) {
+          return NextResponse.json(
+            {
+              error:
+                "Daily limit of 50 free lookups reached. Sign in for 200 lookups/day.",
+              rateLimitExceeded: true,
+            },
+            { status: 429 }
+          );
+        }
       }
     }
-  }
 
-  try {
     const body: ReverseDictionaryRequest = await request.json();
     const { description } = body;
 

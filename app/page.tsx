@@ -63,24 +63,33 @@ export default function Home() {
         body: JSON.stringify({ description }),
       });
 
-      const data = await response.json();
+      // Parse body safely — an empty body (e.g. a gateway 401/502) must not
+      // throw "Unexpected end of JSON input" before we can check the status.
+      let data: Record<string, unknown> = {};
+      try {
+        data = await response.json();
+      } catch {
+        /* empty or non-JSON body */
+      }
 
       if (!response.ok) {
         if (response.status === 429) {
-          setError(data.error);
-          if (data.rateLimit) setRateLimit(data.rateLimit);
+          setError((data.error as string) || "Rate limit exceeded");
+          if (data.rateLimit) setRateLimit(data.rateLimit as typeof rateLimit);
         } else {
-          throw new Error(data.error || "Failed to fetch word");
+          throw new Error(
+            `${(data.error as string) || "Failed to fetch word"} (HTTP ${response.status})`
+          );
         }
         return;
       }
 
-      if (data.rateLimit) setRateLimit(data.rateLimit);
+      if (data.rateLimit) setRateLimit(data.rateLimit as typeof rateLimit);
 
-      const topWord = data.word;
+      const topWord = data.word as string;
       if (!topWord) throw new Error("No results found");
 
-      const alts: string[] = (data.alternatives ?? []).slice(0, 2);
+      const alts: string[] = ((data.alternatives as string[] | undefined) ?? []).slice(0, 2);
       const query = alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
       router.push(`/word/${encodeURIComponent(topWord)}${query}`);
       navigated = true;
