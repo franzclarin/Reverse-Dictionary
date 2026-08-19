@@ -6,12 +6,6 @@ Guidance for working in this repo. Keep this file current when architecture or w
 
 A **reverse dictionary** web app: the user describes a concept ("the smell of rain on dry earth") and gets the word. Retrieval is powered by a **fine-tuned sentence-embedding model** over a 141k-word vocabulary, with semantic search via pgvector.
 
-## Open items
-
-**Claude: at the start of a session, briefly note any unchecked box, then get on with the task.** When one is done, **delete the line** rather than ticking it — this file loads into context every session, so a stale list costs tokens and eventually misleads. Each item carries a recommended default so it doesn't get re-litigated. Last reviewed 2026-08-18.
-
-- [ ] Restore written definitions for new words, if wanted — wire a free source (Wiktionary, dictionaryapi.dev) into `getWordData()`. Mind the `definition === ""` trap under "Word pages". **No recommendation; this is a product call.**
-
 ## Stack
 
 - **Next.js 14** (App Router, TypeScript) + **Tailwind CSS**
