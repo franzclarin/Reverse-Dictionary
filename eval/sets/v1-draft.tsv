@@ -1,0 +1,338 @@
+"# Reverse-dictionary evaluation set v1 — DRAFT, authored slice."									
+#									
+# PROVENANCE. Every query was written blind: from the target word and a									
+"# one-word sense hint only. No WordNet gloss, no Word.definition row and no"									
+# dictionary of any kind was consulted while writing. This is what keeps the									
+# set usable against a model that was fine-tuned on WordNet glosses.									
+#									
+# LIMITATION — state this wherever the set is cited. Every query was authored									
+# by a single writer in a single session. The set is therefore single-register									
+"# even though it is blind, and it is NOT a sample of real user queries. No"									
+"# query text has ever been logged by this product (see the Lookup table), so"									
+# no such sample exists to draw from.									
+#									
+# zipf is the stored truth; freq_band is a derived convenience and its									
+"# boundaries may be redrawn at analysis time. Source: OpenSubtitles 2018,"									
+# which under-weights literary and technical vocabulary — 'rare' by this									
+# measure is not necessarily rare in writing.									
+#									
+# lexical_overlap: none | stem_shared | head_noun. Overlap rows are kept on									
+# purpose; the harness reports recall both including and excluding them.									
+#									
+# reachable=false rows measure vocabulary coverage and are excluded from									
+# headline recall.									
+#									
+# acceptable: comma-separated alternate answers that should also count.									
+target	query	sense_hint	zipf	freq_band	token_count	style	lexical_overlap	reachable	acceptable
+mistake	something you did wrong without ever meaning to do it	error	5.009	very_common	single	abstract	none	TRUE	error
+promise	when you tell somebody that you will definitely do a thing later	vow	5.198	very_common	single	abstract	none	TRUE	
+truth	the way things actually are rather than what somebody made up	fact	5.305	very_common	single	abstract	none	TRUE	
+world war	a conflict so large that most of the countries on earth get dragged into it	conflict	5.289	very_common	multi	abstract	none	TRUE	
+coffee	the hot dark bitter drink that people need first thing in the morning	beverage	5.086	very_common	single	concrete	none	TRUE	java
+dinner	the main meal that people sit down to in the evening	meal	5.206	very_common	single	concrete	none	TRUE	
+head of hair	the whole mass of what grows on somebody's scalp taken together	hair	5.142	very_common	multi	concrete	none	TRUE	
+honey	the sweet sticky gold stuff that bees make and you spread on toast	food	5.266	very_common	single	concrete	none	TRUE	
+best man	the friend who stands beside the groom and keeps hold of the rings	wedding	5.621	very_common	multi	functional	none	TRUE	
+fall guy	the person who gets blamed for something that other people actually did	scapegoat	5.077	very_common	multi	functional	none	TRUE	
+sell-by date	the stamp on food telling the shop when it should be off the shelf	label	5.002	very_common	multi	functional	none	TRUE	
+mind game	when someone messes with your head deliberately to get an advantage	manipulation	5.331	very_common	multi	narrative	none	TRUE	
+waiting game	when you deliberately do nothing because whoever moves first will lose	tactic	5.331	very_common	multi	narrative	none	TRUE	
+appearance	the way that something looks to other people from the outside	look	4.104	common	single	abstract	none	TRUE	visual aspect
+coincidence	when two completely unconnected things happen at the same moment by chance	chance	4.319	common	single	abstract	none	TRUE	happenstance
+engagement	the period after a couple agree to marry and before the wedding happens	betrothal	4.156	common	single	abstract	none	TRUE	betrothal
+judgment	the decision that a court hands down at the end of a case	verdict	4.193	common	single	abstract	none	TRUE	judgement, judicial decision
+basket	the woven container with a handle that you carry things around in	container	4.031	common	single	concrete	none	TRUE	handbasket
+beard	the hair that grows on a man's chin and cheeks	facial	4.121	common	single	concrete	none	TRUE	whiskers
+blanket	the thick cloth you pull over yourself to stay warm in bed	bedding	4.067	common	single	concrete	none	TRUE	
+bucket	the round container with a handle that you carry water in	pail	4.095	common	single	concrete	none	TRUE	pail
+cemetery	a place where dead people are buried under headstones	graveyard	4.008	common	single	concrete	none	TRUE	burial ground, burial site, burying ground, graveyard, memorial park, necropolis
+couch	the long soft padded seat in a living room that two or three people share	furniture	4.296	common	single	concrete	none	TRUE	sofa
+hut	a small crude building with one room and not much in the way of comfort	shelter	4.025	common	single	concrete	none	TRUE	hovel, shack, shanty
+mirror	the glass on the wall that shows you your own reflection	glass	4.442	common	single	concrete	none	TRUE	
+pillow	the soft thing you rest your head on in bed	bedding	4.036	common	single	concrete	none	TRUE	
+shadow	the dark shape you cast on the ground when the sun is behind you	shade	4.37	common	single	concrete	none	TRUE	
+soda	the sweet fizzy drink that comes in a can and bubbles when you open it	drink	4.11	common	single	concrete	none	TRUE	pop, soda pop
+thunder	the deep rumbling noise that follows a flash in a storm	storm	4.356	common	single	concrete	none	TRUE	
+toilet	the porcelain bowl in the bathroom that you sit on and then flush	lavatory	4.504	common	single	concrete	none	TRUE	commode, crapper
+tunnel	the passage dug straight through a hill or under a river	passage	4.267	common	single	concrete	none	TRUE	
+wallet	the small folding thing you keep your cards and money in	billfold	4.276	common	single	concrete	none	TRUE	billfold
+frame	the thing that holds the lenses in a pair of glasses	eyeglasses	4.197	common	single	functional	none	TRUE	
+hammer	the tool with a heavy head for driving nails into wood	tool	4.176	common	single	functional	none	TRUE	
+whistle	the small thing you blow into to make a loud shrill sound and stop the game	signal	4.311	common	single	functional	none	TRUE	
+amnesty	when a government officially forgives a whole group of offenders at once	pardon	3.271	mid	single	abstract	none	TRUE	
+battered	damaged all over from being knocked about again and again	worn	3.283	mid	single	abstract	none	TRUE	beat-up, beaten-up
+bloodline	the line of ancestors that somebody is descended from	lineage	3.084	mid	single	abstract	none	TRUE	ancestry, blood line, descent, line of descent, lineage
+brittle	so hard and dry that it snaps instead of bending	material	3.062	mid	single	abstract	none	TRUE	
+consent	agreeing to let something be done to you	permission	3.948	mid	single	abstract	none	TRUE	
+esteem	the good opinion that other people hold of you	regard	3.222	mid	single	abstract	none	TRUE	regard, respect
+expectation	what you believe is going to happen before it actually does	anticipation	3.285	mid	single	abstract	none	TRUE	anticipation
+ghastly	so horrifying that you can hardly bear to look at it	horrible	3.351	mid	single	abstract	none	TRUE	grisly, gruesome
+glum	quietly miserable and low without making a fuss about it	gloomy	3	mid	single	abstract	none	TRUE	morose
+hasty	done far too fast and without enough thought going into it	rushed	3.501	mid	single	abstract	none	TRUE	overhasty
+humid	hot with so much moisture in the air that everything feels sticky	weather	3.001	mid	single	abstract	none	TRUE	
+indispensable	so necessary that there is no managing without it at all	essential	3.118	mid	single	abstract	none	TRUE	essential
+lifelong	lasting for the whole of somebody's life from start to finish	lasting	3.349	mid	single	abstract	stem_shared	TRUE	
+limitless	having no boundary or end that anybody could ever reach	infinite	3.091	mid	single	abstract	none	TRUE	boundless, unbounded, unlimited
+malpractice	when a doctor or a lawyer does their job so badly that it harms you	negligence	3.071	mid	single	abstract	none	TRUE	
+monopoly	when one company controls the whole market and nobody can compete	economics	3.354	mid	single	abstract	none	TRUE	
+nirvana	the state of perfect peace where every desire has finally stopped	buddhism	3.103	mid	single	abstract	none	TRUE	enlightenment
+nocturnal	sleeping through the day and only coming out after dark	animal	3.029	mid	single	abstract	none	TRUE	
+nostalgia	the feeling of missing a place you have never actually been to	longing	3.193	mid	single	abstract	none	TRUE	
+oblivion	the fear of being completely forgotten after you die	obscurity	3.271	mid	single	abstract	none	TRUE	
+positive feedback	when the result of a process makes even more of that same process happen	systems	3.618	mid	multi	abstract	none	TRUE	
+rainy day	the future time of trouble that you are supposed to be saving money for	hardship	3.563	mid	multi	abstract	none	TRUE	
+sinister	giving off the feeling that something bad is about to happen	ominous	3.554	mid	single	abstract	none	TRUE	menacing, ominous, threatening
+sleazy	cheap and morally grubby in a way that makes you want a shower	sordid	3.216	mid	single	abstract	none	TRUE	seamy, seedy, sordid
+sorcery	the use of magical power to make things happen in the world	magic	3.025	mid	single	abstract	none	TRUE	
+stage fright	the anxious feeling you get before speaking in front of a crowd	nerves	3.585	mid	multi	abstract	none	TRUE	
+summit	a meeting held between the leaders of different countries	conference	3.69	mid	single	abstract	none	TRUE	summit meeting
+turnout	how many people actually bothered to show up and vote	attendance	3.187	mid	single	abstract	none	TRUE	
+vague	not stated clearly enough for anybody to be sure what was meant	unclear	3.622	mid	single	abstract	none	TRUE	
+vertigo	the spinning sensation you get when you look down from somewhere high	dizziness	3.101	mid	single	abstract	none	TRUE	dizziness
+aurora	the coloured curtains of light that ripple across the sky near the poles	sky	3.424	mid	single	concrete	none	TRUE	
+bamboo	the fast growing hollow woody grass that pandas eat and people build with	plant	3.543	mid	single	concrete	none	TRUE	
+bowler hat	the round hard black hat with a curled brim that english bankers used to wear	headwear	3.109	mid	multi	concrete	head_noun	TRUE	bowler, derby, derby hat
+candle	the stick of wax with a wick that you light for a soft glow	light	3.959	mid	single	concrete	none	TRUE	taper
+condor	an enormous vulture from south america with a wingspan wider than a person is tall	bird	3.015	mid	single	concrete	none	TRUE	
+creak	the sound a door makes when the hinges need oil	noise	3.104	mid	single	concrete	none	TRUE	creaking
+eyeball	the round white sphere that sits in your eye socket and lets you see	eye	3.292	mid	single	concrete	none	TRUE	
+gallery	a long room or building where paintings hang for people to come and look at	art	3.987	mid	single	concrete	none	TRUE	art gallery, picture gallery
+jade	the hard green stone that gets carved into ornaments in china	stone	3.835	mid	single	concrete	none	TRUE	jadestone
+kidney bean	the dark red curved bean that goes into chilli	legume	3.884	mid	multi	concrete	head_noun	TRUE	
+kidney stone	the hard little lump that forms inside you and is agony to pass	medical	3.95	mid	multi	concrete	none	TRUE	nephrolith, renal calculus
+layer cake	a cake made of several flat rounds stacked up with filling in between	dessert	3.787	mid	multi	concrete	head_noun	TRUE	
+leprechaun	the little bearded man in green from irish folklore who guards a pot of gold	folklore	3.15	mid	single	concrete	none	TRUE	
+lotus	the flower that floats on a pad in still water and is sacred in asia	flower	3.574	mid	single	concrete	none	TRUE	Indian lotus, sacred lotus
+mannequin	the plastic human figure standing in a shop window wearing clothes	dummy	3.122	mid	single	concrete	none	TRUE	manakin, manikin, mannikin
+marrow	the soft fatty substance inside a bone that makes blood cells	bone	3.437	mid	single	concrete	none	TRUE	bone marrow
+meatloaf	a brick of seasoned ground beef baked in the oven and cut into slices	dish	3.145	mid	single	concrete	none	TRUE	meat loaf
+melon	a big round sweet fruit with a thick rind and seeds in the middle	fruit	3.45	mid	single	concrete	none	TRUE	
+mountain gorilla	the big endangered ape living in the cloud forests of central africa	primate	3.677	mid	multi	concrete	none	TRUE	
+mutton	the meat you get from a fully grown sheep rather than a young one	meat	3.243	mid	single	concrete	none	TRUE	
+place mat	the flat piece of cloth or plastic that goes under a plate at the table	tableware	3.64	mid	multi	concrete	none	TRUE	
+rainbow	the arc of colours that appears in the sky after it rains	sky	3.936	mid	single	concrete	stem_shared	TRUE	
+red dwarf star	"a small cool dim sun, the most common kind there is in the galaxy"	astronomy	3.675	mid	multi	concrete	none	TRUE	red dwarf
+shipyard	the place down by the water where they build and repair large vessels	dockyard	3.122	mid	single	concrete	none	TRUE	
+slippery elm	the tree whose inner bark goes slimy and is used to soothe a sore throat	tree	3.124	mid	multi	concrete	none	TRUE	red elm
+staircase	the set of steps that takes you from one floor of a house up to the next	stairs	3.473	mid	single	concrete	none	TRUE	stairway
+summer squash	the soft skinned green vegetable you pick young and cook without peeling	vegetable	3.536	mid	multi	concrete	none	TRUE	
+sunflower oil	the pale cooking oil pressed out of the seeds of a tall yellow flower	cooking	3.048	mid	multi	concrete	head_noun	TRUE	sunflower-seed oil
+tin	the soft silvery metal used to coat steel so cans do not rust	metal	3.997	mid	single	concrete	none	TRUE	
+whipping cream	the thick dairy liquid you beat with a whisk until it goes stiff and fluffy	dairy	3.339	mid	multi	concrete	none	TRUE	light whipping cream
+ball bearing	the little steel spheres that sit in a ring and let a wheel spin smoothly	mechanical	3.878	mid	multi	functional	none	TRUE	
+bellows	the squeezable bag you pump to blow air onto a fire and make it flare	fire	3.247	mid	single	functional	none	TRUE	
+brake pad	the part in a car that squeezes against the disc to slow the wheel down	automotive	3.832	mid	multi	functional	none	TRUE	
+cameraman	the person on a film crew who actually operates the camera	crew	3.531	mid	single	functional	stem_shared	TRUE	camera operator
+can opener	a tool you use in the kitchen to open metal cans	utensil	3.354	mid	multi	functional	stem_shared	TRUE	tin opener
+compass	the little instrument with a needle that always points north	navigation	3.652	mid	single	functional	none	TRUE	
+decoy	a fake thing you put out deliberately to lure something into a trap	lure	3.419	mid	single	functional	none	TRUE	lure
+detector	the device that senses when something is there and warns you about it	sensor	3.576	mid	single	functional	none	TRUE	sensor
+envelope	the paper sleeve you seal a letter inside before posting it	stationery	3.999	mid	single	functional	none	TRUE	
+funnel	the cone with a spout for pouring liquid into a narrow opening without spilling	pouring	3.152	mid	single	functional	none	TRUE	
+greenhouse gas	the sort of gas in the atmosphere that traps heat and warms the planet up	climate	3.362	mid	multi	functional	head_noun	TRUE	greenhouse emission
+hostess	the woman who greets you at a restaurant and shows you to your table	restaurant	3.573	mid	single	functional	none	TRUE	
+hypocrite	someone who pretends to hold beliefs they do not actually have	pretender	3.548	mid	single	functional	none	TRUE	dissembler, dissimulator, phoney, phony, pretender
+juror	one of the ordinary members of the public who sit and decide a court case	court	3.271	mid	single	functional	none	TRUE	
+navigator	the person on a ship or a plane whose job is working out which way to go	crew	3.222	mid	single	functional	none	TRUE	
+politician	somebody whose whole job is getting elected and then running things	government	3.776	mid	single	functional	none	TRUE	political leader
+prototype	the first working version of a thing built just to test whether it works	model	3.525	mid	single	functional	none	TRUE	
+quarantine	keeping somebody apart from everyone else in case they are carrying disease	isolation	3.537	mid	single	functional	none	TRUE	
+shovel	a tool with a long handle and a flat blade for digging earth	digging	3.74	mid	single	functional	none	TRUE	
+straw poll	an informal unofficial vote taken just to see which way people are leaning	survey	3.352	mid	multi	functional	none	TRUE	straw vote
+umbrella	the thing you open above your head to keep the rain off	rain	3.88	mid	single	functional	none	TRUE	
+brag	when somebody keeps telling everybody how good they are at things	boast	3.546	mid	single	narrative	none	TRUE	boast, bragging
+defect	when somebody abandons their own country and goes over to the other side	treason	3.413	mid	single	narrative	none	TRUE	desert
+distress call	the radio message a ship sends out when it is sinking and needs help	signal	3.856	mid	multi	narrative	none	TRUE	distress signal
+exhale	when you push the air back out of your lungs again	breathing	3.306	mid	single	narrative	none	TRUE	
+forge	when somebody copies a signature or a document to pass it off as genuine	counterfeit	3.605	mid	single	narrative	none	TRUE	counterfeit, fake
+improvise	when you make something up on the spot because nothing was prepared	spontaneity	3.359	mid	single	narrative	none	TRUE	ad-lib, extemporise, extemporize, improvize
+inflation	when money slowly buys less than it used to year after year	economics	3.28	mid	single	narrative	none	TRUE	rising prices
+insomnia	when you lie awake all night and simply cannot get to sleep	sleeplessness	3.229	mid	single	narrative	none	TRUE	
+invade	when an army crosses into another country by force and takes it	military	3.555	mid	single	narrative	none	TRUE	
+mutiny	when the crew turn on the captain and take over the ship themselves	rebellion	3.404	mid	single	narrative	none	TRUE	
+reunion	when people who have not seen each other for years all gather again	gathering	3.872	mid	single	narrative	none	TRUE	
+sabotage	deliberately damaging something so that it will not work when it is needed	wrecking	3.713	mid	single	narrative	none	TRUE	
+shiver	when your body shakes because you are cold or frightened	reflex	3.192	mid	single	narrative	none	TRUE	shudder, tremble
+short circuit	when electricity takes an unintended shortcut and something sparks and dies	electrical	3.868	mid	multi	narrative	stem_shared	TRUE	short
+smuggle	when you sneak goods across a border hidden so the officials do not find them	contraband	3.389	mid	single	narrative	none	TRUE	
+sneeze	when air bursts out of your nose suddenly and you cannot stop it	reflex	3.39	mid	single	narrative	none	TRUE	sneezing
+solar eclipse	when the moon completely blocks out the sun	astronomy	3.489	mid	multi	narrative	none	TRUE	
+spelling bee	the school contest where children take turns saying words letter by letter	competition	3.537	mid	multi	narrative	none	TRUE	spelling contest
+stampede	when a whole herd panics at once and charges off in the same direction	panic	3.092	mid	single	narrative	none	TRUE	
+whisper	when you speak so quietly that only the person beside you hears	speech	3.824	mid	single	narrative	none	TRUE	whispering
+wrestle	when two people grapple and each tries to force the other to the ground	sport	3.446	mid	single	narrative	none	TRUE	grapple, grappling, wrestling
+yawn	when your mouth opens wide on its own because you are tired	reflex	3.065	mid	single	narrative	none	TRUE	yawning
+ambidextrous	able to use your left hand just as well as your right	handedness	2.28	uncommon	single	abstract	none	TRUE	
+buoyant	light enough that it floats back up when you push it under	floating	2.428	uncommon	single	abstract	none	TRUE	
+claustrophobia	the panic that comes over some people in small enclosed spaces	fear	2.719	uncommon	single	abstract	none	TRUE	
+coercion	making somebody do a thing by threatening them with consequences	force	2.797	uncommon	single	abstract	none	TRUE	compulsion
+denomination	a particular branch or sect within a larger religion	religion	2.503	uncommon	single	abstract	none	TRUE	
+dexterity	skill at using your hands quickly and precisely	nimbleness	2.567	uncommon	single	abstract	none	TRUE	manual dexterity
+disdain	the feeling that something is beneath you and not worth your attention	contempt	2.896	uncommon	single	abstract	none	TRUE	contempt, scorn
+eccentricity	the quality of being harmlessly odd in your habits and nobody minds	oddity	2.301	uncommon	single	abstract	none	TRUE	
+elongated	stretched out much longer than the thing would normally be	shape	2.71	uncommon	single	abstract	none	TRUE	elongate
+femme fatale	the dangerously attractive woman in old films who leads the hero to ruin	archetype	2.61	uncommon	multi	abstract	none	TRUE	siren, temptress
+gaunt	so thin from illness or hunger that the bones show through	thin	2.67	uncommon	single	abstract	none	TRUE	cadaverous, emaciated, skeletal
+hegemony	one country quietly dominating all the others without needing to invade	dominance	2.107	uncommon	single	abstract	none	TRUE	
+hogwash	complete nonsense that somebody is trying to pass off as the truth	nonsense	2.656	uncommon	single	abstract	none	TRUE	bunk, bunkum, guff
+immorality	behaviour that breaks the accepted rules about right and wrong	vice	2.612	uncommon	single	abstract	none	TRUE	iniquity, wickedness
+inertia	the tendency of things to keep on doing whatever they were already doing	physics	2.699	uncommon	single	abstract	none	TRUE	
+introverted	preferring your own company and finding big crowds draining	personality	2.482	uncommon	single	abstract	none	TRUE	
+iridescent	shimmering with colours that shift as you move your head	colour	2.241	uncommon	single	abstract	none	TRUE	opalescent, pearlescent
+menstrual cycle	the roughly monthly hormonal rhythm that runs through a woman's body	biology	2.726	uncommon	multi	abstract	none	TRUE	
+monastic	to do with monks living simply together in a religious community	religious	2.49	uncommon	single	abstract	none	TRUE	monastical
+opaque	so solid that no light gets through it at all	optical	2.559	uncommon	single	abstract	none	TRUE	
+perennial	a plant that comes back on its own every year without replanting	botany	2.534	uncommon	single	abstract	none	TRUE	
+porous	full of tiny holes so that liquid soaks straight through it	material	2.484	uncommon	single	abstract	none	TRUE	
+prevailing wind	the direction that the air usually moves in a particular part of the world	weather	2.782	uncommon	multi	abstract	none	TRUE	
+procrastination	the habit of putting things off until the very last minute	delay	2.167	uncommon	single	abstract	none	TRUE	
+pungent	having a smell so sharp and strong that it stings your nose	smell	2.68	uncommon	single	abstract	none	TRUE	acrid
+rancid	the sour smell fat gets when it has been left too long	spoiled	2.865	uncommon	single	abstract	none	TRUE	
+respite	a short break in the middle of something painful or exhausting	pause	2.798	uncommon	single	abstract	none	TRUE	break, relief
+shambles	a scene of such complete disorder that nothing is where it should be	chaos	2.97	uncommon	single	abstract	none	TRUE	
+shrunken	having got smaller and gone all wrinkled	shrivelled	2.547	uncommon	single	abstract	none	TRUE	shriveled, shrivelled, withered
+tact	the skill of saying a difficult thing without hurting anybody's feelings	diplomacy	2.993	uncommon	single	abstract	none	TRUE	tactfulness
+translucent	letting light through but not clearly enough to see shapes on the other side	optical	2.579	uncommon	single	abstract	none	TRUE	semitransparent
+unwritten law	a rule that everybody follows even though nobody ever wrote it down anywhere	custom	2.711	uncommon	multi	abstract	none	TRUE	
+watershed	a turning point after which nothing is ever quite the same again	turningpoint	2.48	uncommon	single	abstract	none	TRUE	turning point
+wickedness	the quality of being deliberately and knowingly evil	evil	2.996	uncommon	single	abstract	none	TRUE	evil, iniquity, nefariousness, vileness
+aardvark	the african animal with a long snout and big ears that digs up ants at night	mammal	2.501	uncommon	single	concrete	none	TRUE	
+blister beetle	the insect whose secretions raise a painful blister where it touches your skin	insect	2.894	uncommon	multi	concrete	head_noun	TRUE	
+broadsword	a heavy old sword with a wide flat blade that you swing with both hands	weapon	2.171	uncommon	single	concrete	none	TRUE	
+caribou	the large deer with broad antlers that migrates in herds across the arctic	deer	2.875	uncommon	single	concrete	none	TRUE	reindeer
+corned beef hash	the fried mixture of salted beef and chopped up potato in a pan	dish	2.908	uncommon	multi	concrete	head_noun	TRUE	
+gargoyle	the ugly carved stone creature on a cathedral that water pours out of	architecture	2.825	uncommon	single	concrete	none	TRUE	
+gravestone	the carved slab of rock standing over the spot where somebody is buried	marker	2.741	uncommon	single	concrete	none	TRUE	headstone, tombstone
+headland	the piece of high land that juts out into the sea from the coastline	promontory	2.307	uncommon	single	concrete	none	TRUE	promontory
+knockwurst	the short fat german sausage you eat with mustard and sauerkraut	sausage	2.102	uncommon	single	concrete	none	TRUE	knackwurst
+lamplight	the soft yellow glow that fills a room from a single lamp at night	glow	2.026	uncommon	single	concrete	stem_shared	TRUE	
+lasagne	the baked italian dish of flat pasta sheets layered with meat sauce and cheese	pasta	2.717	uncommon	single	concrete	none	TRUE	lasagna
+macadamia	the round nut from australia with a shell so hard you need a tool to crack it	nut	2.503	uncommon	single	concrete	none	TRUE	
+mascarpone	the very soft mild italian cream cheese that goes into tiramisu	cheese	2.179	uncommon	single	concrete	none	TRUE	
+minstrel show	the old american stage entertainment where performers blacked their faces	theatre	2.781	uncommon	multi	concrete	none	TRUE	
+mynah bird	the glossy black asian bird that can copy human speech remarkably well	bird	2.155	uncommon	multi	concrete	head_noun	TRUE	mina, minah, myna, myna bird, mynah
+oboe	the slim dark wooden wind instrument with a double reed that tunes the orchestra	instrument	2.718	uncommon	single	concrete	none	TRUE	
+pectoral girdle	the ring of bones across your shoulders that your arms hang from	anatomy	2.261	uncommon	multi	concrete	none	TRUE	
+sardine	the small oily fish packed tightly side by side into a flat tin	fish	2.918	uncommon	single	concrete	none	TRUE	pilchard
+steamboat	an old river vessel pushed along by a big wooden paddle wheel	boat	2.631	uncommon	single	concrete	none	TRUE	
+tamale	the mexican dish of seasoned dough steamed inside a folded corn husk	dish	2.454	uncommon	single	concrete	none	TRUE	
+thumbprint	the pattern of ridges you leave behind when you press down with your thumb	fingerprint	2.779	uncommon	single	concrete	stem_shared	TRUE	
+toffee apple	an apple stuck on a stick and coated in hard sticky caramel at a fairground	sweet	2.912	uncommon	multi	concrete	head_noun	TRUE	candied apple, candy apple, caramel apple, taffy apple
+yarrow	the wild roadside plant with flat white clusters of tiny flowers and feathery leaves	herb	2.238	uncommon	single	concrete	none	TRUE	milfoil
+abacus	the wooden frame with beads on rods that people used to count with	counting	2.542	uncommon	single	functional	none	TRUE	
+adhesive tape	the clear sticky strip you pull off a roll and tear to stick paper together	stationery	2.877	uncommon	multi	functional	none	TRUE	
+anvil	the heavy iron block a blacksmith hammers hot metal against	smithing	2.842	uncommon	single	functional	none	TRUE	
+arbiter	the person that both sides agree will settle the dispute between them	judge	2.621	uncommon	single	functional	none	TRUE	arbitrator
+ascetic	a person who has no interest in food or pleasure at all	austere	2.519	uncommon	single	functional	none	TRUE	
+blockhead	a stupid person who does not seem to understand anything you tell them	fool	2.994	uncommon	single	functional	none	TRUE	bonehead, dunce, dunderhead, knucklehead, lunkhead, muttonhead, numskull
+butterfingers	somebody who is forever dropping whatever they pick up	clumsy	2.435	uncommon	single	functional	none	TRUE	
+calibration	adjusting an instrument until the numbers it gives you are correct	adjustment	2.422	uncommon	single	functional	none	TRUE	
+chaperon	the older person who tags along to keep a young couple respectable	escort	2.359	uncommon	single	functional	none	TRUE	chaperone
+chlorophyll	the green pigment in leaves that lets a plant turn sunlight into food	pigment	2.392	uncommon	single	functional	none	TRUE	chlorophyl
+crankcase	the metal housing at the bottom of an engine that holds the oil	engine	2.015	uncommon	single	functional	none	TRUE	
+crucible	the little ceramic pot you melt metal in at very high temperatures	vessel	2.69	uncommon	single	functional	none	TRUE	melting pot
+guardhouse	the small building at a gate where the sentries sit and wait	military	2.528	uncommon	single	functional	none	TRUE	
+harpoon	the barbed spear on a rope that gets fired at a whale	weapon	2.931	uncommon	single	functional	none	TRUE	
+hedge trimmer	the powered garden tool with a long toothed blade for cutting bushes flat	garden	2.464	uncommon	multi	functional	none	TRUE	
+henhouse	the small wooden building where chickens sleep and lay their eggs	poultry	2.643	uncommon	single	functional	none	TRUE	chicken coop, hencoop
+holdall	the big soft bag that you throw everything into for a weekend away	bag	2.026	uncommon	single	functional	none	TRUE	carryall
+honeypot	something attractive set out deliberately to draw people in and catch them	trap	2.121	uncommon	single	functional	none	TRUE	
+metronome	the device that ticks steadily to keep a musician in time	music	2.488	uncommon	single	functional	none	TRUE	
+palindrome	a word that reads the same forwards and backwards	wordplay	2.107	uncommon	single	functional	none	TRUE	
+periscope	the tube with mirrors that lets a submarine crew see above the water	optical	2.926	uncommon	single	functional	none	TRUE	
+pontoon bridge	a temporary crossing that floats on boats so an army can get over a river	bridge	2.499	uncommon	multi	functional	none	TRUE	floating bridge
+right atrium	the upper chamber of the heart that takes in blood returning from the body	anatomy	2.675	uncommon	multi	functional	none	TRUE	right atrium of the heart
+scaffold	the temporary metal framework put up around a building so workers can reach it	construction	2.886	uncommon	single	functional	none	TRUE	
+sieve	the mesh bowl you pour things through to separate the lumps from the fine bits	strainer	2.815	uncommon	single	functional	none	TRUE	
+snow blower	the machine you push along that throws snow off your driveway	machine	2.988	uncommon	multi	functional	head_noun	TRUE	snow thrower
+stepbrother	the son of the person that your parent married later on	family	2.743	uncommon	single	functional	none	TRUE	
+stethoscope	the thing a doctor puts in their ears to listen to your chest	medical	2.871	uncommon	single	functional	none	TRUE	
+stringed instrument	any musical thing you play by making tight wires vibrate	music	2.048	uncommon	multi	functional	none	TRUE	
+sundial	the old garden thing that tells the time from the shadow it casts	clock	2.55	uncommon	single	functional	none	TRUE	
+thermostat	the little dial on the wall that keeps a room at the temperature you set	control	2.841	uncommon	single	functional	none	TRUE	
+tourniquet	the tight band you wrap above a wound to stop somebody bleeding out	medical	2.895	uncommon	single	functional	none	TRUE	
+trellis	the wooden lattice you fix to a wall so climbing plants have something to grip	garden	2.384	uncommon	single	functional	none	TRUE	
+turnstile	the waist high barrier that lets one person through at a time	gate	2.351	uncommon	single	functional	none	TRUE	
+twosome	two people doing something together as a pair	duo	2.389	uncommon	single	functional	none	TRUE	couple, duo
+windbag	someone who talks a great deal but never says anything meaningful	blowhard	2.57	uncommon	single	functional	none	TRUE	gasbag
+atrophy	when a muscle wastes away because you stopped using it	wasting	2.542	uncommon	single	narrative	none	TRUE	wasting, wasting away
+blindside	when something hits you from exactly the direction you were not watching	surprise	2.528	uncommon	single	narrative	none	TRUE	
+bungle	when you handle something so clumsily that you completely ruin it	botch	2.341	uncommon	single	narrative	none	TRUE	botch, botch up, foul up, mess up, mishandle, screw up
+degradation	when a company quietly makes its product worse over time	decline	2.907	uncommon	single	narrative	none	TRUE	
+drawl	when somebody speaks very slowly and stretches all their vowels out	speech	2.163	uncommon	single	narrative	none	TRUE	
+eavesdrop	when you listen in secretly to a conversation you were not part of	listening	2.919	uncommon	single	narrative	none	TRUE	listen in
+embezzle	when somebody steals money bit by bit from the company they work for	theft	2.261	uncommon	single	narrative	none	TRUE	misappropriate
+envision	when you picture in your head how a thing could turn out later	imagine	2.78	uncommon	single	narrative	none	TRUE	picture, visualise, visualize
+erode	when wind and water slowly wear rock away over thousands of years	geology	2.369	uncommon	single	narrative	none	TRUE	eat away, wear away
+evaporate	when a puddle slowly disappears into the air on a warm day	physics	2.832	uncommon	single	narrative	none	TRUE	vaporise, vaporize
+ferment	when yeast turns the sugar in a liquid into alcohol and bubbles	brewing	2.466	uncommon	single	narrative	none	TRUE	fermentation, fermenting
+filibuster	when a politician talks for hours on purpose so a vote never happens	obstruction	2.362	uncommon	single	narrative	none	TRUE	
+flinch	when your body jerks back on its own because you thought you were about to be hit	reflex	2.913	uncommon	single	narrative	none	TRUE	wince
+germinate	when a seed finally splits open and the first little shoot comes out	growth	2.209	uncommon	single	narrative	none	TRUE	sprout
+haggle	when the buyer and the seller argue back and forth over the price	bargaining	2.771	uncommon	single	narrative	none	TRUE	haggling
+hibernate	when an animal sleeps right through the whole winter underground	sleep	2.501	uncommon	single	narrative	none	TRUE	
+hypothermia	when your body gets so cold that it stops working properly	cold	2.989	uncommon	single	narrative	none	TRUE	
+inaugurate	when a new leader is formally sworn into office at a big ceremony	ceremony	2.567	uncommon	single	narrative	none	TRUE	
+jamais vu	when something completely familiar suddenly feels strange and new	perception	2.316	uncommon	multi	narrative	none	TRUE	
+jostle	when people in a crowd keep knocking into you as they push past	shoving	2.338	uncommon	single	narrative	none	TRUE	jostling
+migrate	when whole flocks travel thousands of miles as the seasons change	movement	2.853	uncommon	single	narrative	none	TRUE	
+nepotism	when somebody in charge hands the good jobs to their own relatives	favouritism	2.516	uncommon	single	narrative	none	TRUE	
+nosebleed	when blood suddenly starts running out of your nostrils on its own	bleeding	2.928	uncommon	single	narrative	none	TRUE	epistaxis
+plagiarism	taking somebody else's writing and passing it off as your own work	copying	2.654	uncommon	single	narrative	none	TRUE	plagiarisation, plagiarization
+ravel	when the edge of a piece of cloth comes apart into loose threads	fraying	2.466	uncommon	single	narrative	none	TRUE	unravel
+refraction	the way light bends when it passes from air into water	optics	2.28	uncommon	single	narrative	none	TRUE	
+reminisce	when older people sit around talking fondly about how things used to be	memory	2.821	uncommon	single	narrative	none	TRUE	
+ricochet	when a bullet bounces off a hard surface and flies away at an angle	bouncing	2.756	uncommon	single	narrative	none	TRUE	carom
+secrete	when a gland quietly produces a fluid and releases it	biology	2.335	uncommon	single	narrative	none	TRUE	
+sublimate	when you take an urge you cannot act on and channel it into work instead	psychology	2.058	uncommon	single	narrative	none	TRUE	
+waddle	when somebody walks with short steps rocking from side to side like a duck	gait	2.564	uncommon	single	narrative	none	TRUE	
+wince	when your face screws up for a second because something hurt	expression	2.231	uncommon	single	narrative	none	TRUE	flinch
+bespectacled	wearing a pair of glasses on your face	appearance	1.953	rare	single	abstract	none	TRUE	spectacled
+carnality	being preoccupied with bodily appetites rather than anything spiritual	lust	1.69	rare	single	abstract	none	TRUE	
+denouement	the part of a story where everything gets resolved at the end	resolution	1.979	rare	single	abstract	none	TRUE	
+merriness	the state of being cheerful and full of fun	cheer	0.979	rare	single	abstract	none	TRUE	
+multicellular	made up of many cells rather than being just a single one	biology	1.596	rare	single	abstract	none	TRUE	
+propinquity	the state of being physically close to another person	nearness	1.435	rare	single	abstract	none	TRUE	proximity
+truculence	an aggressive eagerness to pick a fight with anybody at all	belligerence	0.912	rare	single	abstract	none	TRUE	truculency
+unsociableness	not enjoying the company of other people very much at all	aloofness		rare	single	abstract	none	TRUE	unsociability
+velleity	wanting something so faintly that you never actually do anything about it	wish		rare	single	abstract	none	TRUE	
+aglet	the little plastic bit on the end of a shoelace	tip	1.714	rare	single	concrete	none	TRUE	aiglet
+clamshell	the two hinged halves of the hard casing that a shellfish lives inside	shell	1.85	rare	single	concrete	none	TRUE	
+halite	the mineral form of ordinary table salt as it comes out of the ground	mineral	0.833	rare	single	concrete	none	TRUE	rock salt
+verdigris	the pale green crust that forms on old copper and bronze after years outside	patina	1.476	rare	single	concrete	none	TRUE	
+cardsharp	somebody who cheats other people at card games to take their money	cheat	1.652	rare	single	functional	stem_shared	TRUE	card shark, card sharp, card sharper, cardsharper
+corbel	the stone bracket sticking out of a wall to carry the end of a beam	architecture	1.338	rare	single	functional	none	TRUE	
+homophone	when two words sound the same but mean completely different things	wordplay	1.175	rare	single	functional	none	TRUE	
+opposer	somebody who argues against whatever is being proposed	objector	1.496	rare	single	functional	none	TRUE	opponent
+philatelist	someone who collects stamps as a hobby	collector	1.89	rare	single	functional	none	TRUE	stamp collector
+shirker	somebody who keeps dodging the work that everybody else is doing	slacker	1.94	rare	single	functional	none	TRUE	slacker
+absentmindedness	that feeling when you walk into a room and forget why you came in	forgetfulness	1.134	rare	single	narrative	none	TRUE	
+coagulate	when a liquid thickens and sets into a soft solid lump	clotting	1.973	rare	single	narrative	none	TRUE	clot
+extirpate	when you wipe something out so completely that none of it is left anywhere	eradicate	1.456	rare	single	narrative	none	TRUE	eradicate, exterminate, root out
+genuflection	when you briefly drop one knee to the floor as a mark of respect in church	gesture	0.912	rare	single	narrative	none	TRUE	genuflexion
+satiation	when you say a word so many times it stops sounding like a word	satiety	1.088	rare	single	narrative	none	TRUE	
+hangry	bad tempered specifically because you have not eaten for too long	mood		rare	single	abstract	none	FALSE	
+limerence	the obsessive early stage of infatuation where you cannot stop thinking about them	infatuation		rare	single	abstract	none	FALSE	
+saudade	a wistful longing for something loved that is gone and may never return	longing		rare	single	abstract	none	FALSE	
+sonder	the realisation that every stranger has a life as complicated as yours	feeling		rare	single	abstract	none	FALSE	
+staycation	a holiday where you stay at home instead of travelling anywhere	holiday		rare	single	abstract	stem_shared	FALSE	
+vaporware	software that gets announced with great fanfare and then never ships	software		rare	single	abstract	none	FALSE	
+veganism	the practice of eating only plants and nothing from animals	diet		rare	single	abstract	none	FALSE	
+cryptocurrency	digital money that no bank or government issues or controls	finance		rare	single	concrete	none	FALSE	
+deepfake	a video where somebody's face has been convincingly swapped in by a computer	media		rare	single	concrete	none	FALSE	
+fatberg	the huge mass of congealed grease and wipes that blocks a city sewer	sewer		rare	single	concrete	none	FALSE	
+microplastic	the tiny fragments of broken down packaging that end up in the ocean and in fish	pollution		rare	single	concrete	none	FALSE	
+petrichor	the smell of rain hitting dry ground	scent		rare	single	concrete	none	FALSE	
+philtrum	the small dent above your upper lip below your nose	anatomy		rare	single	concrete	none	FALSE	
+selfie	a photograph you take of yourself by holding the camera at arm's length	photo		rare	single	concrete	none	FALSE	
+clickbait	a headline written purely to make you click even though the article is nothing	media		rare	single	functional	stem_shared	FALSE	
+crowdfunding	raising money for a project from thousands of small online donations	finance		rare	single	functional	none	FALSE	
+webinar	a talk or class delivered live over the internet to people watching at home	online		rare	single	functional	none	FALSE	
+capsize	when a boat rolls right over and ends up upside down in the water	boating		rare	single	narrative	none	FALSE	
+corpsing	when you laugh at something you know you should not laugh at	giggling		rare	single	narrative	none	FALSE	
+doomscrolling	when you keep reading bad news on your phone late into the night	habit		rare	single	narrative	none	FALSE	
+enshittification	when an online platform gets steadily worse to squeeze money out of users	decay		rare	single	narrative	none	FALSE	
+gaslighting	when somebody makes you doubt your own memory of what actually happened	manipulation		rare	single	narrative	none	FALSE	
+greenwashing	when a company pretends to be environmentally friendly purely for the marketing	marketing		rare	single	narrative	none	FALSE	
+loiter	when somebody hangs around a place for a long time with no obvious reason	lingering		rare	single	narrative	none	FALSE	
+mansplaining	when a man explains something to a woman who already knew it better than him	condescension		rare	single	narrative	none	FALSE	

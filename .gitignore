@@ -45,3 +45,16 @@ reverse_dict_model.zip
 .agents/
 .claude/skills/
 skills-lock.json
+
+# Evaluation
+# Runs are regenerable, but the reference baselines are committed: every future
+# change is judged against them.
+eval/runs/*
+!eval/runs/baseline.json
+!eval/runs/exact.json
+!eval/runs/filtered.json
+# Working artifacts, not results
+eval/data/pool-manifest.json
+eval/audit/
+# Timestamped backups written by apply-acceptable-recommendations.ts
+eval/sets/*.bak-*
