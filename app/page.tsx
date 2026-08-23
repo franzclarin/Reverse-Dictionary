@@ -2,35 +2,30 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth, SignInButton } from "@clerk/nextjs";
 import SearchInput from "@/components/SearchInput";
-import ExampleQueries from "@/components/ExampleQueries";
 import { useLoading } from "@/context/LoadingContext";
-import { RateLimitInfo } from "@/types";
 
 export default function Home() {
   const router = useRouter();
-  const { isSignedIn } = useAuth();
   const { startLoading, stopLoading, isLoading } = useLoading();
   const [error, setError] = useState<string | null>(null);
-  const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
 
-  const handleSearch = async (description: string) => {
+  // No fetch here — the results page owns the /api/lookup call (and its
+  // errors, rate limiting, and timing display) so a query typed on the
+  // landing page and one re-run from the results page's own search bar go
+  // through exactly one code path.
+  const handleSearch = (description: string) => {
+    router.push(`/search?q=${encodeURIComponent(description)}`);
+  };
+
+  const handleRandomWord = async () => {
     startLoading();
     setError(null);
     let navigated = false;
 
     try {
-      // Embedding-based lookup via the fine-tuned model. The Claude fallback
-      // is disabled — errors are surfaced directly instead of being swallowed.
-      const response = await fetch("/api/lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: description, k: 5 }),
-      });
+      const response = await fetch("/api/word/random");
 
-      // Parse body safely — an empty body (e.g. a gateway 401/502) must not
-      // throw "Unexpected end of JSON input" before we can check the status.
       let data: Record<string, unknown> = {};
       try {
         data = await response.json();
@@ -38,26 +33,11 @@ export default function Home() {
         /* empty or non-JSON body */
       }
 
-      if (!response.ok) {
-        if (response.status === 429) {
-          setError((data.error as string) || "Rate limit exceeded");
-          if (data.rateLimit) setRateLimit(data.rateLimit as typeof rateLimit);
-        } else {
-          const detail = data.detail ? ` — ${data.detail as string}` : "";
-          throw new Error(
-            `${(data.error as string) || "Failed to fetch word"} (HTTP ${response.status})${detail}`
-          );
-        }
-        return;
+      if (!response.ok || !data.word) {
+        throw new Error((data.error as string) || "Failed to fetch a random word");
       }
 
-      const results = (data.results as { word: string; similarity: number }[]) ?? [];
-      const top = results[0];
-      if (!top) throw new Error("No results found");
-
-      const alts: string[] = results.slice(1, 3).map((r) => r.word);
-      const query = alts.length > 0 ? `?alternatives=${alts.join(",")}` : "";
-      router.push(`/word/${encodeURIComponent(top.word)}${query}`);
+      router.push(`/word/${encodeURIComponent(data.word as string)}`);
       navigated = true;
     } catch (err) {
       setError(
@@ -68,68 +48,67 @@ export default function Home() {
     }
   };
 
-  const showGuestBanner =
-    !isSignedIn && rateLimit !== null && rateLimit.isGuest;
-
   return (
-    <main className="max-w-3xl mx-auto px-6 py-20 flex flex-col items-center gap-10">
-      {/* Hero */}
-      <div className="text-center">
+    <main
+      className="flex flex-col items-center px-6 min-h-screen"
+      style={{ background: "var(--gs-bg)" }}
+    >
+      <div className="w-full max-w-[584px] pt-16 md:pt-[25vh] flex flex-col items-center gap-8">
+        {/* Wordmark */}
         <h1
-          className="font-serif leading-tight mb-4"
+          className="font-google leading-none text-center"
           style={{
-            fontSize: "clamp(2.5rem,6vw,4rem)",
-            color: "var(--text-primary)",
+            fontSize: "clamp(2.75rem,6vw,4rem)",
+            fontWeight: 400,
+            color: "var(--gs-text-primary)",
           }}
         >
-          Find the word you can&apos;t remember.
+          Reverse Dictionary
         </h1>
-        <p
-          className="font-light text-lg"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Describe it. We&apos;ll find it.
-        </p>
-      </div>
 
-      {/* Search bar */}
-      <SearchInput onSearch={handleSearch} isLoading={isLoading} />
+        {/* Search bar */}
+        <SearchInput onSearch={handleSearch} isLoading={isLoading} variant="landing" />
 
-      {/* Example chips — hidden while loading */}
-      {!isLoading && !error && (
-        <ExampleQueries onSelectExample={handleSearch} isLoading={isLoading} />
-      )}
-
-      {/* Guest rate limit banner */}
-      {showGuestBanner && (
-        <div
-          className="w-full flex items-center justify-between gap-4 px-4 py-3 rounded-lg text-sm"
-          style={{
-            background: "var(--accent-gold-dim)",
-            border: "1px solid rgba(201,168,76,0.2)",
-          }}
-        >
-          <span className="font-mono" style={{ color: "var(--accent-gold)" }}>
-            {rateLimit.remaining} of {rateLimit.limit} free lookups remaining
-            today
-          </span>
-          <SignInButton mode="redirect">
-            <button
-              className="shrink-0 font-mono hover:underline font-medium"
-              style={{ color: "var(--accent-gold)" }}
-            >
-              Sign in for 200/day →
-            </button>
-          </SignInButton>
+        {/* Ghost action buttons */}
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            form="search-form-landing"
+            disabled={isLoading}
+            className="font-google text-sm px-5 py-2.5 rounded transition-colors border border-transparent hover:border-[var(--gs-border)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+            style={{
+              background: "var(--gs-hover-bg)",
+              color: "var(--gs-text-secondary)",
+              outlineColor: "var(--gs-accent)",
+            }}
+          >
+            Search
+          </button>
+          <button
+            type="button"
+            onClick={handleRandomWord}
+            disabled={isLoading}
+            className="font-google text-sm px-5 py-2.5 rounded transition-colors border border-transparent hover:border-[var(--gs-border)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+            style={{
+              background: "var(--gs-hover-bg)",
+              color: "var(--gs-text-secondary)",
+              outlineColor: "var(--gs-accent)",
+            }}
+          >
+            Random Word
+          </button>
         </div>
-      )}
 
-      {/* Error */}
-      {error && (
-        <p className="font-mono text-sm" style={{ color: "var(--text-secondary)" }}>
-          {error}
-        </p>
-      )}
+        {/* Error — only ever from Random Word now; lookup errors surface on /search */}
+        {error && (
+          <p
+            className="font-google text-sm text-center"
+            style={{ color: "var(--gs-error)" }}
+          >
+            {error}
+          </p>
+        )}
+      </div>
     </main>
   );
 }

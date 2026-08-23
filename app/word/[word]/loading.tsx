@@ -1,31 +1,15 @@
 export default function WordPageLoading() {
   return (
-    <>
-      <div className="loading-overlay">
-        <div className="loading-content">
-          <div className="loading-symbol">◈</div>
-          <div className="loading-dots">
-            <span>Generating</span>
-            <span className="dot">.</span>
-            <span className="dot">.</span>
-            <span className="dot">.</span>
-          </div>
-          <p className="loading-subtext">Building word profile</p>
-        </div>
+    <main
+      className="min-h-screen flex items-center justify-center"
+      style={{ background: "var(--gs-bg)" }}
+    >
+      <div className="flex flex-col items-center gap-3.5">
+        <div className="loading-spinner" aria-hidden="true" />
+        <p className="font-google" style={{ fontSize: "13px", color: "var(--gs-text-muted)" }}>
+          Loading word…
+        </p>
       </div>
-
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <div className="mb-8">
-          <div className="skeleton skeleton-word-heading" />
-          <div className="skeleton skeleton-badge" />
-        </div>
-        <div className="skeleton skeleton-divider" />
-        <div className="skeleton skeleton-definition" style={{ marginTop: "2.5rem" }} />
-        <div className="skeleton skeleton-definition short" />
-        <div className="skeleton skeleton-divider" />
-        <div className="skeleton skeleton-label" style={{ marginTop: "2.5rem" }} />
-        <div className="skeleton skeleton-etymology" />
-      </main>
-    </>
+    </main>
   );
 }

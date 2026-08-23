@@ -7,38 +7,36 @@ export default function Navbar() {
   const { isSignedIn } = useAuth();
 
   return (
-    <header style={{ borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
+    <header style={{ borderBottom: "1px solid var(--gs-border)", background: "var(--gs-bg)" }}>
       <nav className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2">
+        {/* Logo mark */}
+        <Link
+          href="/"
+          className="flex items-center gap-2 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          style={{ outlineColor: "var(--gs-accent)" }}
+        >
           <span
-            className="font-serif text-xl leading-none"
-            style={{ color: "var(--accent-gold)" }}
+            className="font-google text-lg leading-none"
+            style={{ color: "var(--gs-accent)" }}
           >
             ◈
           </span>
           <span
-            className="font-serif text-lg tracking-tight"
-            style={{ color: "var(--text-primary)" }}
+            className="font-google text-lg"
+            style={{ color: "var(--gs-text-primary)" }}
           >
             Reverse Dictionary
           </span>
         </Link>
 
-        {/* Auth controls */}
-        <div className="flex items-center gap-4">
+        {/* Utility links */}
+        <div className="flex items-center gap-5">
           {isSignedIn ? (
             <>
               <Link
                 href="/collection"
-                className="font-mono text-sm transition-colors"
-                style={{ color: "var(--text-secondary)" }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.color = "var(--text-primary)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.color = "var(--text-secondary)")
-                }
+                className="font-google text-sm hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                style={{ color: "var(--gs-text-secondary)", outlineColor: "var(--gs-accent)" }}
               >
                 My Words
               </Link>
@@ -48,24 +46,22 @@ export default function Navbar() {
             <>
               <SignInButton mode="redirect">
                 <button
-                  className="font-mono text-sm px-3 py-1.5 rounded transition-colors"
-                  style={{
-                    color: "var(--text-secondary)",
-                    border: "1px solid var(--border)",
-                  }}
+                  className="font-google text-sm hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                  style={{ color: "var(--gs-text-secondary)", outlineColor: "var(--gs-accent)" }}
                 >
                   Sign in
                 </button>
               </SignInButton>
               <SignUpButton mode="redirect">
                 <button
-                  className="font-mono text-sm px-3 py-1.5 rounded font-medium transition-opacity hover:opacity-90"
+                  className="font-google text-sm px-4 py-1.5 rounded transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                   style={{
-                    background: "var(--accent-gold)",
-                    color: "var(--bg)",
+                    background: "var(--gs-accent)",
+                    color: "#ffffff",
+                    outlineColor: "var(--gs-accent)",
                   }}
                 >
-                  Sign up →
+                  Sign up
                 </button>
               </SignUpButton>
             </>

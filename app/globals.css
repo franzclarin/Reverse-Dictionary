@@ -1,21 +1,20 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Inter:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Inter:wght@300;400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --bg: #0f0f0f;
-  --surface: #1a1a1a;
-  --surface-2: #242424;
-  --border: #2e2e2e;
-  --text-primary: #f0ebe0;
-  --text-secondary: #8a8278;
-  --accent-gold: #c9a84c;
-  --accent-gold-dim: #c9a84c1a;
-  --confidence-high: #4caf7d;
-  --confidence-mid: #e6a817;
-  --confidence-low: #e05252;
+  --gs-bg: #ffffff;
+  --gs-text-primary: #202124;
+  --gs-text-secondary: #5f6368;
+  --gs-text-muted: #70757a;
+  --gs-text-gloss: #4d5156;
+  --gs-accent: #1a73e8;
+  --gs-hover-bg: #f8f9fa;
+  --gs-border: #dfe1e5;
+  --gs-error: #d93025;
+  --gs-success: #1e8e3e;
 }
 
 *,
@@ -25,79 +24,16 @@
 }
 
 html {
-  background: var(--bg);
+  background: var(--gs-bg);
 }
 
 body {
-  background: var(--bg);
-  color: var(--text-primary);
-  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--gs-bg);
+  color: var(--gs-text-primary);
+  font-family: 'Roboto', 'Inter', -apple-system, sans-serif;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-/* Staggered fade-up for result cards */
-@keyframes fadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(14px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-fade-up {
-  opacity: 0;
-  animation: fadeUp 0.35s ease forwards;
-}
-
-/* Shimmer skeleton */
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-.skeleton-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--surface) 25%,
-    var(--surface-2) 50%,
-    var(--surface) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-}
-
-/* Gold loading dots */
-@keyframes dotPulse {
-  0%, 80%, 100% {
-    opacity: 0.2;
-    transform: scale(0.75);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.dot-pulse span {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-gold);
-  animation: dotPulse 1.2s infinite ease-in-out;
-}
-
-.dot-pulse span:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.dot-pulse span:nth-child(3) {
-  animation-delay: 0.4s;
 }
 
 @layer utilities {
@@ -106,89 +42,80 @@ body {
   }
 }
 
-/* Loading overlay */
+/* Result row fade-in-up: 4px slide, 180ms ease-out. */
+@keyframes gsFadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.gs-fade-in-up {
+  opacity: 0;
+  animation: gsFadeInUp 180ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gs-fade-in-up {
+    opacity: 1;
+    animation: none;
+    transform: none;
+  }
+}
+
+/* Loading overlay — minimal spinner, no shimmer, no full-screen "luxury" takeover */
 @keyframes fadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.6; transform: scale(0.95); }
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 0; }
-  50%       { opacity: 1; }
+@keyframes gsSpin {
+  to { transform: rotate(360deg); }
 }
 
 .loading-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 15, 15, 0.92);
-  backdrop-filter: blur(4px);
+  background: rgba(255, 255, 255, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  animation: fadeIn 0.2s ease;
+  animation: fadeIn 0.15s ease;
 }
 
 .loading-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
 
-.loading-symbol {
-  font-family: 'DM Serif Display', serif;
-  font-size: 64px;
-  color: var(--accent-gold);
-  animation: pulse 1.5s ease-in-out infinite;
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--gs-border);
+  border-top-color: var(--gs-accent);
+  border-radius: 50%;
+  animation: gsSpin 0.7s linear infinite;
 }
-
-.loading-dots {
-  display: flex;
-  gap: 2px;
-  font-family: 'DM Mono', monospace;
-  font-size: 18px;
-  color: var(--text-secondary);
-}
-
-.loading-dots .dot {
-  animation: blink 1.2s infinite;
-}
-
-.loading-dots .dot:nth-child(2) { animation-delay: 0.2s; }
-.loading-dots .dot:nth-child(3) { animation-delay: 0.4s; }
-.loading-dots .dot:nth-child(4) { animation-delay: 0.6s; }
 
 .loading-subtext {
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-  color: var(--text-secondary);
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
+  font-family: 'Roboto', 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  color: var(--gs-text-muted);
 }
 
-/* Skeleton shapes for word page loading */
-.skeleton {
-  border-radius: 2px;
-  background: linear-gradient(
-    90deg,
-    var(--surface-2) 25%,
-    var(--surface)   50%,
-    var(--surface-2) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+@media (prefers-reduced-motion: reduce) {
+  .loading-overlay {
+    animation: none;
+  }
+  .loading-spinner {
+    animation: none;
+    border-top-color: var(--gs-border);
+  }
 }
-
-.skeleton-word-heading { height: 72px; width: 40%; margin-bottom: 16px; }
-.skeleton-badge        { height: 24px; width: 80px; margin-bottom: 32px; }
-.skeleton-divider      { height: 1px;  width: 100%; margin: 24px 0; }
-.skeleton-definition   { height: 20px; width: 90%; margin-bottom: 12px; }
-.skeleton-definition.short { width: 60%; }
-.skeleton-label        { height: 14px; width: 120px; margin-bottom: 16px; }
-.skeleton-etymology    { height: 20px; width: 75%; }

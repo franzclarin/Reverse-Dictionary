@@ -54,13 +54,7 @@ export function LoadingProvider({ children }: { children: React.ReactNode }) {
       {isLoading && (
         <div className="loading-overlay">
           <div className="loading-content">
-            <div className="loading-symbol">◈</div>
-            <div className="loading-dots">
-              <span>Finding</span>
-              <span className="dot">.</span>
-              <span className="dot">.</span>
-              <span className="dot">.</span>
-            </div>
+            <div className="loading-spinner" aria-hidden="true" />
             <p className="loading-subtext">{LOADING_MESSAGES[messageIndex]}</p>
           </div>
         </div>

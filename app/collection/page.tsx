@@ -26,26 +26,22 @@ export default async function CollectionPage() {
   }));
 
   return (
-    <main className="max-w-5xl mx-auto px-6 py-12">
-      <div className="mb-10">
-        <h1
-          className="font-serif mb-2"
-          style={{
-            fontSize: "clamp(2rem,5vw,3rem)",
-            color: "var(--text-primary)",
-          }}
-        >
-          My Words
-        </h1>
-        <p
-          className="font-mono text-sm"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          {words.length} {words.length === 1 ? "word" : "words"} saved
-        </p>
-      </div>
+    <main className="min-h-screen" style={{ background: "var(--gs-bg)" }}>
+      <div className="max-w-5xl mx-auto px-6 py-12">
+        <div className="mb-10">
+          <h1
+            className="font-google mb-2"
+            style={{ fontSize: "clamp(1.75rem,4vw,2.5rem)", fontWeight: 400, color: "var(--gs-text-primary)" }}
+          >
+            My Words
+          </h1>
+          <p className="font-google text-sm" style={{ color: "var(--gs-text-muted)" }}>
+            {words.length} {words.length === 1 ? "word" : "words"} saved
+          </p>
+        </div>
 
-      <CollectionGrid words={words} />
+        <CollectionGrid words={words} />
+      </div>
     </main>
   );
 }

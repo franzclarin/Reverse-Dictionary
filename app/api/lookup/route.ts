@@ -178,7 +178,13 @@ export async function POST(request: NextRequest) {
     }
     console.log(`[lookup] db ok ms=${Date.now() - dbStartedAt} rows=${rows.length}`);
 
-    return NextResponse.json({ results: rows });
+    // Embed + db time only — excludes auth/ratelimit overhead, which isn't
+    // part of "how long did the search take" from the user's perspective.
+    // Real elapsed time, including any cold-start model download: no fixed
+    // placeholder number gets shown in its place.
+    const timingMs = Date.now() - embedStartedAt;
+
+    return NextResponse.json({ results: rows, timingMs });
   } catch (error) {
     const subsystem: Subsystem =
       error instanceof SubsystemError ? error.subsystem : "unknown";

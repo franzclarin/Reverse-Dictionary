@@ -31,20 +31,21 @@ export default function SaveWordButton({
     <button
       onClick={handleToggle}
       disabled={loading}
-      className="flex items-center gap-1.5 px-4 py-2 font-mono text-sm rounded transition-all disabled:opacity-50"
-      style={
-        saved
+      className="flex items-center gap-1.5 px-4 py-2 font-google text-sm rounded transition-all disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+      style={{
+        outlineColor: "var(--gs-accent)",
+        ...(saved
           ? {
-              background: "var(--accent-gold)",
-              color: "var(--bg)",
-              border: "1px solid var(--accent-gold)",
+              background: "var(--gs-accent)",
+              color: "#ffffff",
+              border: "1px solid var(--gs-accent)",
             }
           : {
               background: "transparent",
-              color: "var(--accent-gold)",
-              border: "1px solid var(--accent-gold)",
-            }
-      }
+              color: "var(--gs-accent)",
+              border: "1px solid var(--gs-accent)",
+            }),
+      }}
     >
       {saved ? (
         <>
