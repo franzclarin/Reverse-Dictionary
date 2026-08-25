@@ -126,12 +126,12 @@ export default function SearchResults({ query }: SearchResultsProps) {
   };
 
   return (
-    <main className="min-h-screen" style={{ background: "var(--gs-bg)" }}>
+    <main className="min-h-screen" style={{ background: "var(--rd-paper)" }}>
       <div
         className="sticky top-0 z-10 px-6 py-3"
-        style={{ background: "var(--gs-bg)", borderBottom: "1px solid var(--gs-border)" }}
+        style={{ background: "var(--rd-paper)", borderBottom: "1px solid var(--rd-border)" }}
       >
-        <div className="mx-auto max-w-[584px]">
+        <div className="mx-auto max-w-[640px]">
           <SearchInput
             onSearch={handleSearch}
             isLoading={loading}
@@ -141,32 +141,32 @@ export default function SearchResults({ query }: SearchResultsProps) {
         </div>
       </div>
 
-      <div className="mx-auto max-w-[584px] px-6 py-4">
+      <div className="mx-auto max-w-[640px] px-6 py-5">
         {query && !error && (
           <p
-            className="font-google mb-2"
-            style={{ fontSize: "13px", color: "var(--gs-text-muted)" }}
+            className="font-mono mb-3 uppercase tracking-wide"
+            style={{ fontSize: "11px", color: "var(--rd-ink-muted)" }}
           >
             {loading && results.length === 0
               ? "Searching…"
-              : `About ${count} result${count === 1 ? "" : "s"}${
-                  timingMs !== null ? ` (${(timingMs / 1000).toFixed(2)} seconds)` : ""
+              : `${count} ${count === 1 ? "entry" : "entries"}${
+                  timingMs !== null ? ` · ${(timingMs / 1000).toFixed(2)}s` : ""
                 }`}
           </p>
         )}
 
         {rateLimit && (
           <div
-            className="font-google mb-4 flex items-center justify-between gap-4 rounded px-4 py-3 text-sm"
-            style={{ background: "var(--gs-hover-bg)", border: "1px solid var(--gs-border)" }}
+            className="font-sans mb-4 flex items-center justify-between gap-4 rounded-lg px-4 py-3 text-sm"
+            style={{ background: "var(--rd-hover)", border: "1px solid var(--rd-border)" }}
           >
-            <span style={{ color: "var(--gs-text-secondary)" }}>
+            <span style={{ color: "var(--rd-ink-secondary)" }}>
               {rateLimit.remaining} of {rateLimit.limit} free lookups remaining today
             </span>
             <SignInButton mode="redirect">
               <button
                 className="shrink-0 font-medium hover:underline"
-                style={{ color: "var(--gs-accent)" }}
+                style={{ color: "var(--rd-accent)" }}
               >
                 Sign in for 200/day →
               </button>
@@ -175,25 +175,25 @@ export default function SearchResults({ query }: SearchResultsProps) {
         )}
 
         {error && (
-          <p className="font-google text-sm" style={{ color: "var(--gs-error)" }}>
+          <p className="font-sans text-sm" style={{ color: "var(--rd-error)" }}>
             {error}
           </p>
         )}
 
         {!error && !query && (
-          <p className="font-google text-sm" style={{ color: "var(--gs-text-muted)" }}>
+          <p className="font-sans text-sm" style={{ color: "var(--rd-ink-muted)" }}>
             Type a description above to find a word.
           </p>
         )}
 
         {!error && query && !loading && results.length === 0 && (
-          <p className="font-google text-sm" style={{ color: "var(--gs-text-muted)" }}>
-            No results found for &ldquo;{query}&rdquo;
+          <p className="font-sans text-sm" style={{ color: "var(--rd-ink-muted)" }}>
+            No entries found for &ldquo;{query}&rdquo;
           </p>
         )}
 
         {results.length > 0 && (
-          <ul className="list-none divide-y divide-[var(--gs-border)]">
+          <ul className="list-none divide-y divide-[var(--rd-border)]">
             {results.map((r, i) => (
               <ResultListItem key={r.word} word={r.word} similarity={r.similarity} index={i} />
             ))}
@@ -204,10 +204,10 @@ export default function SearchResults({ query }: SearchResultsProps) {
           <button
             type="button"
             onClick={() => setK((prev) => prev + LOAD_MORE_STEP)}
-            className="font-google mt-4 text-sm hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-            style={{ color: "var(--gs-accent)", outlineColor: "var(--gs-accent)" }}
+            className="font-mono mt-4 text-xs uppercase tracking-wide hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{ color: "var(--rd-accent)", outlineColor: "var(--rd-accent)" }}
           >
-            Load more results
+            Load more entries
           </button>
         )}
       </div>

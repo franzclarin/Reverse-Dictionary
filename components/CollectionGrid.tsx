@@ -29,13 +29,13 @@ export default function CollectionGrid({ words }: { words: SavedWordItem[] }) {
   if (items.length === 0) {
     return (
       <div className="text-center py-24">
-        <p className="font-google text-lg" style={{ color: "var(--gs-text-muted)" }}>
+        <p className="font-sans text-lg" style={{ color: "var(--rd-ink-muted)" }}>
           Your collection is empty. Search for a word to begin.
         </p>
         <Link
           href="/"
-          className="mt-6 inline-block font-google text-sm hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-          style={{ color: "var(--gs-accent)", outlineColor: "var(--gs-accent)" }}
+          className="mt-6 inline-block font-mono text-xs uppercase tracking-wide hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          style={{ color: "var(--rd-accent)", outlineColor: "var(--rd-accent)" }}
         >
           Start searching →
         </Link>
@@ -49,30 +49,30 @@ export default function CollectionGrid({ words }: { words: SavedWordItem[] }) {
         <div
           key={word.id}
           className="p-5 rounded-lg transition-colors"
-          style={{ background: "var(--gs-bg)", border: "1px solid var(--gs-border)" }}
+          style={{ background: "#ffffff", border: "1px solid var(--rd-border)" }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--gs-hover-bg)";
+            e.currentTarget.style.background = "var(--rd-hover)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "var(--gs-bg)";
+            e.currentTarget.style.background = "#ffffff";
           }}
         >
           <WordLink word={word.word} className="block mb-4">
             <h2
-              className="font-google text-2xl mb-1.5"
-              style={{ fontWeight: 500, color: "var(--gs-accent)" }}
+              className="font-serif text-2xl mb-1.5"
+              style={{ color: "var(--rd-accent)" }}
             >
               {word.word}
             </h2>
             <span
-              className="font-google text-[10px] px-2 py-0.5 rounded"
-              style={{ background: "var(--gs-hover-bg)", color: "var(--gs-text-muted)" }}
+              className="font-mono text-[10px] uppercase tracking-wide px-2 py-0.5 rounded"
+              style={{ background: "var(--rd-hover)", color: "var(--rd-ink-muted)" }}
             >
               {word.partOfSpeech}
             </span>
             <p
-              className="mt-3 font-google text-sm leading-relaxed line-clamp-3"
-              style={{ color: "var(--gs-text-gloss)" }}
+              className="mt-3 font-sans text-sm leading-relaxed line-clamp-3"
+              style={{ color: "var(--rd-ink-gloss)" }}
             >
               {word.definition}
             </p>
@@ -80,17 +80,17 @@ export default function CollectionGrid({ words }: { words: SavedWordItem[] }) {
 
           <div
             className="flex items-center justify-between pt-3"
-            style={{ borderTop: "1px solid var(--gs-border)" }}
+            style={{ borderTop: "1px solid var(--rd-border)" }}
           >
-            <p className="font-google text-[10px]" style={{ color: "var(--gs-text-muted)" }}>
+            <p className="font-mono text-[10px]" style={{ color: "var(--rd-ink-muted)" }}>
               {new Date(savedAt).toLocaleDateString()}
             </p>
             <button
               onClick={() => handleUnsave(word.word)}
-              className="font-google text-[10px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-              style={{ color: "var(--gs-text-muted)", outlineColor: "var(--gs-accent)" }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--gs-error)")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--gs-text-muted)")}
+              className="font-mono text-[10px] uppercase tracking-wide transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              style={{ color: "var(--rd-ink-muted)", outlineColor: "var(--rd-accent)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--rd-error)")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--rd-ink-muted)")}
             >
               Remove
             </button>

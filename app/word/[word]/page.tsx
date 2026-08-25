@@ -60,18 +60,18 @@ export default async function WordPage({ params }: PageProps) {
   }
 
   return (
-    <main className="min-h-screen" style={{ background: "var(--gs-bg)" }}>
+    <main className="min-h-screen" style={{ background: "var(--rd-paper)" }}>
       <div className="max-w-3xl mx-auto px-6 py-12">
         {/* Word header */}
         <div className="mb-8">
           <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
             <div>
               <h1
-                className="font-google leading-none mb-4"
+                className="font-serif leading-none mb-4"
                 style={{
                   fontSize: "clamp(2.5rem,7vw,3.5rem)",
                   fontWeight: 400,
-                  color: "var(--gs-text-primary)",
+                  color: "var(--rd-ink)",
                 }}
               >
                 {wordData.word}
@@ -79,24 +79,24 @@ export default async function WordPage({ params }: PageProps) {
               <div className="flex items-center gap-3 flex-wrap">
                 {wordData.partOfSpeech && (
                   <span
-                    className="font-google text-xs px-2.5 py-1 rounded"
-                    style={{ background: "var(--gs-hover-bg)", color: "var(--gs-text-muted)" }}
+                    className="font-mono text-xs uppercase tracking-wide px-2.5 py-1 rounded"
+                    style={{ background: "var(--rd-hover)", color: "var(--rd-ink-muted)" }}
                   >
                     {wordData.partOfSpeech}
                   </span>
                 )}
                 {wordData.pronunciation && (
                   <span
-                    className="font-google text-sm"
-                    style={{ color: "var(--gs-text-secondary)" }}
+                    className="font-mono text-sm"
+                    style={{ color: "var(--rd-ink-secondary)" }}
                   >
                     {wordData.pronunciation}
                   </span>
                 )}
                 {wordData.domain && (
                   <span
-                    className="font-google text-xs px-2.5 py-1 rounded"
-                    style={{ color: "var(--gs-text-secondary)", border: "1px solid var(--gs-border)" }}
+                    className="font-mono text-xs uppercase tracking-wide px-2.5 py-1 rounded"
+                    style={{ color: "var(--rd-ink-secondary)", border: "1px solid var(--rd-border)" }}
                   >
                     {wordData.domain}
                   </span>
@@ -115,7 +115,7 @@ export default async function WordPage({ params }: PageProps) {
             </div>
           </div>
 
-          <hr style={{ borderColor: "var(--gs-border)" }} />
+          <hr style={{ borderColor: "var(--rd-border)" }} />
         </div>
 
         {/* Definition — only words profiled before the generative API was
@@ -123,31 +123,31 @@ export default async function WordPage({ params }: PageProps) {
         <section className="mb-10">
           {wordData.definition ? (
             <p
-              className="font-google"
-              style={{ fontSize: "18px", lineHeight: 1.6, color: "var(--gs-text-gloss)" }}
+              className="font-serif"
+              style={{ fontSize: "20px", lineHeight: 1.6, color: "var(--rd-ink-gloss)" }}
             >
               {wordData.definition}
             </p>
           ) : (
-            <p className="font-google" style={{ lineHeight: 1.6, color: "var(--gs-text-muted)" }}>
+            <p className="font-sans" style={{ lineHeight: 1.6, color: "var(--rd-ink-muted)" }}>
               No written definition on file. This word is placed by its position in
               the model&apos;s semantic space — see the closest words below.
             </p>
           )}
         </section>
 
-        <hr style={{ borderColor: "var(--gs-border)", marginBottom: "2.5rem" }} />
+        <hr style={{ borderColor: "var(--rd-border)", marginBottom: "2.5rem" }} />
 
         {/* Etymology */}
         {wordData.etymology && (
           <section className="mb-10">
             <p
-              className="font-google text-xs uppercase tracking-widest mb-4"
-              style={{ color: "var(--gs-text-muted)" }}
+              className="font-mono text-xs uppercase tracking-widest mb-4"
+              style={{ color: "var(--rd-ink-muted)" }}
             >
               Etymology
             </p>
-            <p className="font-google leading-relaxed" style={{ color: "var(--gs-text-secondary)" }}>
+            <p className="font-sans leading-relaxed" style={{ color: "var(--rd-ink-secondary)" }}>
               {wordData.etymology}
             </p>
           </section>
@@ -157,8 +157,8 @@ export default async function WordPage({ params }: PageProps) {
         {wordData.examples.length > 0 && (
           <section className="mb-10">
             <p
-              className="font-google text-xs uppercase tracking-widest mb-4"
-              style={{ color: "var(--gs-text-muted)" }}
+              className="font-mono text-xs uppercase tracking-widest mb-4"
+              style={{ color: "var(--rd-ink-muted)" }}
             >
               Examples
             </p>
@@ -166,12 +166,12 @@ export default async function WordPage({ params }: PageProps) {
               {wordData.examples.map((example, i) => (
                 <li
                   key={i}
-                  className="font-google flex gap-3 leading-relaxed"
-                  style={{ color: "var(--gs-text-secondary)" }}
+                  className="font-sans flex gap-3 leading-relaxed"
+                  style={{ color: "var(--rd-ink-secondary)" }}
                 >
                   <span
                     className="text-xs mt-1 shrink-0"
-                    style={{ color: "var(--gs-accent)" }}
+                    style={{ color: "var(--rd-accent)" }}
                   >
                     ·
                   </span>
@@ -187,12 +187,12 @@ export default async function WordPage({ params }: PageProps) {
         {related.length > 0 && (
           <section className="mb-10">
             <p
-              className="font-google text-xs uppercase tracking-widest mb-2"
-              style={{ color: "var(--gs-text-muted)" }}
+              className="font-mono text-xs uppercase tracking-widest mb-2"
+              style={{ color: "var(--rd-ink-muted)" }}
             >
               Closest Words
             </p>
-            <p className="font-google text-sm mb-4" style={{ color: "var(--gs-text-secondary)" }}>
+            <p className="font-sans text-sm mb-4" style={{ color: "var(--rd-ink-secondary)" }}>
               Ranked by cosine similarity to {wordData.word} in the model&apos;s
               384-dimensional space.
             </p>
@@ -201,32 +201,34 @@ export default async function WordPage({ params }: PageProps) {
                 <WordLink
                   key={r.word}
                   word={r.word}
-                  className="font-google px-3 py-1.5 text-xs rounded-full transition-colors flex items-center gap-2 hover:bg-[var(--gs-hover-bg)]"
-                  style={{ color: "var(--gs-text-secondary)", border: "1px solid var(--gs-border)" }}
+                  className="font-sans px-3 py-1.5 text-sm rounded-full transition-colors flex items-center gap-2 hover:bg-[var(--rd-hover)]"
+                  style={{ color: "var(--rd-ink-secondary)", border: "1px solid var(--rd-border)" }}
                 >
                   <span>{r.word}</span>
-                  <span style={{ color: "var(--gs-accent)" }}>{r.similarity.toFixed(2)}</span>
+                  <span className="font-mono text-xs" style={{ color: "var(--rd-accent)" }}>
+                    {(r.similarity * 100).toFixed(0)}%
+                  </span>
                 </WordLink>
               ))}
             </div>
           </section>
         )}
 
-        <hr style={{ borderColor: "var(--gs-border)", marginBottom: "2rem" }} />
+        <hr style={{ borderColor: "var(--rd-border)", marginBottom: "2rem" }} />
 
         {/* Sign-in CTA for guests */}
         {!userId && (
           <div
             className="p-6 rounded-lg text-center"
-            style={{ border: "1px solid var(--gs-border)", background: "var(--gs-hover-bg)" }}
+            style={{ border: "1px solid var(--rd-border)", background: "var(--rd-hover)" }}
           >
-            <p className="font-google mb-4" style={{ color: "var(--gs-text-secondary)" }}>
+            <p className="font-sans mb-4" style={{ color: "var(--rd-ink-secondary)" }}>
               Sign in to save words to your personal collection.
             </p>
             <Link
               href="/sign-in"
-              className="font-google inline-block px-5 py-2 text-sm rounded transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-              style={{ background: "var(--gs-accent)", color: "#ffffff", outlineColor: "var(--gs-accent)" }}
+              className="font-sans inline-block px-5 py-2 text-sm font-medium rounded-md transition-colors hover:bg-[var(--rd-accent-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              style={{ background: "var(--rd-accent)", color: "#ffffff", outlineColor: "var(--rd-accent)" }}
             >
               Sign in free →
             </Link>

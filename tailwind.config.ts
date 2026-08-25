@@ -12,7 +12,6 @@ const config: Config = {
         serif: ["DM Serif Display", "Georgia", "serif"],
         mono: ["DM Mono", "Courier New", "monospace"],
         sans: ["Inter", "system-ui", "sans-serif"],
-        google: ["Google Sans", "Roboto", "-apple-system", "sans-serif"],
       },
     },
   },

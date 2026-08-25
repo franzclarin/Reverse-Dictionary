@@ -32,29 +32,29 @@ export default function WordShareButtons({
   };
 
   const btnStyle = {
-    color: "var(--gs-text-secondary)",
-    border: "1px solid var(--gs-border)",
+    color: "var(--rd-ink-secondary)",
+    border: "1px solid var(--rd-border)",
   };
 
   return (
     <div className="flex gap-2">
       <button
         onClick={handleCopy}
-        className="flex items-center gap-1.5 px-3 py-2 font-google text-sm rounded transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="flex items-center gap-1.5 px-3 py-2 font-sans text-sm rounded-md transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
         style={{
-          outlineColor: "var(--gs-accent)",
-          ...(copied ? { color: "var(--gs-success)", border: "1px solid var(--gs-border)" } : btnStyle),
+          outlineColor: "var(--rd-accent)",
+          ...(copied ? { color: "var(--rd-success)", border: "1px solid var(--rd-border)" } : btnStyle),
         }}
         onMouseEnter={(e) => {
           if (!copied) {
-            e.currentTarget.style.borderColor = "var(--gs-accent)";
-            e.currentTarget.style.color = "var(--gs-accent)";
+            e.currentTarget.style.borderColor = "var(--rd-accent)";
+            e.currentTarget.style.color = "var(--rd-accent)";
           }
         }}
         onMouseLeave={(e) => {
           if (!copied) {
-            e.currentTarget.style.borderColor = "var(--gs-border)";
-            e.currentTarget.style.color = "var(--gs-text-secondary)";
+            e.currentTarget.style.borderColor = "var(--rd-border)";
+            e.currentTarget.style.color = "var(--rd-ink-secondary)";
           }
         }}
       >
@@ -82,15 +82,15 @@ export default function WordShareButtons({
 
       <button
         onClick={handleTwitter}
-        className="flex items-center gap-1.5 px-3 py-2 font-google text-sm rounded transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-        style={{ ...btnStyle, outlineColor: "var(--gs-accent)" }}
+        className="flex items-center gap-1.5 px-3 py-2 font-sans text-sm rounded-md transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        style={{ ...btnStyle, outlineColor: "var(--rd-accent)" }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = "var(--gs-accent)";
-          e.currentTarget.style.color = "var(--gs-accent)";
+          e.currentTarget.style.borderColor = "var(--rd-accent)";
+          e.currentTarget.style.color = "var(--rd-accent)";
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = "var(--gs-border)";
-          e.currentTarget.style.color = "var(--gs-text-secondary)";
+          e.currentTarget.style.borderColor = "var(--rd-border)";
+          e.currentTarget.style.color = "var(--rd-ink-secondary)";
         }}
       >
         <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">

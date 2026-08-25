@@ -1,20 +1,22 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Inter:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --gs-bg: #ffffff;
-  --gs-text-primary: #202124;
-  --gs-text-secondary: #5f6368;
-  --gs-text-muted: #70757a;
-  --gs-text-gloss: #4d5156;
-  --gs-accent: #1a73e8;
-  --gs-hover-bg: #f8f9fa;
-  --gs-border: #dfe1e5;
-  --gs-error: #d93025;
-  --gs-success: #1e8e3e;
+  --rd-paper: #faf7f2;
+  --rd-ink: #211d19;
+  --rd-ink-secondary: #55504a;
+  --rd-ink-muted: #6f6a5f;
+  --rd-ink-gloss: #3f3a34;
+  --rd-accent: #7a2e2e;
+  --rd-accent-hover: #632424;
+  --rd-accent-soft: #f4e6e2;
+  --rd-hover: #f1ece2;
+  --rd-border: #e2dbcd;
+  --rd-error: #a8331f;
+  --rd-success: #3f6b3f;
 }
 
 *,
@@ -24,13 +26,13 @@
 }
 
 html {
-  background: var(--gs-bg);
+  background: var(--rd-paper);
 }
 
 body {
-  background: var(--gs-bg);
-  color: var(--gs-text-primary);
-  font-family: 'Roboto', 'Inter', -apple-system, sans-serif;
+  background: var(--rd-paper);
+  color: var(--rd-ink);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -43,7 +45,7 @@ body {
 }
 
 /* Result row fade-in-up: 4px slide, 180ms ease-out. */
-@keyframes gsFadeInUp {
+@keyframes rdFadeInUp {
   from {
     opacity: 0;
     transform: translateY(4px);
@@ -54,14 +56,55 @@ body {
   }
 }
 
-.gs-fade-in-up {
+.rd-fade-in-up {
   opacity: 0;
-  animation: gsFadeInUp 180ms ease-out forwards;
+  animation: rdFadeInUp 180ms ease-out forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gs-fade-in-up {
+  .rd-fade-in-up {
     opacity: 1;
+    animation: none;
+    transform: none;
+  }
+}
+
+/* Landing wordmark: the ¶ settles in like a stamp, slightly overshooting. */
+@keyframes rdStampIn {
+  from {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.rd-stamp-in {
+  opacity: 0;
+  animation: rdStampIn 420ms cubic-bezier(0.2, 0.8, 0.2, 1.2) forwards;
+}
+
+/* Tagline rule: draws left-to-right, like underlining a definition. */
+@keyframes rdUnderlineDraw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.rd-underline-draw {
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: rdUnderlineDraw 420ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-stamp-in {
+    opacity: 1;
+    animation: none;
+    transform: none;
+  }
+  .rd-underline-draw {
     animation: none;
     transform: none;
   }
@@ -73,14 +116,14 @@ body {
   to   { opacity: 1; }
 }
 
-@keyframes gsSpin {
+@keyframes rdSpin {
   to { transform: rotate(360deg); }
 }
 
 .loading-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(250, 247, 242, 0.88);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -96,18 +139,19 @@ body {
 }
 
 .loading-spinner {
-  width: 28px;
-  height: 28px;
-  border: 3px solid var(--gs-border);
-  border-top-color: var(--gs-accent);
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--rd-border);
+  border-top-color: var(--rd-accent);
   border-radius: 50%;
-  animation: gsSpin 0.7s linear infinite;
+  animation: rdSpin 0.7s linear infinite;
 }
 
 .loading-subtext {
-  font-family: 'Roboto', 'Inter', -apple-system, sans-serif;
-  font-size: 13px;
-  color: var(--gs-text-muted);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--rd-ink-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -116,6 +160,6 @@ body {
   }
   .loading-spinner {
     animation: none;
-    border-top-color: var(--gs-border);
+    border-top-color: var(--rd-border);
   }
 }

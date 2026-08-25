@@ -31,19 +31,19 @@ export default function SaveWordButton({
     <button
       onClick={handleToggle}
       disabled={loading}
-      className="flex items-center gap-1.5 px-4 py-2 font-google text-sm rounded transition-all disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+      className="flex items-center gap-1.5 px-4 py-2 font-sans text-sm font-medium rounded-md transition-all disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
       style={{
-        outlineColor: "var(--gs-accent)",
+        outlineColor: "var(--rd-accent)",
         ...(saved
           ? {
-              background: "var(--gs-accent)",
+              background: "var(--rd-accent)",
               color: "#ffffff",
-              border: "1px solid var(--gs-accent)",
+              border: "1px solid var(--rd-accent)",
             }
           : {
               background: "transparent",
-              color: "var(--gs-accent)",
-              border: "1px solid var(--gs-accent)",
+              color: "var(--rd-accent)",
+              border: "1px solid var(--rd-accent)",
             }),
       }}
     >

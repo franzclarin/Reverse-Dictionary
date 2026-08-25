@@ -16,40 +16,36 @@ export default function ResultListItem({
 }: ResultListItemProps) {
   return (
     <li
-      className="gs-fade-in-up py-3"
+      className="rd-fade-in-up py-3"
       style={{ animationDelay: `${index * 30}ms` }}
     >
       <Link
         href={`/word/${encodeURIComponent(word)}`}
-        className="-mx-3 block rounded-lg px-3 py-2 transition-colors hover:bg-[var(--gs-hover-bg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-        style={{ outlineColor: "var(--gs-accent)" }}
+        className="-mx-3 flex items-center justify-between gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-[var(--rd-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        style={{ outlineColor: "var(--rd-accent)" }}
       >
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-baseline gap-2 min-w-0">
           <span
-            className="font-google hover:underline"
-            style={{ fontSize: "20px", fontWeight: 500, color: "var(--gs-accent)" }}
+            className="font-serif truncate"
+            style={{ fontSize: "22px", color: "var(--rd-ink)" }}
           >
             {word}
           </span>
           {partOfSpeech && (
             <span
-              className="font-google shrink-0 rounded px-2 py-0.5"
-              style={{
-                fontSize: "12px",
-                color: "var(--gs-text-muted)",
-                background: "var(--gs-hover-bg)",
-              }}
+              className="font-mono shrink-0 uppercase tracking-wide"
+              style={{ fontSize: "11px", color: "var(--rd-ink-muted)" }}
             >
               {partOfSpeech}
             </span>
           )}
         </div>
-        <p
-          className="font-google mt-1"
-          style={{ fontSize: "14px", lineHeight: 1.58, color: "var(--gs-text-gloss)" }}
+        <span
+          className="font-mono shrink-0 tabular-nums"
+          style={{ fontSize: "13px", color: "var(--rd-accent)" }}
         >
-          {similarity.toFixed(2)} match
-        </p>
+          {(similarity * 100).toFixed(0)}%
+        </span>
       </Link>
     </li>
   );

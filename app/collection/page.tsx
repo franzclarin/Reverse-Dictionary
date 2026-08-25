@@ -26,16 +26,16 @@ export default async function CollectionPage() {
   }));
 
   return (
-    <main className="min-h-screen" style={{ background: "var(--gs-bg)" }}>
+    <main className="min-h-screen" style={{ background: "var(--rd-paper)" }}>
       <div className="max-w-5xl mx-auto px-6 py-12">
         <div className="mb-10">
           <h1
-            className="font-google mb-2"
-            style={{ fontSize: "clamp(1.75rem,4vw,2.5rem)", fontWeight: 400, color: "var(--gs-text-primary)" }}
+            className="font-serif mb-2"
+            style={{ fontSize: "clamp(1.75rem,4vw,2.5rem)", fontWeight: 400, color: "var(--rd-ink)" }}
           >
             My Words
           </h1>
-          <p className="font-google text-sm" style={{ color: "var(--gs-text-muted)" }}>
+          <p className="font-mono text-xs uppercase tracking-wide" style={{ color: "var(--rd-ink-muted)" }}>
             {words.length} {words.length === 1 ? "word" : "words"} saved
           </p>
         </div>

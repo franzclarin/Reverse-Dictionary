@@ -19,39 +19,53 @@ export default function Home() {
   return (
     <main
       className="flex flex-col items-center px-6 min-h-screen"
-      style={{ background: "var(--gs-bg)" }}
+      style={{ background: "var(--rd-paper)" }}
     >
-      <div className="w-full max-w-[584px] pt-16 md:pt-[25vh] flex flex-col items-center gap-8">
+      <div className="w-full max-w-[640px] pt-20 md:pt-[22vh] flex flex-col items-center gap-8">
         {/* Wordmark */}
-        <h1
-          className="font-google leading-none text-center"
-          style={{
-            fontSize: "clamp(2.75rem,6vw,4rem)",
-            fontWeight: 400,
-            color: "var(--gs-text-primary)",
-          }}
-        >
-          Reverse Dictionary
-        </h1>
-
-        {/* Search bar */}
-        <SearchInput onSearch={handleSearch} isLoading={isLoading} variant="landing" />
-
-        {/* Ghost action buttons */}
-        <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            form="search-form-landing"
-            disabled={isLoading}
-            className="font-google text-sm px-5 py-2.5 rounded transition-colors border border-transparent hover:border-[var(--gs-border)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+        <div className="flex flex-col items-center gap-3 text-center">
+          <h1
+            className="font-serif leading-none flex items-center gap-3"
             style={{
-              background: "var(--gs-hover-bg)",
-              color: "var(--gs-text-secondary)",
-              outlineColor: "var(--gs-accent)",
+              fontSize: "clamp(2.75rem,6vw,4rem)",
+              fontWeight: 400,
+              color: "var(--rd-ink)",
             }}
           >
-            Search
-          </button>
+            <span
+              aria-hidden="true"
+              className="rd-stamp-in"
+              style={{ color: "var(--rd-accent)", animationDelay: "80ms" }}
+            >
+              ¶
+            </span>
+            <span className="rd-fade-in-up" style={{ animationDelay: "140ms" }}>
+              Reverse Dictionary
+            </span>
+          </h1>
+          <div className="rd-fade-in-up flex flex-col items-center gap-2" style={{ animationDelay: "360ms" }}>
+            <p
+              className="font-mono text-xs uppercase tracking-widest"
+              style={{ color: "var(--rd-ink-muted)" }}
+            >
+              Describe it. Find the word.
+            </p>
+            <span
+              className="rd-underline-draw"
+              aria-hidden="true"
+              style={{
+                width: "56px",
+                height: "1.5px",
+                background: "var(--rd-accent)",
+                animationDelay: "540ms",
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Search bar */}
+        <div className="rd-fade-in-up w-full" style={{ animationDelay: "480ms" }}>
+          <SearchInput onSearch={handleSearch} isLoading={isLoading} variant="landing" />
         </div>
       </div>
     </main>
