@@ -4,6 +4,7 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { embed } from "@/lib/embedder";
 import { prisma } from "@/lib/prisma";
+import { runShadowLookup } from "@/lib/shadowLookup";
 import {
   Subsystem,
   SubsystemError,
@@ -13,6 +14,14 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // model cold-start needs up to ~20s; default 10s is too short
+
+// NOT YET ENABLED — GlossEmbedding has no rows yet (see MIGRATION_AUDIT.md /
+// scripts/build-gloss-index.ts), so every shadow query would just return
+// nothing useful right now. Flip on only after that table is populated, and
+// only after this whole block has been reviewed and deployed deliberately —
+// it is not live merely because it's written.
+const SHADOW_LOOKUP_ENABLED = false;
+const SHADOW_SAMPLE_RATE = 0.1;
 
 type Ratelimiters = { guest: Ratelimit; user: Ratelimit };
 
@@ -177,6 +186,16 @@ export async function POST(request: NextRequest) {
       });
     }
     console.log(`[lookup] db ok ms=${Date.now() - dbStartedAt} rows=${rows.length}`);
+
+    // Fire-and-forget: never awaited, sampled, and never allowed to affect
+    // the response or its latency. See lib/shadowLookup.ts for what's logged
+    // and why. SHADOW_LOOKUP_ENABLED stays false until GlossEmbedding is
+    // actually populated and this has been reviewed — see the flag's comment.
+    if (SHADOW_LOOKUP_ENABLED && rows.length > 0 && Math.random() < SHADOW_SAMPLE_RATE) {
+      runShadowLookup(query, vectorLiteral, rows[0]).catch((error) => {
+        console.error(`[lookup] shadow log failed (non-fatal): ${formatErrorShape(describeError(error))}`);
+      });
+    }
 
     // Embed + db time only — excludes auth/ratelimit overhead, which isn't
     // part of "how long did the search take" from the user's perspective.

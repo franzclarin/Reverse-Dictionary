@@ -64,3 +64,48 @@ model VocabEmbedding {
   word      String                     @unique
   embedding Unsupported("vector(384)")
 }
+
+/// Production synset-keyed gloss index (CLAUDE.md "Next steps"), staged but
+/// NOT YET POPULATED and NOT YET QUERIED by /api/lookup. Building it requires
+/// dropping VocabEmbedding's IVFFlat index to fit Neon's 512MB ceiling — see
+/// the commented-out DROP INDEX in this table's migration file. That step,
+/// and running scripts/build-gloss-index.ts's insert phase against
+/// production, are both deliberately left for explicit user confirmation
+/// rather than run by this migration audit. See MIGRATION_AUDIT.md.
+model GlossEmbedding {
+  id        Int                          @id @default(autoincrement())
+  /// "<pos>:<wordnet offset>", e.g. "noun:00123456".
+  synsetKey String                       @unique
+  pos       String
+  /// WordNet definition text only (no examples) — the exact string embedded.
+  gloss     String
+  /// Synset members in WordNet's own within-synset order (sense familiarity)
+  /// — the eval-validated production expansion order ("--expansion-order
+  /// wordnet", +2.5pp lenient R@1 over zipf ordering). Stored, not
+  /// recomputed at query time.
+  lemmas    String[]
+  embedding Unsupported("halfvec(384)")
+}
+
+/// Shadow-log for the gloss-index cutover decision (CLAUDE.md "Next steps":
+/// gated on shadow-log agreement over real production traffic, not the
+/// 287-query hand-authored eval set alone). Staged but NOT YET APPLIED to
+/// production and NOT YET WRITTEN TO by /api/lookup — see
+/// lib/shadowLookup.ts and MIGRATION_AUDIT.md. Logs a query hash, not query
+/// text, preserving the existing "no query text has ever been logged"
+/// property. Logs only each system's top-1 answer — enough to measure
+/// agreement rate between VocabEmbedding and GlossEmbedding, not enough to
+/// reconstruct query text or a full paired accuracy comparison (production
+/// traffic has no labelled target either way).
+model ShadowLookup {
+  id            String   @id @default(cuid())
+  queryHash     String
+  oldTop1       String
+  oldSimilarity Float
+  newTop1       String
+  newSimilarity Float
+  agree         Boolean
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+}

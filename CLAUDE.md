@@ -180,12 +180,6 @@ Authored slice, 287 reachable queries. **Lenient R@1 is the metric the decision 
 - Pre-registered prediction: narrative recall was **not** materially below the other styles, so its conditional never fired.
 - **The fine-tune's original 10.9% training-time figure is unusable and must not be cited** — measured with no held-out split, so it describes memorisation, not retrieval.
 
-### Next steps
-
-- Production build of a **synset-keyed gloss index** at `halfvec(384)`: 114,662 rows, ~88 MB of vector payload. Dropping `VocabEmbedding`'s IVFFlat index frees 230 MB, which is what makes it fit under the 512 MB ceiling while keeping the bare vectors as an exact-search rollback.
-- `halfvec` recall cost is **settled: zero at 384 dimensions.** Do not use `halfvec(256)`.
-- Open: whether a cutover is acceptable, to be decided on shadow-log agreement over real traffic rather than on 287 hand-authored queries.
-
 ## Commands
 
 ```bash
