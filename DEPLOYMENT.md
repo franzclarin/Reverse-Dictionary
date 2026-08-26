@@ -1,238 +1,88 @@
 # Deployment Guide
 
-This guide covers deploying your Reverse Dictionary application to production.
+This app is deployed on **Vercel only**. That isn't just a preference — the search path runs an ONNX embedding model in-function (`serverComponentsExternalPackages: ["@xenova/transformers"]`) and depends on Neon-specific pooled-connection behavior for migrations, neither of which this guide has validated on Railway/Fly/Netlify/etc. If you fork this to another platform, treat the search feature as unverified until you've confirmed both of those independently.
 
-## Deploy to Vercel (Recommended)
-
-Vercel is the recommended deployment platform for Next.js applications. It offers zero-configuration deployment with automatic HTTPS, CDN, and serverless functions.
+## Deploy to Vercel
 
 ### Prerequisites
 
-- A GitHub account
-- Your code pushed to a GitHub repository
-- An Anthropic API key
+- A GitHub account, with this repo pushed there
+- A Neon Postgres database with the `pgvector` extension enabled
+- A Clerk account
+- Optional: an Upstash Redis database provisioned via the Vercel Marketplace (`upstash/upstash-kv`) — search works without it, just with no rate limiting
 
-### Step-by-Step Deployment
+### Step 1 — Import the project
 
-#### 1. Prepare Your Repository
+1. Go to [vercel.com](https://vercel.com), sign in with GitHub, and import this repository.
+2. Framework preset (Next.js), root directory, build command, and output directory are all auto-detected.
+
+### Step 2 — Environment variables
+
+Add these under Settings → Environment Variables (Production, Preview, and Development as appropriate):
+
+| Variable | Source |
+|---|---|
+| `DATABASE_URL` | Neon connection string (owner role for migrations; a read-only role is enough for the app itself) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` | Clerk dashboard |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Written automatically if you provision Redis via `vercel integration add upstash/upstash-kv` — don't hand-copy these from elsewhere; a stale hand-set pair here previously caused a full search outage (see CLAUDE.md) |
+| `NEXT_PUBLIC_SITE_URL` | Your production domain, if it's not `reversedictionary.xyz` |
+
+### Step 3 — Apply migrations
+
+Neon's pooled connection breaks `prisma migrate deploy`'s advisory lock. Apply migration SQL directly instead:
 
 ```bash
-# Initialize git if you haven't already
-git init
-
-# Add all files
-git add .
-
-# Commit your changes
-git commit -m "Initial commit: Reverse Dictionary app"
-
-# Create a new repository on GitHub, then push
-git remote add origin https://github.com/yourusername/reverse-dictionary.git
-git branch -M main
-git push -u origin main
+npx prisma db execute --file prisma/migrations/<migration-folder>/migration.sql
 ```
 
-#### 2. Deploy to Vercel
+`VocabEmbedding` (141,854 pre-computed word embeddings) is a data seed, not something any migration or `npm install` step generates — see CLAUDE.md if you're standing this app up against a fresh database.
 
-**Option A: Using Vercel Dashboard**
+### Step 4 — Deploy
 
-1. Go to [vercel.com](https://vercel.com) and sign in with GitHub
-2. Click "Add New Project"
-3. Import your `reverse-dictionary` repository
-4. Configure the project:
-   - Framework Preset: Next.js (auto-detected)
-   - Root Directory: ./
-   - Build Command: `npm run build` (auto-detected)
-   - Output Directory: `.next` (auto-detected)
-5. Add Environment Variables:
-   - Click "Environment Variables"
-   - Add `ANTHROPIC_API_KEY` with your API key
-   - Select all environments (Production, Preview, Development)
-6. Click "Deploy"
+**Push to `main`.** Vercel's Git integration clones the repo, so `.gitignore` applies and the build only includes what's actually tracked.
 
-**Option B: Using Vercel CLI**
+**Do not run `vercel deploy --prod` from the CLI.** It uploads the working directory as-is, and `.gitignore` does not apply to CLI deploys (there's no `.vercelignore` in this repo either) — it will sweep in the gitignored `reverse_dict_model.zip` / `_model_tmp/` (~1.5GB) and blow Vercel's 100MB per-file cap. This has been hit before; always deploy by pushing.
 
-```bash
-# Install Vercel CLI
-npm install -g vercel
+### Step 5 — Verify
 
-# Login to Vercel
-vercel login
+1. Open the deployment URL.
+2. Run a search and confirm results return (don't expect the top result to always be the "intended" word — see README's note on search quality).
+3. Check function logs for `[lookup] embed ok` / `[lookup] db ok` lines confirming both subsystems are healthy.
 
-# Deploy
-vercel
+## Post-Deployment
 
-# Follow the prompts:
-# - Set up and deploy: Y
-# - Which scope: [your-username]
-# - Link to existing project: N
-# - Project name: reverse-dictionary
-# - Directory: ./
-# - Override settings: N
+### Custom Domain
 
-# Add environment variable
-vercel env add ANTHROPIC_API_KEY
-# Paste your API key when prompted
-# Select all environments
+Settings → Domains → add your domain, update DNS as instructed. Also set `NEXT_PUBLIC_SITE_URL` to match, so the sitemap points at the real domain rather than falling back to the default.
 
-# Deploy to production
-vercel --prod
-```
+### Monitoring
 
-#### 3. Verify Deployment
+- **Logs**: Vercel's Deployments → function logs. `/api/lookup` logs `embed ok ms=… dims=…`, `db ok ms=… rows=…`, or on failure `[lookup] FAILED subsystem=<model|database|ratelimit|unknown> …` — the subsystem tag is deliberate (see CLAUDE.md's "Tag failures by subsystem") so a generic `fetch failed` never has to be diagnosed blind.
+- **Rate limiting failures fail open** — a stale or deleted Upstash database degrades to "no rate limiting," not a search outage. Still worth alerting on if `[lookup] rate limit check failed — FAILING OPEN` appears repeatedly.
 
-1. Vercel will provide a deployment URL (e.g., `reverse-dictionary.vercel.app`)
-2. Open the URL in your browser
-3. Test the application with example queries
-4. Verify that results are being returned correctly
-
-### Post-Deployment Configuration
-
-#### Custom Domain (Optional)
-
-1. In Vercel Dashboard, go to your project
-2. Navigate to Settings → Domains
-3. Add your custom domain
-4. Update DNS records as instructed
-5. Wait for DNS propagation (can take up to 48 hours)
-
-#### Environment Variables Management
-
-To update environment variables:
-
-1. Go to Settings → Environment Variables
-2. Edit or add new variables
-3. Redeploy for changes to take effect
-
-#### Monitoring
-
-Vercel provides built-in monitoring:
-
-1. Analytics: Track page views and performance
-2. Logs: View serverless function logs under "Deployments"
-3. Speed Insights: Monitor Core Web Vitals
-
-## Alternative Deployment Options
-
-### Deploy to Railway
-
-1. Go to [railway.app](https://railway.app)
-2. Create a new project from GitHub repo
-3. Add environment variable: `ANTHROPIC_API_KEY`
-4. Deploy automatically
-
-### Deploy to Fly.io
+### Updating
 
 ```bash
-# Install flyctl
-# macOS
-brew install flyctl
-
-# Linux
-curl -L https://fly.io/install.sh | sh
-
-# Windows
-powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
-
-# Login
-fly auth login
-
-# Launch app
-fly launch
-
-# Set environment variable
-fly secrets set ANTHROPIC_API_KEY=your-api-key-here
-
-# Deploy
-fly deploy
-```
-
-### Deploy to Netlify
-
-1. Connect your GitHub repository to Netlify
-2. Build settings:
-   - Build command: `npm run build`
-   - Publish directory: `.next`
-3. Add environment variable: `ANTHROPIC_API_KEY`
-4. Deploy
-
-## Production Checklist
-
-Before going live, ensure:
-
-- [ ] Environment variables are set correctly
-- [ ] Build completes successfully locally (`npm run build`)
-- [ ] All example queries work correctly
-- [ ] Error handling displays properly
-- [ ] Application is responsive on mobile devices
-- [ ] API key has sufficient credits
-- [ ] Custom domain is configured (if applicable)
-- [ ] SSL/HTTPS is working
-- [ ] Analytics are configured (optional)
-
-## Monitoring & Maintenance
-
-### API Usage Monitoring
-
-Monitor your Anthropic API usage:
-1. Visit [console.anthropic.com](https://console.anthropic.com)
-2. Check usage and billing
-3. Set up usage alerts if needed
-
-### Performance Monitoring
-
-Use Vercel Analytics to track:
-- Page load times
-- API response times
-- Error rates
-- User traffic patterns
-
-### Updating the Application
-
-To deploy updates:
-
-```bash
-# Make your changes
-git add .
-git commit -m "Description of changes"
+git add <files>
+git commit -m "..."
 git push
-
-# Vercel automatically deploys on push to main branch
 ```
+Vercel deploys automatically on push to `main`.
 
 ## Troubleshooting
 
-### Deployment Fails
+### Deployment fails at build
+- Check the Vercel build logs.
+- Confirm `npx tsc --noEmit` and `npm run build` succeed locally first.
 
-- Check build logs in Vercel dashboard
-- Ensure all dependencies are in `package.json`
-- Verify TypeScript has no errors: `npm run build`
+### Search returns a 500
+- Check the function log's `subsystem` tag (`model`, `database`, or `ratelimit`) and `code` — see CLAUDE.md's "Observed cause codes" for what `ENOTFOUND`/`ECONNREFUSED`/`EAI_AGAIN` typically mean in this app.
+- A cold-start model download can legitimately take up to ~20s; `maxDuration = 60` accounts for this, so a genuine timeout points at a network problem reaching the Hugging Face CDN, not a slow-but-working load.
 
-### API Not Working in Production
-
-- Verify `ANTHROPIC_API_KEY` is set in Vercel environment variables
-- Check that the variable name matches exactly
-- Redeploy after adding environment variables
-
-### Slow Response Times
-
-- Consider upgrading your Vercel plan for better performance
-- Implement caching for common queries
-- Use Vercel Edge Functions for lower latency
+### Search is slow
+- Confirm you're comparing against production latency (both embed and DB round-trips happen inside `iad1`), not a local-machine-to-Neon round trip during dev, which is much slower and not representative — see CLAUDE.md's eval-harness latency note.
 
 ## Scaling Considerations
 
-As your app grows:
-
-1. **Rate Limiting**: Implement request throttling to prevent abuse
-2. **Caching**: Add Redis/Upstash for common queries
-3. **Analytics**: Track popular queries to improve UX
-4. **Authentication**: Add user accounts for premium features
-5. **Database**: Store query history and user preferences
-
-## Support
-
-For deployment issues:
-- Vercel: [vercel.com/docs](https://vercel.com/docs)
-- Next.js: [nextjs.org/docs](https://nextjs.org/docs)
-- Anthropic: [docs.anthropic.com](https://docs.anthropic.com)
+- **Storage ceiling**: the Neon project is capped at 512MB; `VocabEmbedding` alone is ~452MB. There is no headroom for a second full-size vector index without dropping something first — see CLAUDE.md if you're considering the staged `GlossEmbedding` cutover.
+- **Rate limiting** is already in place (Upstash sliding window); raising limits is a one-line change in `app/api/lookup/route.ts`, not new infrastructure.

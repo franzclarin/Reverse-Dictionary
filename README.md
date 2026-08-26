@@ -1,8 +1,10 @@
 # Reverse Dictionary
 
-A reverse dictionary powered by Claude AI. Describe a concept in plain language and discover the exact word you're looking for.
+A reverse dictionary powered by a fine-tuned sentence-embedding model. Describe a concept in plain language and search a 141k-word vocabulary for the closest match by meaning.
 
 ## Examples
+
+Queries like these are what the app is built for — semantic search over single-word vectors doesn't always nail the exact term (see "A note on search quality" below), but this is the shape of the problem it's solving:
 
 - "the smell of rain on dry earth" → **petrichor**
 - "fear of long words" → **hippopotomonstrosesquippedaliophobia**
@@ -11,184 +13,161 @@ A reverse dictionary powered by Claude AI. Describe a concept in plain language 
 
 ## Features
 
-- **AI-Powered Search**: Uses Claude Sonnet 4 for accurate word matching
-- **Word Pages**: Each result has a dedicated SEO-optimized page at `/word/[word]`
-- **Saved Collection**: Authenticated users can save words to a personal collection
-- **Credits System**: Earn credits through daily lookups, streaks, and saving words
-- **Word Games**: Five casino-style games — Word Roulette, Definition Bluff, Lexical Slots, Higher or Lower, Speed Round
-- **Leaderboard**: Top 10 credit rankings across all users
-- **Rate Limiting**: 3 lookups/day for guests, 50/day for signed-in users
-- **Auth**: Sign in with Clerk to unlock higher limits, word saving, and games
-- **Share**: Copy link or share results directly to X
+- **Semantic search**: a query is embedded and compared against 141,854 pre-computed word vectors via pgvector cosine similarity — no generative model in the loop.
+- **Word pages**: each result has a dedicated page at `/word/[word]` with related words (nearest neighbours in embedding space).
+- **Saved collection**: authenticated users can save words to a personal collection.
+- **Credits & leaderboard**: users earn credits for saving new words; `/api/leaderboard` ranks the top 10 by credits.
+- **Rate limiting**: 50 lookups/day for guests, 200/day for signed-in users, backed by Upstash Redis — fails open if the limiter itself is unreachable.
+- **Auth**: sign in with Clerk to unlock the higher limit, saved words, and credits.
+- **Share**: copy link or share results directly to X.
 
 ## Tech Stack
 
 - **Framework**: Next.js 14 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
-- **AI**: Anthropic Claude API (`claude-sonnet-4-20250514`)
+- **Search**: a fine-tuned sentence-embedding model (`franzclarin/ReverseDictionary`), run in-function via Transformers.js (ONNX) — no external inference API, no generative AI dependency
+- **Database**: Neon Postgres + `pgvector`, via Prisma 5
 - **Auth**: Clerk (`@clerk/nextjs` v5)
-- **Rate Limiting**: Upstash Redis + `@upstash/ratelimit`
-- **Database**: PostgreSQL via Prisma v5
+- **Rate Limiting**: Upstash Redis (Vercel Marketplace) + `@upstash/ratelimit`
 - **Deployment**: Vercel
+
+For how the retrieval model actually works, its measured limitations, and the offline evaluation harness, see **[CLAUDE.md](CLAUDE.md)** — it's the maintained source of truth for the search internals.
+
+## A note on search quality
+
+`VocabEmbedding` stores the embedding of each bare word, not a definition — so a multi-word description is compared against single-token vectors. This produces a well-documented "lexical echo" effect (results that share a word stem with the query tend to outscore the actual answer). Measured Recall@1 on a hand-authored 287-query eval set is ~10% strict / ~10-11% lenient at the approximate index — see CLAUDE.md's "Headline results" for the full numbers, including an experimental gloss-indexed approach that measured +13-16 points better offline but is not yet in production.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
-- An Anthropic API key ([console.anthropic.com](https://console.anthropic.com/))
+- A Postgres database with the `pgvector` extension (this project uses [Neon](https://neon.tech))
 - A Clerk account ([dashboard.clerk.com](https://dashboard.clerk.com/))
-- An Upstash Redis database ([console.upstash.com](https://console.upstash.com/))
-- A PostgreSQL database
+- Optional: an Upstash Redis database (Vercel Marketplace `upstash/upstash-kv`) for rate limiting — the app runs without it, just unlimited
 
 ### Installation
 
-1. Clone the repository:
+1. Clone the repository and install dependencies:
 ```bash
-git clone https://github.com/yourusername/reverse-dictionary.git
-cd reverse-dictionary
-```
-
-2. Install dependencies:
-```bash
+git clone https://github.com/franzclarin/Reverse-Dictionary.git
+cd Reverse-Dictionary
 npm install
 ```
 
-3. Create a `.env.local` file and add your environment variables (see below).
+2. Create `.env.local` with the variables below. If the project is already linked to Vercel, `vercel env pull .env.local` is the fastest way to get real values.
 
-4. Run the Prisma migration:
+3. Apply migrations. Neon's pooled connection breaks `prisma migrate deploy`'s advisory lock, so apply the SQL directly instead:
 ```bash
-npx prisma db push
+npx prisma db execute --file prisma/migrations/<migration>/migration.sql
 ```
+(`VocabEmbedding` itself — 141,854 rows of pre-computed embeddings — is a data migration, not something `npm install` seeds; see CLAUDE.md if you're standing up a fresh database.)
 
-5. Run the development server:
+4. Run the development server:
 ```bash
 npm run dev
 ```
 
-6. Open [http://localhost:3000](http://localhost:3000) in your browser.
+5. Open [http://localhost:3000](http://localhost:3000).
 
 ## Environment Variables
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `ANTHROPIC_API_KEY` | Anthropic API key | Yes |
+| `DATABASE_URL` | Postgres (Neon) connection string, `pgvector` enabled | Yes |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key | Yes |
 | `CLERK_SECRET_KEY` | Clerk secret key | Yes |
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL | Yes (rate limiting) |
-| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token | Yes (rate limiting) |
-| `GAME_TOKEN_SECRET` | Secret for signing game state tokens | No (recommended) |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Upstash Redis REST creds (written by the Vercel Marketplace integration) | No — rate limiting fails open without it |
+| `NEXT_PUBLIC_SITE_URL` | Canonical origin for the sitemap | No — falls back to the production domain |
+
+`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` are read as a fallback if the `KV_*` pair isn't set, but shouldn't be hand-set for a Marketplace-provisioned database — see CLAUDE.md's "Redis creds come from `KV_*`" note.
 
 ## Project Structure
 
 ```
-reverse-dictionary/
+Reverse-Dictionary/
 ├── app/
 │   ├── api/
-│   │   ├── reverse-dictionary/
-│   │   │   └── route.ts          # Main search endpoint
-│   │   ├── word/[word]/
-│   │   │   ├── route.ts          # Word profile fetch/generate
-│   │   │   └── save/route.ts     # Save/unsave toggle
-│   │   ├── credits/
-│   │   │   └── route.ts          # GET balance, POST award
-│   │   ├── leaderboard/
-│   │   │   └── route.ts          # Top 10 credit rankings
-│   │   └── games/
-│   │       └── [game]/
-│   │           └── route.ts      # Game endpoints (5 games)
-│   ├── word/[word]/
-│   │   └── page.tsx              # SSR word detail page
-│   ├── games/
-│   │   ├── page.tsx              # Game lobby + leaderboard
-│   │   └── [game]/
-│   │       └── page.tsx          # Individual game page
-│   ├── collection/
-│   │   └── page.tsx              # Saved words collection
-│   ├── sign-in/[[...sign-in]]/
-│   │   └── page.tsx              # Clerk sign-in
-│   ├── sign-up/[[...sign-up]]/
-│   │   └── page.tsx              # Clerk sign-up
-│   ├── sitemap.ts                # Auto-generated sitemap
-│   ├── layout.tsx                # Root layout (ClerkProvider)
-│   └── page.tsx                  # Main search page
+│   │   ├── lookup/route.ts           # Search: embed query → pgvector → top-k
+│   │   ├── word/[word]/route.ts      # Word page data (existing row or minimal stub)
+│   │   ├── word/[word]/save/route.ts # Save/unsave, awards credits
+│   │   ├── credits/route.ts          # GET balance, POST award
+│   │   └── leaderboard/route.ts      # Top 10 by credits
+│   ├── word/[word]/page.tsx          # Word detail page + related words
+│   ├── search/page.tsx               # Results list (owns the /api/lookup call)
+│   ├── collection/page.tsx           # Saved words
+│   ├── sign-in/ , sign-up/           # Clerk auth pages
+│   ├── sitemap.ts
+│   ├── layout.tsx                    # Root layout (ClerkProvider)
+│   └── page.tsx                      # Landing / search entry
 ├── components/
-│   ├── CreditsDisplay.tsx        # Credits balance in navbar
-│   ├── ResultDisplay.tsx         # Search results with word links
-│   ├── SaveWordButton.tsx        # Save/unsave toggle (client)
-│   └── WordShareButtons.tsx      # Copy link + share on X (client)
+│   ├── SearchInput.tsx, SearchResults.tsx, ResultListItem.tsx
+│   ├── Navbar.tsx, WordLink.tsx, WordShareButtons.tsx
+│   ├── SaveWordButton.tsx, CollectionGrid.tsx
 ├── lib/
-│   ├── credits.ts                # Credit award logic + game settlement
-│   ├── gameTokens.ts             # HMAC-signed game state tokens
-│   ├── gameUtils.ts              # Random words, rate limiting, bet validation
-│   ├── prisma.ts                 # Singleton PrismaClient
-│   └── wordData.ts               # Word profile: DB cache → Claude
+│   ├── embedder.ts                   # Transformers.js singleton (the ONNX model)
+│   ├── wordData.ts                   # getWordData / getRelatedWords (React cache())
+│   ├── prisma.ts                     # Singleton PrismaClient
+│   ├── credits.ts                    # Credit award logic
+│   └── errors.ts                     # SubsystemError / describeError for fetch-failed triage
 ├── prisma/
-│   └── schema.prisma             # Word, SavedWord, User, Lookup, GameRound models
-└── middleware.ts                 # Clerk middleware (all routes public)
+│   └── schema.prisma                 # Word, SavedWord, User, Lookup, GameRound, VocabEmbedding, …
+├── scripts/, eval/                   # Offline retrieval evaluation harness (dev-only, read-only)
+└── middleware.ts                     # Clerk middleware (all routes public)
 ```
 
 ## API Reference
 
-### POST /api/reverse-dictionary
+### POST /api/lookup
 
 Request:
 ```json
-{ "description": "the smell of rain on dry earth" }
+{ "query": "the smell of rain on dry earth", "k": 10 }
 ```
 
 Response:
 ```json
 {
-  "word": "petrichor",
-  "definition": "The pleasant smell that accompanies the first rain after a dry spell.",
-  "alternatives": ["geosmin"],
-  "examples": [
-    "The petrichor after the storm was incredibly refreshing."
-  ],
-  "rateLimit": { "remaining": 49, "limit": 50, "isGuest": false }
+  "results": [{ "word": "petrichor", "similarity": 0.71 }, ...],
+  "timingMs": 812
 }
 ```
 
-Returns `429` when the rate limit is exceeded.
+Returns `429` when the rate limit is exceeded, and a `{ error, subsystem, code, detail }` shape on failure — see CLAUDE.md's "Conventions & gotchas" for why a bare `fetch failed` is never the real error here.
 
 ### GET /api/word/[word]
 
-Returns a full word profile (fetched from DB or generated by Claude).
+Returns related words (nearest neighbours by embedding) and whatever `Word` row exists for the page — text fields are empty for words that haven't been profiled.
 
-### POST /api/word/[word]/save
+### POST / DELETE /api/word/[word]/save
 
-Saves a word to the authenticated user's collection. DELETE removes it. Requires auth.
+Saves or unsaves a word for the authenticated user. Saving a *new* word awards credits. Requires auth.
 
-### GET /api/credits
+### GET / POST /api/credits
 
-Returns the authenticated user's current credit balance.
+Returns or awards the authenticated user's credit balance.
 
 ### GET /api/leaderboard
 
-Returns the top 10 users by credits with display names from Clerk.
-
-### POST /api/games/[game]
-
-Plays a round of one of the five games. Available games: `word-roulette`, `definition-bluff`, `lexical-slots`, `higher-lower`, `speed-round`. Requires auth. Bets must be between 10 and 500 credits.
+Top 10 users by credits, with display names resolved via Clerk.
 
 ## Development
 
 ```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm start        # Start production server
-npm run lint     # Run ESLint
-npx prisma studio  # Browse the database
+npm run dev            # Start development server
+npm run build           # Build for production
+npm start                # Start production server
+npm run lint             # Run ESLint
+npx tsc --noEmit         # Type-check
+npx prisma studio        # Browse the database
+
+npm run eval              # Offline retrieval eval — see CLAUDE.md "Evaluation"
 ```
 
-## Deployment (Vercel)
+## Deployment
 
-1. Push your code to GitHub and import the repo on [vercel.com](https://vercel.com).
-2. Add all environment variables under Settings → Environment Variables.
-3. Deploy — Vercel runs `prisma generate` automatically on build.
+**Deploy by pushing to `main`** — Vercel's Git integration is the only supported path. `vercel deploy --prod` uploads the working directory directly and ignores `.gitignore`, which sweeps in a ~1.5GB gitignored model artifact and blows Vercel's per-file cap. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## License
 

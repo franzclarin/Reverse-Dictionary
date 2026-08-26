@@ -1,189 +1,146 @@
 # Reverse Dictionary - Architecture Documentation
 
 ## Overview
-A production-ready reverse dictionary application that uses Claude AI to help users find words based on concept descriptions.
+
+A reverse dictionary application that finds words from concept descriptions using **semantic search over a fine-tuned sentence-embedding model** — not a generative model. There is no LLM call anywhere in the search or word-page flow; the entire "understanding" of a query is one forward pass through an embedding model, compared against pre-computed word vectors.
+
+Claude/Anthropic was removed from this app entirely on 2026-08-18. There is no `@anthropic-ai/sdk` and no `ANTHROPIC_API_KEY` anywhere in the codebase.
 
 ## Stack Selection
 
 ### Frontend & Backend
-- **Framework**: Next.js 14+ (App Router)
+- **Framework**: Next.js 14 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
-- **Deployment**: Vercel
+- **Deployment**: Vercel (region `iad1`)
 
-### AI Integration
-- **Model**: Claude Sonnet 4 (claude-sonnet-4-20250514)
-- **SDK**: @anthropic-ai/sdk
-- **API**: Anthropic Messages API
-
-## Architecture Decision Rationale
+### Retrieval
+- **Model**: `franzclarin/ReverseDictionary`, a sentence-transformer fine-tuned on WordNet (gloss, lemma, negative-lemma) triplets
+- **Runtime**: Transformers.js (ONNX), loaded and run **inside the Vercel function itself** — not a call to a hosted inference API. `quantized: false`, `{ pooling: "mean", normalize: true }`, matching the pipeline that produced the stored database vectors.
+- **Index**: Neon Postgres + `pgvector`, queried via Prisma 5's `$queryRawUnsafe` (the vector column is `Unsupported("vector(384)")`, so the typed client can't touch it)
 
 ### Why Next.js + Vercel?
-1. **Fast Deployment**: Zero-config deployment with Vercel
-2. **API Routes**: Built-in serverless functions for Claude API integration
-3. **Type Safety**: First-class TypeScript support
-4. **Performance**: Automatic optimization and edge caching
-5. **Developer Experience**: Hot reload, file-based routing, React Server Components
+1. Serverless functions run the embedding model in-function with no separate inference service to operate
+2. First-class TypeScript support
+3. Zero-config deployment, hot reload, file-based routing
+4. `serverComponentsExternalPackages: ["@xenova/transformers"]` keeps the native ONNX runtime out of the webpack bundle so Vercel ships its binaries correctly
 
 ## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         User Browser                         │
-│                                                               │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │           React Frontend (Next.js)                   │    │
-│  │  • Search Input Component                            │    │
-│  │  • Results Display                                    │    │
-│  │  • Loading States                                     │    │
-│  │  • Error Handling                                     │    │
+│  │  Next.js Frontend                                      │  │
+│  │  • SearchInput (landing page)                          │  │
+│  │  • SearchResults / ResultListItem (results page)       │  │
+│  │  • Word page (related words, save button)              │  │
 │  └──────────────────┬──────────────────────────────────┘    │
 └────────────────────│─────────────────────────────────────────┘
                      │ HTTPS
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Next.js API Route                         │
-│                   (/api/reverse-dictionary)                  │
+│              POST /api/lookup  (Node.js runtime, 60s)        │
 │                                                               │
-│  • Input Validation                                          │
-│  • Rate Limiting (future)                                    │
-│  • Request Formatting                                        │
-│  └──────────────────┬──────────────────────────────────┘    │
+│  1. auth() + rate limit check (fails open)                  │
+│  2. embed(query) — Transformers.js ONNX, in-function         │
+│  3. pgvector: ORDER BY embedding <=> $1 LIMIT k              │
+│     (SET LOCAL ivfflat.probes = 10, inside a transaction)    │
+│  4. return { results: [{ word, similarity }], timingMs }     │
 └────────────────────│─────────────────────────────────────────┘
-                     │ HTTPS
+                     │
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Anthropic Claude API                      │
-│                                                               │
-│  • Model: claude-sonnet-4-20250514                           │
-│  • System Prompt Engineering                                 │
-│  • Response Generation                                       │
+│            Neon Postgres — "VocabEmbedding"                  │
+│  141,854 rows, one per vocabulary word, vector(384),          │
+│  IVFFlat index (vector_cosine_ops, lists = 150)               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+Word pages (`/word/[word]`) follow a separate, cheaper path: `getRelatedWords()` reads the word's **already-stored** vector via a subquery and finds nearest neighbours — it never re-runs the ONNX model. `getWordData()` returns an existing `Word` row if one was profiled before the Claude removal, or creates a minimal row with empty text fields otherwise; there is no generative fallback that could fill those fields in.
+
 ## Data Flow
 
-1. **User Input**
-   - User types description: "the smell of rain on dry earth"
-   - Frontend validates input (non-empty, reasonable length)
+1. **User input** — a query typed on the landing page (`app/page.tsx`) routes to `/search?q=...`, which owns the actual `/api/lookup` call so every entry point (landing page, results page's own search bar) goes through one code path.
+2. **Frontend → `/api/lookup`** — `POST { query: string, k?: number }`.
+3. **Embed** — `embed(query)` produces a 384-dim, L2-normalized vector (mean pooling over token embeddings, then normalize).
+4. **pgvector search** — cosine distance (`<=>`) against `VocabEmbedding`'s 141,854 rows via an approximate IVFFlat index (`lists = 150`, `probes = 10` set per-query). This trades a small amount of recall (~0.3pp measured) for speed over an exact sequential scan.
+5. **Response** — `{ results: [{ word, similarity }], timingMs }`; `similarity = 1 - cosine_distance`.
+6. **Frontend display** — the results page renders the ranked list; clicking a word navigates to its page, which runs the separate `getRelatedWords()`/`getWordData()` path described above.
 
-2. **Frontend → API Route**
-   - POST request to `/api/reverse-dictionary`
-   - Payload: `{ description: string }`
+There is no system prompt, no JSON-contract parsing, and no retry-on-malformed-response logic anywhere in this flow — retrieval is a single vector comparison, not a model "answering" a question.
 
-3. **API Route → Claude API**
-   - Construct messages with system prompt
-   - Send to Anthropic API with:
-     - Model: claude-sonnet-4-20250514
-     - Max tokens: 1024
-     - Temperature: 0.3 (lower for more deterministic results)
+## Known Limitations (measured, not hypothetical)
 
-4. **Claude Response Processing**
-   - Parse response for word(s)
-   - Extract definition and usage examples
-   - Format for frontend consumption
+- **Lexical echo**: `VocabEmbedding` stores each word's *own* embedding (not a definition), so a multi-word query is compared against single-token vectors. ~34% of top-10 results share a word stem with the query and outscore the actual intended answer.
+- **The fine-tune's contribution is small**: swapping in the untouched base model only costs ~4.5 points of lenient Recall@1 — a measured null result against the pre-committed bar.
+- **A gloss-indexed alternative** (embedding WordNet definitions per sense instead of bare words) measured +13-16 points of lenient Recall@1 offline and is **designed but not deployed** — see CLAUDE.md's "Phase E" and the dormant `GlossEmbedding`/`ShadowLookup` schema in `prisma/schema.prisma`.
 
-5. **API Route → Frontend**
-   - Return JSON: `{ word: string, definition: string, examples?: string[] }`
-
-6. **Frontend Display**
-   - Show primary word prominently
-   - Display definition
-   - Show usage examples if available
-
-## System Prompt Strategy
-
-The system prompt is critical for accurate reverse dictionary results:
-
-```
-You are a precise reverse dictionary. When given a description or concept,
-return the exact word or phrase that matches.
-
-Response Format:
-- Primary word/phrase (the main answer)
-- Definition (1-2 sentences)
-- 2-3 usage examples (optional)
-
-Rules:
-1. Prioritize precision over verbosity
-2. If multiple words fit, provide the most common one first
-3. Include both the word and brief definition
-4. For obscure words, verify they're real dictionary entries
-5. If no exact match exists, provide the closest alternative
-
-Return response as JSON:
-{
-  "word": "the exact word or phrase",
-  "definition": "clear, concise definition",
-  "alternatives": ["other possible words"],
-  "examples": ["usage example 1", "usage example 2"]
-}
-```
+Full measurement methodology, the offline eval harness, and the frozen eval set live in **[CLAUDE.md](CLAUDE.md)** — that file is the maintained source of truth for retrieval internals; this document should not duplicate it.
 
 ## Project Structure
 
 ```
-reverse-dictionary/
+Reverse-Dictionary/
 ├── app/
 │   ├── api/
-│   │   └── reverse-dictionary/
-│   │       └── route.ts          # API endpoint for Claude integration
-│   ├── layout.tsx                 # Root layout
-│   ├── page.tsx                   # Main search interface
-│   └── globals.css                # Global styles with Tailwind
+│   │   ├── lookup/route.ts
+│   │   ├── word/[word]/route.ts
+│   │   ├── word/[word]/save/route.ts
+│   │   ├── credits/route.ts
+│   │   └── leaderboard/route.ts
+│   ├── page.tsx, search/page.tsx, word/[word]/page.tsx
+│   ├── collection/page.tsx
+│   ├── layout.tsx, globals.css
 ├── components/
-│   ├── SearchInput.tsx            # Search input component
-│   ├── ResultDisplay.tsx          # Results display component
-│   └── ExampleQueries.tsx         # Example query chips
+│   ├── SearchInput.tsx, SearchResults.tsx, ResultListItem.tsx
+│   ├── Navbar.tsx, WordLink.tsx, WordShareButtons.tsx, SaveWordButton.tsx
 ├── lib/
-│   └── claude.ts                  # Claude API client configuration
-├── types/
-│   └── index.ts                   # TypeScript type definitions
-├── .env.local                     # Environment variables (not committed)
-├── .env.example                   # Example env file
-├── next.config.js                 # Next.js configuration
-├── tailwind.config.ts             # Tailwind configuration
-├── tsconfig.json                  # TypeScript configuration
-└── package.json                   # Dependencies
+│   ├── embedder.ts          # Transformers.js singleton, retry/backoff, never caches a rejected promise
+│   ├── wordData.ts          # getWordData / getRelatedWords, both wrapped in React cache()
+│   ├── errors.ts            # describeError/formatErrorShape/SubsystemError — flattens fetch-failed cause chains
+│   ├── prisma.ts
+│   └── credits.ts
+├── prisma/
+│   └── schema.prisma
+├── scripts/, eval/          # Offline retrieval evaluation harness (see CLAUDE.md)
+└── next.config.js, middleware.ts
 ```
 
 ## Environment Variables
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-xxx
+DATABASE_URL=postgres://...          # Neon, pgvector enabled
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
+CLERK_SECRET_KEY=...
+KV_REST_API_URL=...                  # Optional — Upstash Redis via Vercel Marketplace
+KV_REST_API_TOKEN=...
+NEXT_PUBLIC_SITE_URL=...             # Optional — sitemap origin
 ```
 
 ## Security Considerations
 
-1. **API Key Protection**: Store Anthropic API key in environment variables, never in client code
-2. **Rate Limiting**: Implement rate limiting to prevent abuse (future enhancement)
-3. **Input Validation**: Sanitize and validate all user inputs
-4. **CORS**: Configure appropriate CORS policies
-5. **Error Handling**: Never expose internal errors or API keys in responses
+1. **No LLM API key to protect** — there is no Anthropic key or equivalent in this app anymore.
+2. **Rate limiting** is implemented (Upstash-backed sliding window, 50/day guest, 200/day signed-in) and **fails open** by design if the limiter itself is unreachable — search availability is prioritized over strict quota enforcement.
+3. **Input validation**: query must be a non-empty string ≤500 characters.
+4. **Error responses never leak internals**: `hostname` in error `detail` is stripped outside dev (it can identify a private Upstash database); the full error shape is always in server logs.
+5. Clerk middleware runs on all routes; the app itself is usable fully signed-out.
 
-## Performance Optimization
+## Performance Notes
 
-1. **Streaming**: Consider streaming Claude responses for better UX
-2. **Caching**: Cache common queries (future enhancement)
-3. **Edge Functions**: Deploy API routes to edge for lower latency
-4. **Debouncing**: Debounce user input to reduce API calls
+1. **Cold start**: the embedding model is loaded on-demand and cached per warm instance (`globalThis._embedderPromise`); `maxDuration = 60` on `/api/lookup` accounts for a cold model download taking up to ~20s. The promise is deliberately cleared on rejection so one bad network blip doesn't wedge every subsequent request on that instance.
+2. **Approximate index**: IVFFlat trades a small amount of recall for large speed gains over an exact scan — see CLAUDE.md for the measured cost.
+3. **`React cache()`** on `getWordData`/`getRelatedWords` means the word page and its `generateMetadata` share one query per request instead of duplicating it.
 
 ## Deployment Checklist
 
-- [ ] Environment variables configured in Vercel
-- [ ] Build succeeds locally
-- [ ] API key validation works
-- [ ] Error handling tested
-- [ ] Mobile responsive design verified
-- [ ] SEO metadata added
-- [ ] Analytics configured (optional)
+- [ ] `DATABASE_URL`, Clerk keys, and (optionally) `KV_*` set in Vercel
+- [ ] `npm run build` succeeds locally
+- [ ] `npx tsc --noEmit` clean
+- [ ] Deployed by pushing to `main` — **not** `vercel deploy --prod` (see DEPLOYMENT.md)
+- [ ] Mobile responsive verified
+- [ ] Sitemap resolves the correct production domain (`NEXT_PUBLIC_SITE_URL` if not the default)
 
-## Future Enhancements
+## Open / Staged Work
 
-1. **History**: Save user search history locally
-2. **Favorites**: Bookmark interesting word discoveries
-3. **Multi-language**: Support for multiple languages
-4. **Voice Input**: Speech-to-text for descriptions
-5. **Word Games**: Interactive word learning games
-6. **API Rate Limiting**: Implement request throttling
-7. **Caching Layer**: Redis/Upstash for common queries
+A synset-keyed gloss index (`GlossEmbedding`, `halfvec(384)`) and a shadow-log cutover gate (`ShadowLookup`) are designed, type-checked, and committed as **dormant** — no migration applied, no rows populated, the route hook gated behind a hardcoded `false`. See `prisma/schema.prisma`'s comments on those two models and `scripts/build-gloss-index.ts` / `scripts/shadow-compare.ts` for what a real cutover would require.

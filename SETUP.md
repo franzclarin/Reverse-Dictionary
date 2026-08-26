@@ -1,77 +1,74 @@
 # Quick Setup Guide
 
-Follow these steps to get your Reverse Dictionary app running locally.
+Follow these steps to get the Reverse Dictionary app running locally.
 
-## Step 1: Get Your Anthropic API Key
+## Step 1: Get Credentials
 
-1. Go to [https://console.anthropic.com/](https://console.anthropic.com/)
-2. Sign up or log in to your account
-3. Navigate to API Keys section
-4. Create a new API key
-5. Copy the key (it starts with `sk-ant-...`)
+You need three things before the app will run locally:
+
+1. **A Neon Postgres connection string** with `pgvector` enabled ([neon.tech](https://neon.tech)) — or ask whoever owns this project for the shared dev database.
+2. **A Clerk publishable + secret key** ([dashboard.clerk.com](https://dashboard.clerk.com/)).
+3. Optional: **Upstash Redis REST credentials** ([console.upstash.com](https://console.upstash.com/), or provisioned via the Vercel Marketplace) — the app runs fine without these, just with no rate limiting.
+
+If this project is already linked to a Vercel team, the fastest path is:
+```bash
+npx vercel login
+npx vercel link
+npx vercel env pull .env.local
+```
+which pulls real Development-scoped values for all of the above directly.
 
 ## Step 2: Configure Environment Variables
 
-1. Create a `.env.local` file in the root of the project:
-
-```bash
-# On Windows (Command Prompt)
-copy .env.example .env.local
-
-# On Windows (PowerShell)
-Copy-Item .env.example .env.local
-
-# On macOS/Linux
-cp .env.example .env.local
-```
-
-2. Open `.env.local` and add your API key:
+If you're not pulling from Vercel, create `.env.local` in the project root by hand:
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-your-actual-api-key-here
+DATABASE_URL=postgres://...
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+CLERK_SECRET_KEY=sk_...
+
+# Optional — rate limiting fails open without these
+KV_REST_API_URL=...
+KV_REST_API_TOKEN=...
 ```
 
-## Step 3: Run the Development Server
+There's no `.env.example` checked in — the variable names above are the complete required set (see README's Environment Variables table for what each one does).
+
+## Step 3: Install and Run
 
 ```bash
+npm install
 npm run dev
 ```
 
-The app will be available at [http://localhost:3000](http://localhost:3000)
+The app will be available at [http://localhost:3000](http://localhost:3000).
+
+`postinstall` runs `prisma generate` automatically. You do **not** need to run `prisma migrate` or `prisma db push` against a database that already has the schema applied — `DATABASE_URL` just needs to point at one that does. If you're standing up a genuinely fresh database, see DEPLOYMENT.md's migration step and CLAUDE.md's note that `VocabEmbedding`'s 141,854 rows are a data seed, not something a migration generates for you.
 
 ## Testing the App
 
-1. Open your browser to `http://localhost:3000`
-2. Try one of the example queries like "the smell of rain on dry earth"
-3. You should see "petrichor" as the result
+1. Open `http://localhost:3000`.
+2. Try a query like "the smell of rain on dry earth" and see what comes back.
+3. Don't be surprised if the intended word isn't the top result — this model's measured strict Recall@1 is ~10% on a 287-query eval set (see CLAUDE.md), largely due to a documented "lexical echo" effect. That's expected current behavior, not a local misconfiguration.
 
 ## Troubleshooting
 
-### Error: "API configuration error"
-- Make sure your `.env.local` file exists
-- Verify your `ANTHROPIC_API_KEY` is set correctly
-- Restart the development server after changing environment variables
+### Search returns a 500 with `subsystem: "database"`
+- Confirm `DATABASE_URL` is correct and the database has `pgvector` enabled and a populated `VocabEmbedding` table.
 
-### Error: "AI service error"
-- Check that your API key is valid
-- Ensure you have credits in your Anthropic account
-- Verify your internet connection
+### Search returns a 500 with `subsystem: "model"`
+- The embedding model (`franzclarin/ReverseDictionary`) is pulled from the Hugging Face CDN on first use per warm instance — this needs outbound network access on first run and can take up to ~20s.
 
-### Build Errors
-- Run `npm install` to ensure all dependencies are installed
-- Delete `.next` folder and rebuild: `rm -rf .next && npm run build`
+### Sign-in doesn't work
+- Confirm both Clerk keys are set and match the same Clerk application/environment.
+
+### Build errors
+- Run `npm install` again.
+- Delete `.next` and rebuild: `rm -rf .next && npm run build`.
+- If `next dev` exits immediately with no server started, check whether the repo lives under a cloud-sync folder (OneDrive, etc.) — see CLAUDE.md's "Repo hygiene" for a known `EINVAL: readlink` issue in that setup.
 
 ## Next Steps
 
-Once you have the app running locally:
-
-1. Test different queries
-2. Customize the UI in `app/page.tsx`
-3. Modify the system prompt in `app/api/reverse-dictionary/route.ts`
-4. Deploy to Vercel (see README.md for instructions)
-
-## Need Help?
-
-- Check the main [README.md](README.md) for more detailed information
-- Review [ARCHITECTURE.md](ARCHITECTURE.md) for system design details
-- Open an issue on GitHub if you encounter problems
+- Read [CLAUDE.md](CLAUDE.md) for how search actually works, its measured limitations, and the offline eval harness.
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design.
+- Deploying? See [DEPLOYMENT.md](DEPLOYMENT.md) — in particular, deploy by pushing to `main`, not `vercel deploy --prod`.

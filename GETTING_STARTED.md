@@ -1,136 +1,77 @@
 # Getting Started Checklist
 
-Your Reverse Dictionary application is ready! Follow this checklist to get it running.
-
 ## Local Development Setup
 
 ### 1. Environment Setup
 
-- [ ] Get your Anthropic API key from [console.anthropic.com](https://console.anthropic.com/)
-- [ ] Create `.env.local` file: `copy .env.example .env.local` (Windows) or `cp .env.example .env.local` (Mac/Linux)
-- [ ] Add your API key to `.env.local`:
-  ```env
-  ANTHROPIC_API_KEY=sk-ant-your-key-here
-  ```
+- [ ] Get a Neon Postgres connection string with `pgvector` enabled (or pull it: `npx vercel link && npx vercel env pull .env.local`)
+- [ ] Get Clerk publishable + secret keys
+- [ ] Create `.env.local` with `DATABASE_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` (see [SETUP.md](SETUP.md) for the full list, including the optional Upstash rate-limiting pair)
 
 ### 2. Run Locally
 
-- [ ] Start the development server: `npm run dev`
+- [ ] `npm install`
+- [ ] `npm run dev`
 - [ ] Open [http://localhost:3000](http://localhost:3000)
-- [ ] Test with example query: "the smell of rain on dry earth"
-- [ ] Verify you get "petrichor" as the result
+- [ ] Try a query like "the smell of rain on dry earth" and see what the search returns — don't expect a guaranteed exact match; see the note below
 
 ### 3. Verify Build
 
-- [ ] Run `npm run build` to ensure production build works
-- [ ] Check that there are no TypeScript errors
+- [ ] `npm run build` succeeds
+- [ ] `npx tsc --noEmit` reports no errors
+- [ ] `npm run lint` is clean
+
+## A note on expected search behavior
+
+Unlike the old Claude-powered version of this app, results are **not guaranteed to be the intended word** for a given description. The current model embeds bare words, not definitions, which produces a documented "lexical echo" effect — measured strict Recall@1 is ~10% on a 287-query hand-authored eval set (CLAUDE.md's "Headline results"). If a query doesn't return what you expected, that's the current, known state of retrieval quality — not a bug in your local setup.
 
 ## Production Deployment
 
-### Option 1: Deploy to Vercel (Easiest)
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the full walkthrough. In short:
 
-- [ ] Push code to GitHub repository
-- [ ] Go to [vercel.com](https://vercel.com) and import your repo
-- [ ] Add `ANTHROPIC_API_KEY` environment variable in Vercel dashboard
-- [ ] Deploy and get your production URL
-- [ ] Test the production deployment
-
-### Option 2: Manual Deployment
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions on deploying to:
-- Railway
-- Fly.io
-- Netlify
-- Or any other hosting platform
+- [ ] Push to GitHub, import the repo on Vercel
+- [ ] Set `DATABASE_URL`, Clerk keys, and optionally `KV_REST_API_URL`/`KV_REST_API_TOKEN` in Vercel's environment variables
+- [ ] **Deploy by pushing to `main`** — not `vercel deploy --prod` (see DEPLOYMENT.md for why)
+- [ ] Verify the deployed URL, checking function logs for `[lookup] embed ok` / `[lookup] db ok`
 
 ## Testing Checklist
 
-Once deployed, test these scenarios:
-
-- [ ] Example query: "the smell of rain on dry earth" → "petrichor"
-- [ ] Example query: "fear of long words" → "hippopotomonstrosesquippedaliophobia"
-- [ ] Example query: "pleasure from others' misfortune" → "schadenfreude"
-- [ ] Try a custom query
-- [ ] Test on mobile device
-- [ ] Test error handling (disconnect internet and try a query)
-- [ ] Verify dark mode works (if your browser is in dark mode)
+- [ ] Run a handful of varied queries and confirm results return with similarity scores
+- [ ] Sign in via Clerk and confirm the rate limit changes from 50/day to 200/day
+- [ ] Save a word from its word page and confirm it appears in `/collection`
+- [ ] Confirm credits increase after saving a new (not previously saved) word
+- [ ] Check `/api/leaderboard` returns a ranked list
+- [ ] Test on mobile
 
 ## Customization Ideas
 
-Want to make it your own? Try these customizations:
+- [ ] Adjust the color scheme / typography in `app/globals.css` and `tailwind.config.ts`
+- [ ] Change `k` (result count) or the rate-limit windows in `app/api/lookup/route.ts`
+- [ ] Customize `components/SearchInput.tsx` / `components/SearchResults.tsx`
+- [ ] Update metadata in `app/layout.tsx` and `app/sitemap.ts`'s `NEXT_PUBLIC_SITE_URL` fallback
 
-- [ ] Update the color scheme in `tailwind.config.ts`
-- [ ] Add more example queries in `components/ExampleQueries.tsx`
-- [ ] Modify the system prompt in `app/api/reverse-dictionary/route.ts`
-- [ ] Add your own logo to the header
-- [ ] Customize the metadata in `app/layout.tsx`
+## Improving Search Quality
 
-## Next Steps
-
-1. **Add Analytics** (Optional)
-   - Enable Vercel Analytics for traffic insights
-   - Track popular queries to improve UX
-
-2. **Implement Caching** (Optional)
-   - Add Redis/Upstash for common queries
-   - Reduce API costs and improve response time
-
-3. **Add Features** (Optional)
-   - User accounts and saved searches
-   - History of recent lookups
-   - Share results on social media
-   - Multi-language support
-
-4. **Monitor Usage**
-   - Check Anthropic console for API usage
-   - Monitor costs and set up alerts
-   - Review Vercel logs for errors
+This is the actual open problem in this app, not a customization nicety. Start with [CLAUDE.md](CLAUDE.md)'s "Established facts" and "Headline results" sections — a gloss-indexed approach has already been measured offline to fix most of the lexical-echo problem (+13-16 points of lenient Recall@1) and is designed, type-checked, and committed as dormant scaffolding (`GlossEmbedding`/`ShadowLookup` in `prisma/schema.prisma`, `scripts/build-gloss-index.ts`, `scripts/shadow-compare.ts`) — not yet applied to production. That's the highest-leverage next step, not a from-scratch redesign.
 
 ## Troubleshooting
 
-Common issues and solutions:
-
 | Issue | Solution |
 |-------|----------|
-| "API configuration error" | Check `.env.local` file exists and has correct API key |
-| Build fails | Run `npm install` and try again |
-| No results returned | Verify API key is valid and has credits |
-| Slow responses | Check Anthropic API status and your internet connection |
+| 500 with `subsystem: "database"` | Check `DATABASE_URL`, confirm `pgvector` is enabled and `VocabEmbedding` is populated |
+| 500 with `subsystem: "model"` | First request per warm instance downloads the embedding model from the HF CDN — needs outbound network, can take up to ~20s |
+| 500 with `subsystem: "ratelimit"` | Should not surface to users — rate limiting fails open by design; if you see this, something upstream of `checkRateLimit`'s try/catch broke |
+| Build fails | `npm install`, then `rm -rf .next && npm run build` |
+| `next dev` exits instantly, no server | Check if the repo is under OneDrive or similar cloud sync — see CLAUDE.md's "Repo hygiene" |
 
 ## Documentation Reference
 
-- **[README.md](README.md)** - Main documentation with full feature list
-- **[SETUP.md](SETUP.md)** - Quick setup guide
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Technical architecture details
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Comprehensive deployment guide
-
-## Support Resources
-
-- **Anthropic Docs**: [docs.anthropic.com](https://docs.anthropic.com)
-- **Next.js Docs**: [nextjs.org/docs](https://nextjs.org/docs)
-- **Vercel Docs**: [vercel.com/docs](https://vercel.com/docs)
-- **Tailwind CSS**: [tailwindcss.com/docs](https://tailwindcss.com/docs)
+- **[README.md](README.md)** — overview, features, API reference
+- **[SETUP.md](SETUP.md)** — quick local setup
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** — deploying to Vercel
+- **[CLAUDE.md](CLAUDE.md)** — how retrieval actually works, its measured limitations, and the offline eval harness; the maintained source of truth for search internals
 
 ## Project Status
 
-✅ **Complete and Ready for Production**
-
-All core features are implemented:
-- ✅ AI-powered reverse dictionary
-- ✅ Beautiful, responsive UI
-- ✅ Example queries
-- ✅ Error handling
-- ✅ Dark mode support
-- ✅ Production build tested
-- ✅ Deployment ready
-- ✅ Full documentation
-
-## Questions?
-
-If you encounter any issues:
-1. Check the troubleshooting section above
-2. Review the documentation files
-3. Ensure your API key is valid and has credits
-4. Check that all dependencies are installed
-
-Happy word hunting! 🔍✨
+Search, word pages, auth, saved collection, credits, and the leaderboard are live in production. Search quality is a known, measured, ongoing limitation (see above) — not something to report as broken, but also not something to describe as "done." A gloss-indexed retrieval improvement is designed and staged, not yet deployed.
