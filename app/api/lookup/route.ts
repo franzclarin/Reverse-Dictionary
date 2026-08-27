@@ -15,12 +15,12 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60; // model cold-start needs up to ~20s; default 10s is too short
 
-// NOT YET ENABLED — GlossEmbedding has no rows yet (see MIGRATION_AUDIT.md /
-// scripts/build-gloss-index.ts), so every shadow query would just return
-// nothing useful right now. Flip on only after that table is populated, and
-// only after this whole block has been reviewed and deployed deliberately —
-// it is not live merely because it's written.
-const SHADOW_LOOKUP_ENABLED = false;
+// Enabled per RD-02: GlossEmbedding is populated (117,791 rows, RD-01) and
+// this block has been reviewed for the cutover soak. Sampled and
+// fire-and-forget — see the call site below and lib/shadowLookup.ts's header
+// comment for what's logged and why. Flip back to false to stop logging
+// without a redeploy of anything else.
+const SHADOW_LOOKUP_ENABLED = true;
 const SHADOW_SAMPLE_RATE = 0.1;
 
 type Ratelimiters = { guest: Ratelimit; user: Ratelimit };

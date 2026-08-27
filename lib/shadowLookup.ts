@@ -17,11 +17,10 @@ import { prisma } from "@/lib/prisma";
  * data no matter how much is logged, since production traffic has no
  * labelled target — see scripts/shadow-compare.ts's header comment.
  *
- * NOT YET CALLED from app/api/lookup/route.ts and NOT YET APPLIED as a
- * migration — see MIGRATION_AUDIT.md. When wired in, the caller must never
- * await this before responding and must always wrap it in .catch(): a
- * GlossEmbedding failure (e.g. the table not existing yet) must never affect
- * the user-facing lookup response.
+ * Called from app/api/lookup/route.ts (RD-02), sampled at SHADOW_SAMPLE_RATE.
+ * The caller never awaits this before responding and always wraps it in
+ * .catch(): a GlossEmbedding failure must never affect the user-facing
+ * lookup response.
  */
 export async function runShadowLookup(
   query: string,

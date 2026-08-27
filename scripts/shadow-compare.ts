@@ -19,9 +19,9 @@
  * and reported in CLAUDE.md) is as the PRIOR — this script is a live-traffic
  * sanity/drift check against that prior, not a replacement for it.
  *
- * NOT YET RUNNABLE FOR REAL: ShadowLookup has no rows until the route
- * instrumentation in app/api/lookup/route.ts is reviewed, enabled
- * (SHADOW_LOOKUP_ENABLED), and deployed — see MIGRATION_AUDIT.md.
+ * Runnable for real as of RD-02: route instrumentation is reviewed, enabled
+ * (SHADOW_LOOKUP_ENABLED), and deployed. Rows accumulate as sampled
+ * production traffic arrives — see MIGRATION_AUDIT.md for the rollout log.
  *
  *   npx tsx scripts/shadow-compare.ts --since 2026-09-01
  */
