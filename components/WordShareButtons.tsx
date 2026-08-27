@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSound } from "@/context/SoundContext";
 
 interface WordShareButtonsProps {
   word: string;
@@ -12,14 +13,17 @@ export default function WordShareButtons({
   definition,
 }: WordShareButtonsProps) {
   const [copied, setCopied] = useState(false);
+  const { play } = useSound();
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(window.location.href);
     setCopied(true);
+    play("click");
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleTwitter = () => {
+    play("click");
     const url = window.location.href;
     const shortDef =
       definition.length > 100 ? definition.slice(0, 97) + "…" : definition;

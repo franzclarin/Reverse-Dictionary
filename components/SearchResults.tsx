@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import SearchInput from "@/components/SearchInput";
 import ResultListItem from "@/components/ResultListItem";
+import { useSound } from "@/context/SoundContext";
 
 interface LookupResult {
   word: string;
@@ -56,6 +57,11 @@ export default function SearchResults({ query }: SearchResultsProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const { play } = useSound();
+  // A ref so the fetch effect doesn't need `play` in its deps — toggling
+  // sound mid-request shouldn't re-trigger the fetch.
+  const playRef = useRef(play);
+  playRef.current = play;
 
   // A new query resets pagination — otherwise "load more" on one query would
   // carry over into a k of 30+ for the next.
@@ -99,10 +105,13 @@ export default function SearchResults({ query }: SearchResultsProps) {
           );
         }
 
-        setResults((data.results as LookupResult[]) ?? []);
+        const newResults = (data.results as LookupResult[]) ?? [];
+        setResults(newResults);
         setTimingMs(typeof data.timingMs === "number" ? data.timingMs : null);
+        playRef.current(newResults.length > 0 ? "stamp" : "error");
       } catch (err) {
         setError(err instanceof Error ? err.message : "An unexpected error occurred");
+        playRef.current("error");
       } finally {
         if (requestIdRef.current === requestId) setLoading(false);
       }
@@ -175,7 +184,10 @@ export default function SearchResults({ query }: SearchResultsProps) {
         {canLoadMore && (
           <button
             type="button"
-            onClick={() => setK((prev) => prev + LOAD_MORE_STEP)}
+            onClick={() => {
+              play("click");
+              setK((prev) => prev + LOAD_MORE_STEP);
+            }}
             className="font-mono mt-4 text-xs uppercase tracking-wide hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
             style={{ color: "var(--rd-accent)", outlineColor: "var(--rd-accent)" }}
           >

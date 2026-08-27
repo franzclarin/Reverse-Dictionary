@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSound } from "@/context/SoundContext";
 
 interface SearchInputProps {
   onSearch: (description: string) => void;
@@ -106,6 +107,7 @@ export default function SearchInput({
   const [description, setDescription] = useState(initialValue);
   const [isFocused, setIsFocused] = useState(false);
   const [isButtonHovered, setIsButtonHovered] = useState(false);
+  const { play } = useSound();
 
   const placeholder = useTypewriterPlaceholder(
     description.length === 0 && !isFocused
@@ -115,7 +117,16 @@ export default function SearchInput({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (description.trim() && !isLoading) {
+      play("return");
       onSearch(description.trim());
+    }
+  };
+
+  // Fires on the keys that actually change the field's text — a typewriter
+  // key strike per character, not per event (ignores modifiers, arrows, etc).
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete") {
+      play("key");
     }
   };
 
@@ -164,6 +175,7 @@ export default function SearchInput({
           type="search"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          onKeyDown={handleKeyDown}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           placeholder={placeholder}

@@ -1,0 +1,75 @@
+<title>RD-08 · Add sound effects</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-08</div>
+
+  <div class="ticket-head">
+    <h1>Add sound effects to make the search experience more immersive</h1>
+    <span class="badge badge-p3">P3 · polish</span>
+    <span class="badge badge-done">✓ Done · 2026-08-26</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Touches:</b> <code>context/SoundContext.tsx</code> (new), <code>app/layout.tsx</code>, <code>components/Navbar.tsx</code>, <code>components/SearchInput.tsx</code>, <code>components/SearchResults.tsx</code>, <code>components/WordShareButtons.tsx</code></span>
+    <span><b>Risk:</b> low — additive, muted by default preference is respected, no new dependency</span>
+    <span><b>Est:</b> ~1 hr</span>
+  </div>
+
+  <p class="lede">User request: make the reverse dictionary feel more immersive with sound. The app has no <code>public/</code> directory and no audio-file assets anywhere, and the project already avoids adding dependencies where the platform can do the job — so effects are synthesized at call time with the Web Audio API rather than shipping <code>.mp3</code>/<code>.wav</code> files.</p>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — S</div>
+      <div class="stat-value">1 new context, 4 call sites wired</div>
+      <div class="stat-note">No new npm dependency. No <code>public/</code> assets. All five effects are oscillator/noise-burst functions in one file.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — low-risk polish</div>
+      <div class="stat-value">Search flow + word-page copy button</div>
+      <div class="stat-note">Doesn't touch retrieval, the API, or the data model. Purely a client-side UX layer, off by a persisted toggle if a user doesn't want it.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li>Add <code>context/SoundContext.tsx</code>: a <code>SoundProvider</code> exposing <code>{ enabled, toggle, play(name) }</code>. Effects are synthesized with <code>AudioContext</code> oscillators and filtered white-noise bursts — no audio files. Preference persists to <code>localStorage</code> under <code>rd-sound-enabled</code> (default on); the <code>AudioContext</code> itself is a module-level singleton (not React state) since browsers cap how many can exist per page and it needs to survive remounts.</li>
+      <li>Theme the five effects to the site's existing paper/typewriter motif (serif ¶ mark, <code>rd-stamp-in</code> animation, DM Mono) rather than generic UI beeps:
+        <ul>
+          <li><code>key</code> — short bandpass-filtered noise burst, pitch-varied across 4 variants, on every character typed or deleted in the search box.</li>
+          <li><code>return</code> — a bell-like sine ding on search submit (typewriter carriage return).</li>
+          <li><code>stamp</code> — a pitch-dropping low thud plus a tight noise transient when results land (a rubber stamp hitting paper).</li>
+          <li><code>error</code> — a soft descending two-note tone for request errors or zero matches — deliberately not alarm-like.</li>
+          <li><code>click</code> — a small neutral click for secondary actions: "Load more entries", copying the share link, the X/Twitter share button, and turning sound back on from the mute toggle.</li>
+        </ul>
+      </li>
+      <li>Wrap <code>app/layout.tsx</code>'s tree in <code>SoundProvider</code> (outside <code>LoadingProvider</code>, since the two are independent).</li>
+      <li>Add a mute/unmute icon button to <code>components/Navbar.tsx</code>, right-aligned, <code>aria-pressed</code> + <code>aria-label</code> reflecting state, matching the nav's existing focus-ring and hover treatment.</li>
+      <li>Wire call sites: <code>SearchInput</code> (key clicks on <code>onKeyDown</code>, ding on submit), <code>SearchResults</code> (stamp on results found, soft error tone on failure or zero matches, click on "Load more"), <code>WordShareButtons</code> (click on copy-link and on the X share button).</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <p>Browsers start a freshly-constructed <code>AudioContext</code> in <code>"suspended"</code> state and only let it actually produce sound after a user gesture; calling <code>resume()</code> outside a gesture is a harmless no-op, not an error. That means the stamp/error sounds on a search page loaded directly from a URL (no prior gesture in that tab) will silently not sound until the user's first keystroke or click resumes the context — expected platform behavior, not a bug to route around.</p>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Keep <code>play</code> out of the fetch effect's dependency array.</b> <code>SearchResults</code>' result-fetching <code>useEffect</code> calls <code>play()</code> as a side effect but must not depend on it — <code>play</code>'s identity changes when <code>enabled</code> toggles, and including it would re-run the fetch every time the user muted/unmuted mid-search. Fixed with a <code>playRef</code> updated on every render instead, the same pattern the file already uses for <code>requestIdRef</code>.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>A hard minimum-gap floor per sound name</b> (35ms for <code>key</code>, 60–200ms for the rest) stops key-repeat or a paste from turning into a buzz of overlapping bursts — cheaper and simpler than a debounce/queue.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li class="done">Typing in the search box produces a per-character click; submitting produces a distinct ding</li>
+      <li class="done">A successful search plays a stamp sound; an error or zero-result search plays a soft error tone, not the stamp</li>
+      <li class="done">"Load more entries" and the word-page share/copy buttons play a neutral click</li>
+      <li class="done">A nav toggle mutes/unmutes all effects and the choice persists across reloads via <code>localStorage</code></li>
+      <li class="done"><code>npx tsc --noEmit</code> and <code>npm run lint</code> both pass clean</li>
+      <li class="done">No new npm dependency and no new files under <code>public/</code></li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-08 · reverse-dictionary</footer>
+</div>

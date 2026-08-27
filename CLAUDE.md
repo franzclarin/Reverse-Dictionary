@@ -13,6 +13,7 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 - **No auth, no rate limiting.** Clerk and Upstash Redis/Ratelimit were removed entirely (RD-06, 2026-08-26) — the app has no userbase (no sign-in, saved words, credits, or leaderboard) and `/api/lookup` is fully anonymous and unthrottled. There is no `@clerk/nextjs`, `@upstash/ratelimit`, or `@upstash/redis` dependency and no `middleware.ts`.
 - **@xenova/transformers** (Transformers.js) — in-function ONNX embedding
 - **No generative AI dependency.** Claude was removed entirely on 2026-08-18 — search never used it, and word pages no longer do (see "Word pages"). There is no `@anthropic-ai/sdk` and no `ANTHROPIC_API_KEY`
+- **Sound effects are synthesized, not audio files.** `context/SoundContext.tsx` generates every effect at call time via the Web Audio API (oscillators + filtered noise bursts) — no `public/` audio assets, no dependency. Themed to the paper/typewriter motif: a key click while typing, a carriage-return ding on submit, a stamp thud when results land, a soft two-note tone on errors/no-matches, a neutral click for secondary actions (load more, copy link). Preference persists to `localStorage` (`rd-sound-enabled`, default on); toggle lives in `Navbar`. `AudioContext` is a module-level singleton, not React state — browsers cap how many can exist per page and it must survive remounts.
 - Deployed on **Vercel** (region `iad1`); GitHub `franzclarin/Reverse-Dictionary`, branch `main`
 - **Dev-only, evaluation tooling:** `tsx` (runs `scripts/*.ts`) and `wordnet-db` (build-time WordNet 3.0 gloss/coverage data). Neither is imported by the app, and `wordnet-db` never touches `eval/sets/` — the eval set is hand-authored and stays blind to every gloss. See "Evaluation".
 
@@ -173,6 +174,14 @@ Authored slice, 287 reachable queries. **Lenient R@1 is the metric the decision 
 - **Cross-validated:** `exact` (pgvector) vs `cell_lemma_ft` (local brute force) agree at **R@1 delta 0.00 points, top-1 agreement 99.0%**.
 - Pre-registered prediction: narrative recall was **not** materially below the other styles, so its conditional never fired.
 - **The fine-tune's original 10.9% training-time figure is unusable and must not be cited** — measured with no held-out split, so it describes memorisation, not retrieval.
+
+## Backlog (`backlog/`)
+
+Tickets are static HTML, not an issue tracker: `backlog/index.html` lists them (with a size-vs-impact quadrant plot), `backlog/NN-slug.html` is each ticket's body, `backlog/style.css` is shared. IDs are sequential `RD-NN`, the same IDs referenced in commit messages (e.g. `c7eec8f RD-06/RD-07: …`).
+
+- **Whenever a change has a big enough impact, turn it into a ticket** — add an `RD-NN` row to `index.html` and a `backlog/NN-slug.html` body following the existing structure (title/badges, meta-row, task/prerequisite-knowledge sections, learnings, acceptance criteria). If the change is already finished by the time you'd file it, file it as done rather than skipping it: `badge-done`, a completion date, and a one-line result summary in both the index row and the ticket body.
+- Use judgement on "big enough" — a typo or a one-line config tweak doesn't need a ticket; a data migration, a removed/added subsystem, anything that changes retrieval behavior, or anything future work would need context on, does.
+- Follow the existing badge (`badge-p0`…`badge-p3`, `badge-done`) and tag (`size:`, `impact:`) vocabulary already used in `index.html` — don't invent a new taxonomy per ticket.
 
 ## Commands
 
