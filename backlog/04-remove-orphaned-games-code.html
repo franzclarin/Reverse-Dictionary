@@ -1,0 +1,108 @@
+<title>RD-04 · Remove orphaned games/credit code</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-04</div>
+
+  <div class="ticket-head">
+    <h1>Remove orphaned games code left behind by the games-UI removal</h1>
+    <span class="badge badge-p2">P2 · cleanup</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Touches:</b> <code>lib/gameTokens.ts</code>, <code>lib/gameUtils.ts</code>, <code>lib/credits.ts</code></span>
+    <span><b>Risk:</b> low — verified zero live callers</span>
+    <span><b>Est:</b> ~1 hr</span>
+  </div>
+
+  <p class="lede">The five casino-style word games and their API (<code>1ad57f8</code>, "Remove games UI and StreamlinedSongs link") were removed from the app, but the backend plumbing built for them wasn't. This was verified directly this session — not inferred from a commit message — by grepping every caller of each function.</p>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — S</div>
+      <div class="stat-value">2 file deletions + 3 function removals</div>
+      <div class="stat-note">Deletion, not modification, of code with zero verified callers. The only real work is confirming the two live callers (<code>/api/credits</code>, <code>/api/word/[word]/save</code>) still pass afterward.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — low</div>
+      <div class="stat-value">Zero user-facing change</div>
+      <div class="stat-note">Pure code-health: smaller surface area, one less orphaned Upstash rate limiter to reason about, one fewer stale env var to explain to a new contributor. Nothing a user or the retrieval numbers will ever notice.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li>Delete <code>lib/gameTokens.ts</code> in full — zero importers anywhere in <code>app/</code>, <code>lib/</code>, <code>components/</code>, or <code>scripts/</code>.</li>
+      <li>Delete <code>lib/gameUtils.ts</code> in full — same, zero importers. Note it holds its own second Upstash rate limiter (<code>getGameRatelimiter</code>), entirely separate from and unrelated to the one in <code>app/api/lookup/route.ts</code>.</li>
+      <li>In <code>lib/credits.ts</code>, remove <code>settleGame</code>, <code>awardDailyLookup</code>, and <code>awardWordShare</code> — each individually verified to have no callers. Keep <code>getOrCreateUser</code>, <code>getCredits</code>, and <code>awardCredits</code> (used by <code>/api/credits</code>) and <code>awardWordSave</code> (used by <code>/api/word/[word]/save</code>).</li>
+      <li>Remove the now-unused <code>GAME_TOKEN_SECRET</code> env var reference from documentation (it was only ever read inside <code>lib/gameTokens.ts</code>).</li>
+      <li>Leave the <code>GameRound</code> Prisma model and <code>User.streak</code>/<code>User.gameHistory</code> fields alone for now — see Learnings for why this is a separate, riskier decision than deleting the TypeScript code above.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <h3>What's actually dead vs. what's still wired up</h3>
+    <div class="viz">
+      <svg viewBox="0 0 760 260" width="100%" role="img" aria-labelledby="calltitle">
+        <title id="calltitle">Call graph — live routes vs. orphaned credit/game functions</title>
+        <g font-family="ui-monospace,monospace" font-size="10.5">
+          <!-- callers column -->
+          <rect x="0" y="10" width="170" height="34" rx="7" fill="var(--p2-bg)" stroke="var(--p2)"/>
+          <text x="85" y="31" text-anchor="middle" fill="var(--p2)">/api/credits</text>
+
+          <rect x="0" y="60" width="170" height="34" rx="7" fill="var(--p2-bg)" stroke="var(--p2)"/>
+          <text x="85" y="81" text-anchor="middle" fill="var(--p2)">/api/word/[w]/save</text>
+
+          <!-- live functions -->
+          <path d="M175 27 L280 27" stroke="var(--good)" marker-end="url(#a5)"/>
+          <path d="M175 77 L280 107" stroke="var(--good)" marker-end="url(#a5)"/>
+
+          <rect x="285" y="10" width="180" height="30" rx="7" fill="var(--good-bg)" stroke="var(--good)"/>
+          <text x="375" y="30" text-anchor="middle" fill="var(--good)">getCredits / awardCredits</text>
+
+          <rect x="285" y="95" width="180" height="30" rx="7" fill="var(--good-bg)" stroke="var(--good)"/>
+          <text x="375" y="115" text-anchor="middle" fill="var(--good)">awardWordSave</text>
+
+          <!-- orphaned -->
+          <text x="285" y="150" fill="var(--ink-soft)" font-size="10">no caller anywhere in app/ →</text>
+          <rect x="285" y="158" width="180" height="26" rx="6" fill="var(--bad-bg)" stroke="var(--bad)" stroke-dasharray="3,2"/>
+          <text x="375" y="175" text-anchor="middle" fill="var(--bad)">settleGame</text>
+          <rect x="285" y="190" width="180" height="26" rx="6" fill="var(--bad-bg)" stroke="var(--bad)" stroke-dasharray="3,2"/>
+          <text x="375" y="207" text-anchor="middle" fill="var(--bad)">awardDailyLookup</text>
+          <rect x="285" y="222" width="180" height="26" rx="6" fill="var(--bad-bg)" stroke="var(--bad)" stroke-dasharray="3,2"/>
+          <text x="375" y="239" text-anchor="middle" fill="var(--bad)">awardWordShare</text>
+
+          <rect x="510" y="158" width="230" height="90" rx="6" fill="var(--bad-bg)" stroke="var(--bad)" stroke-dasharray="3,2"/>
+          <text x="625" y="180" text-anchor="middle" fill="var(--bad)">lib/gameTokens.ts</text>
+          <text x="625" y="196" text-anchor="middle" fill="var(--bad)">lib/gameUtils.ts</text>
+          <text x="625" y="215" text-anchor="middle" fill="var(--ink-soft)" font-size="9">HMAC game tokens, getRandomWords,</text>
+          <text x="625" y="228" text-anchor="middle" fill="var(--ink-soft)" font-size="9">second Upstash rate limiter — all unreferenced</text>
+        </g>
+        <defs><marker id="a5" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--good)"/></marker></defs>
+      </svg>
+      <div class="viz-caption">Verified by grep this session, not inferred — dashed/red nodes have zero callers</div>
+    </div>
+
+    <h3>Why <code>GameRound</code> the model is scoped out</h3>
+    <p><code>lib/credits.ts</code>'s <code>settleGame</code> writes to <code>prisma.gameRound</code>, and <code>scripts/inspect-eval-sources.ts</code> also references it — so unlike the two fully-orphaned files, the Prisma model has at least one other touchpoint to check before removal. Dropping a model means a migration (irreversible without a restore), where deleting unused TypeScript functions is a same-day revert. Different risk tier; don't bundle them into one PR.</p>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>"Removed" in a commit message doesn't mean removed.</b> <code>1ad57f8</code>'s title says the games UI was removed; the backend half of that feature — three functions, two full library files, one env var, one secondary rate limiter — was left in place. Grep the actual call graph before trusting a removal commit's scope, even your own.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The credits system itself is still live and load-bearing</b> — this isn't "delete the whole credits feature." Users still earn credits for saving words and see a leaderboard; only the games-specific award paths are dead.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li><code>lib/gameTokens.ts</code>, <code>lib/gameUtils.ts</code> deleted</li>
+      <li><code>settleGame</code>, <code>awardDailyLookup</code>, <code>awardWordShare</code> removed from <code>lib/credits.ts</code></li>
+      <li><code>npx tsc --noEmit</code> and <code>npm run lint</code> clean afterward</li>
+      <li><code>/api/credits</code> and <code>/api/word/[word]/save</code> manually re-verified working (they're the two real callers left in the file)</li>
+      <li><code>GameRound</code> model and its two other references explicitly left alone, noted as future work if ever revisited</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-04 · reverse-dictionary · priority 4 of 5</footer>
+</div>

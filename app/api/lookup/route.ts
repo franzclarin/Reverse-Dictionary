@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
 import { embed } from "@/lib/embedder";
 import { prisma } from "@/lib/prisma";
 import { runShadowLookup } from "@/lib/shadowLookup";
@@ -23,103 +20,11 @@ export const maxDuration = 60; // model cold-start needs up to ~20s; default 10s
 const SHADOW_LOOKUP_ENABLED = true;
 const SHADOW_SAMPLE_RATE = 0.1;
 
-type Ratelimiters = { guest: Ratelimit; user: Ratelimit };
-
-let ratelimitersCache: Ratelimiters | null | undefined;
-
-/**
- * Built lazily (not at module scope): a malformed UPSTASH_REDIS_REST_URL makes
- * `new Redis()` throw, and at module scope that crashes route initialisation
- * into an empty-body 500 before our try/catch can return JSON.
- */
-function getRatelimiters(): Ratelimiters | null {
-  if (ratelimitersCache !== undefined) return ratelimitersCache;
-
-  // Prefer KV_* — those are written and rotated by the Vercel/Upstash
-  // Marketplace integration, so they can't go stale the way a hand-copied
-  // UPSTASH_REDIS_REST_URL did (it outlived its database by 166 days and
-  // took down search). UPSTASH_* stays as a fallback for local/self-managed.
-  const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) {
-    ratelimitersCache = null;
-    return null;
-  }
-
-  try {
-    const redis = new Redis({ url, token });
-    ratelimitersCache = {
-      guest: new Ratelimit({
-        redis,
-        limiter: Ratelimit.slidingWindow(50, "1 d"),
-        prefix: "rl:lookup:guest",
-      }),
-      user: new Ratelimit({
-        redis,
-        limiter: Ratelimit.slidingWindow(200, "1 d"),
-        prefix: "rl:lookup:user",
-      }),
-    };
-  } catch (error) {
-    console.error(
-      `[lookup] rate limiter construction failed; continuing without rate limiting. ${formatErrorShape(describeError(error))}`
-    );
-    ratelimitersCache = null;
-  }
-  return ratelimitersCache;
-}
-
 type ResultRow = { word: string; similarity: number };
-
-type LimitOutcome = { allowed: true } | { allowed: false; message: string; guest: boolean };
-
-/**
- * @upstash/redis talks REST over `fetch`, so stale credentials or a deleted
- * database throw "fetch failed" here — long before we touch the model.
- * Rate limiting must never take down search, so we fail open.
- */
-async function checkRateLimit(
-  request: NextRequest,
-  userId: string | null
-): Promise<LimitOutcome> {
-  const ratelimiters = getRatelimiters();
-  if (!ratelimiters) return { allowed: true };
-
-  try {
-    if (userId) {
-      const result = await ratelimiters.user.limit(userId);
-      return result.success
-        ? { allowed: true }
-        : {
-            allowed: false,
-            guest: false,
-            message: "Daily limit of 200 lookups reached. Try again tomorrow.",
-          };
-    }
-
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "127.0.0.1";
-    const result = await ratelimiters.guest.limit(ip);
-    return result.success
-      ? { allowed: true }
-      : {
-          allowed: false,
-          guest: true,
-          message: "Daily limit of 50 free lookups reached. Sign in for 200 lookups/day.",
-        };
-  } catch (error) {
-    const shape = describeError(error);
-    console.error(
-      `[lookup] rate limit check failed — FAILING OPEN. ${formatErrorShape(shape)}`
-    );
-    return { allowed: true };
-  }
-}
 
 const SUBSYSTEM_MESSAGES: Record<Subsystem, string> = {
   model:
     "The embedding model could not be loaded. This is usually a temporary network problem reaching the model host — please try again in a moment.",
-  ratelimit: "The rate limiter is unavailable.",
   database:
     "The word database is unreachable. Please try again in a moment.",
   unknown: "An unexpected error occurred.",
@@ -127,20 +32,6 @@ const SUBSYSTEM_MESSAGES: Record<Subsystem, string> = {
 
 export async function POST(request: NextRequest) {
   try {
-    // auth() stays inside the try so a Clerk failure returns JSON, not an
-    // empty-body 500 that breaks the client's response.json().
-    const { userId } = auth();
-
-    const limit = await checkRateLimit(request, userId);
-    if (!limit.allowed) {
-      return NextResponse.json(
-        limit.guest
-          ? { error: limit.message, rateLimitExceeded: true }
-          : { error: limit.message },
-        { status: 429 }
-      );
-    }
-
     const body = await request.json();
     const { query, k = 10 } = body as { query: string; k?: number };
 
@@ -197,10 +88,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Embed + db time only — excludes auth/ratelimit overhead, which isn't
-    // part of "how long did the search take" from the user's perspective.
-    // Real elapsed time, including any cold-start model download: no fixed
-    // placeholder number gets shown in its place.
+    // Embed + db time only. Real elapsed time, including any cold-start
+    // model download: no fixed placeholder number gets shown in its place.
     const timingMs = Date.now() - embedStartedAt;
 
     return NextResponse.json({ results: rows, timingMs });
@@ -213,9 +102,9 @@ export async function POST(request: NextRequest) {
     if (shape.stack) console.error(`[lookup] stack: ${shape.stack}`);
 
     // Name the subsystem and the network code so the client never again sees a
-    // bare "fetch failed". The hostname can identify a private Upstash
-    // database, so it is only echoed outside production (the full shape is
-    // always in the server logs regardless).
+    // bare "fetch failed". The hostname can identify a private database, so
+    // it is only echoed outside production (the full shape is always in the
+    // server logs regardless).
     const detailParts = [
       `${subsystem}: ${shape.message}`,
       shape.code ? `code=${shape.code}` : undefined,

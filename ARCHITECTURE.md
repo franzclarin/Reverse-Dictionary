@@ -42,11 +42,10 @@ Claude/Anthropic was removed from this app entirely on 2026-08-18. There is no `
 ┌─────────────────────────────────────────────────────────────┐
 │              POST /api/lookup  (Node.js runtime, 60s)        │
 │                                                               │
-│  1. auth() + rate limit check (fails open)                  │
-│  2. embed(query) — Transformers.js ONNX, in-function         │
-│  3. pgvector: ORDER BY embedding <=> $1 LIMIT k              │
+│  1. embed(query) — Transformers.js ONNX, in-function         │
+│  2. pgvector: ORDER BY embedding <=> $1 LIMIT k              │
 │     (SET LOCAL ivfflat.probes = 10, inside a transaction)    │
-│  4. return { results: [{ word, similarity }], timingMs }     │
+│  3. return { results: [{ word, similarity }], timingMs }     │
 └────────────────────│─────────────────────────────────────────┘
                      │
                      ▼
@@ -85,46 +84,37 @@ Reverse-Dictionary/
 ├── app/
 │   ├── api/
 │   │   ├── lookup/route.ts
-│   │   ├── word/[word]/route.ts
-│   │   ├── word/[word]/save/route.ts
-│   │   ├── credits/route.ts
-│   │   └── leaderboard/route.ts
+│   │   └── word/[word]/route.ts
 │   ├── page.tsx, search/page.tsx, word/[word]/page.tsx
-│   ├── collection/page.tsx
+│   ├── icon.svg              # Favicon (Next App Router file convention)
 │   ├── layout.tsx, globals.css
 ├── components/
 │   ├── SearchInput.tsx, SearchResults.tsx, ResultListItem.tsx
-│   ├── Navbar.tsx, WordLink.tsx, WordShareButtons.tsx, SaveWordButton.tsx
+│   ├── Navbar.tsx, WordLink.tsx, WordShareButtons.tsx
 ├── lib/
 │   ├── embedder.ts          # Transformers.js singleton, retry/backoff, never caches a rejected promise
 │   ├── wordData.ts          # getWordData / getRelatedWords, both wrapped in React cache()
 │   ├── errors.ts            # describeError/formatErrorShape/SubsystemError — flattens fetch-failed cause chains
-│   ├── prisma.ts
-│   └── credits.ts
+│   └── prisma.ts
 ├── prisma/
 │   └── schema.prisma
 ├── scripts/, eval/          # Offline retrieval evaluation harness (see CLAUDE.md)
-└── next.config.js, middleware.ts
+└── next.config.js
 ```
 
 ## Environment Variables
 
 ```env
 DATABASE_URL=postgres://...          # Neon, pgvector enabled
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=...
-CLERK_SECRET_KEY=...
-KV_REST_API_URL=...                  # Optional — Upstash Redis via Vercel Marketplace
-KV_REST_API_TOKEN=...
 NEXT_PUBLIC_SITE_URL=...             # Optional — sitemap origin
 ```
 
 ## Security Considerations
 
 1. **No LLM API key to protect** — there is no Anthropic key or equivalent in this app anymore.
-2. **Rate limiting** is implemented (Upstash-backed sliding window, 50/day guest, 200/day signed-in) and **fails open** by design if the limiter itself is unreachable — search availability is prioritized over strict quota enforcement.
+2. **No auth, no rate limiting** — there is no userbase and nothing to authenticate; `/api/lookup` is fully anonymous and unthrottled (removed 2026-08-26, see CLAUDE.md).
 3. **Input validation**: query must be a non-empty string ≤500 characters.
-4. **Error responses never leak internals**: `hostname` in error `detail` is stripped outside dev (it can identify a private Upstash database); the full error shape is always in server logs.
-5. Clerk middleware runs on all routes; the app itself is usable fully signed-out.
+4. **Error responses never leak internals**: `hostname` in error `detail` is stripped outside dev (it can identify a private database host); the full error shape is always in server logs.
 
 ## Performance Notes
 
@@ -134,7 +124,7 @@ NEXT_PUBLIC_SITE_URL=...             # Optional — sitemap origin
 
 ## Deployment Checklist
 
-- [ ] `DATABASE_URL`, Clerk keys, and (optionally) `KV_*` set in Vercel
+- [ ] `DATABASE_URL` set in Vercel
 - [ ] `npm run build` succeeds locally
 - [ ] `npx tsc --noEmit` clean
 - [ ] Deployed by pushing to `main` — **not** `vercel deploy --prod` (see DEPLOYMENT.md)

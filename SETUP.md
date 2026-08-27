@@ -4,11 +4,9 @@ Follow these steps to get the Reverse Dictionary app running locally.
 
 ## Step 1: Get Credentials
 
-You need three things before the app will run locally:
+You need one thing before the app will run locally:
 
 1. **A Neon Postgres connection string** with `pgvector` enabled ([neon.tech](https://neon.tech)) — or ask whoever owns this project for the shared dev database.
-2. **A Clerk publishable + secret key** ([dashboard.clerk.com](https://dashboard.clerk.com/)).
-3. Optional: **Upstash Redis REST credentials** ([console.upstash.com](https://console.upstash.com/), or provisioned via the Vercel Marketplace) — the app runs fine without these, just with no rate limiting.
 
 If this project is already linked to a Vercel team, the fastest path is:
 ```bash
@@ -24,12 +22,6 @@ If you're not pulling from Vercel, create `.env.local` in the project root by ha
 
 ```env
 DATABASE_URL=postgres://...
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
-CLERK_SECRET_KEY=sk_...
-
-# Optional — rate limiting fails open without these
-KV_REST_API_URL=...
-KV_REST_API_TOKEN=...
 ```
 
 There's no `.env.example` checked in — the variable names above are the complete required set (see README's Environment Variables table for what each one does).
@@ -58,9 +50,6 @@ The app will be available at [http://localhost:3000](http://localhost:3000).
 
 ### Search returns a 500 with `subsystem: "model"`
 - The embedding model (`franzclarin/ReverseDictionary`) is pulled from the Hugging Face CDN on first use per warm instance — this needs outbound network access on first run and can take up to ~20s.
-
-### Sign-in doesn't work
-- Confirm both Clerk keys are set and match the same Clerk application/environment.
 
 ### Build errors
 - Run `npm install` again.

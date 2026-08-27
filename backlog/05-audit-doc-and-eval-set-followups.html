@@ -1,0 +1,71 @@
+<title>RD-05 · Audit doc and eval-set follow-ups</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-05</div>
+
+  <div class="ticket-head">
+    <h1>Decide the fate of <code>MIGRATION_AUDIT.md</code>; finish the eval set's <code>acceptable[]</code> coverage</h1>
+    <span class="badge badge-p3">P3 · housekeeping</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Touches:</b> <code>MIGRATION_AUDIT.md</code>, <code>eval/sets/v1.jsonl</code></span>
+    <span><b>Risk:</b> none — pure documentation/process</span>
+    <span><b>Est:</b> ~30 min for the audit doc, ~2–3 hrs for acceptable[] if pursued</span>
+  </div>
+
+  <p class="lede">Two small, unrelated loose ends that don't block anything above but shouldn't sit forever either. Bundled here because both are low-stakes enough to defer past every engineering ticket in this folder, not because they're related to each other.</p>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — S (A) / M (B)</div>
+      <div class="stat-value">1 file decision; ~179 rows to review</div>
+      <div class="stat-note">Part A is a single pick-one-of-three decision, ~30 min. Part B is genuinely bigger than it looks — 179 eval rows need a human synonym-acceptability judgment call each, plus the full re-versioning ceremony (new sha256, regenerated reference runs) the frozen-set discipline requires.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — low</div>
+      <div class="stat-value">Process hygiene, not product</div>
+      <div class="stat-note">Part A is pure repo cleanliness. Part B has a real but narrow methodological effect — it tightens lenient-R@1's synonym correction — but CLAUDE.md already calls the current partial coverage "deliberate MVP scope," so treat this as polish, not a gap in what's currently trustworthy.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task — part A: the audit doc</h2>
+    <ol>
+      <li><code>MIGRATION_AUDIT.md</code> is a detailed, valuable session log — but it's sitting untracked in the repo root, which doesn't match this project's own documented convention of not leaving completed/stale narrative docs lying around (see <code>CLAUDE.md</code>'s own history: commit <code>671621c</code> deliberately deleted a stale "Open items" section rather than let it accumulate).</li>
+      <li>Pick one: (a) fold anything still load-bearing into <code>CLAUDE.md</code> or these tickets, then delete it; (b) move it to a <code>docs/history/</code> or similar archive location and commit it there deliberately; (c) commit it as-is at the repo root if the team wants a permanent record of this specific audit. Any of these is fine — leaving it perpetually untracked is the one option that isn't.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Task — part B: <code>acceptable[]</code> coverage</h2>
+    <ol>
+      <li>Only 133 of 312 authored eval rows currently carry an <code>acceptable[]</code> synonym list, meaning lenient Recall@1 equals strict Recall@1 on the other 179 — the synonym-tie correction is partial, not applied uniformly.</li>
+      <li><code>eval/audit/acceptable-recommendations.tsv</code> already has candidate recommendations sitting unresolved (per <code>CLAUDE.md</code> §"Known limitation of v1") — start there rather than re-deriving from scratch.</li>
+      <li><b>The eval set is frozen — this cannot be an in-place edit.</b> Any change produces <code>v2.jsonl</code>, a fresh sha256 recorded the same way <code>v1</code>'s was, and every committed reference run (<code>eval/runs/baseline.json</code> etc.) needs re-generating against the new set before it's trustworthy again.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <ul>
+      <li>This is explicitly <b>not</b> urgent: <code>CLAUDE.md</code> already labels the partial <code>acceptable[]</code> coverage "deliberate MVP scope, not a bug." Don't let this ticket imply otherwise — it's here so it doesn't get forgotten, not because it's blocking anything.</li>
+      <li>Before starting part B, re-read <code>CLAUDE.md</code> §"The eval set — frozen, never regenerated in place" in full. The freeze discipline is the single thing that keeps every headline number in this repo trustworthy over time; getting the versioning wrong here undermines every ticket above it.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>A repo's own documented conventions are a legitimate audit signal.</b> This project explicitly prefers deleting completed TODO-style docs over accumulating them — that's not a generic best practice being imported from outside, it's this codebase's own established pattern, visible in its git history. Worth checking for on any project before deciding whether a working doc should stay.</p></div>
+    <div class="learning"><div class="learning-mark risk">!</div><p><b>"Low priority" and "no opinion on the answer" are different things.</b> This ticket doesn't recommend which of the three audit-doc options to take — that's a genuine team call (permanent record vs. archive vs. fold-and-delete) — but it does insist one of them gets picked rather than the file quietly living in an untracked limbo indefinitely.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li><code>MIGRATION_AUDIT.md</code> either committed somewhere deliberate, folded into existing docs, or removed — not left untracked</li>
+      <li>If part B is pursued: new set is <code>v2.jsonl</code>, never an edit to <code>v1.jsonl</code>; sha256 recorded; reference runs regenerated</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-05 · reverse-dictionary · priority 5 of 5</footer>
+</div>

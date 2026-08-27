@@ -8,7 +8,7 @@
  */
 
 /** Which outbound dependency blew up. Drives the user-facing message. */
-export type Subsystem = "model" | "ratelimit" | "database" | "unknown";
+export type Subsystem = "model" | "database" | "unknown";
 
 export class SubsystemError extends Error {
   readonly subsystem: Subsystem;

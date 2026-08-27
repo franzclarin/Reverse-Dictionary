@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { ClerkProvider } from "@clerk/nextjs";
 import Navbar from "@/components/Navbar";
 import { LoadingProvider } from "@/context/LoadingContext";
 
@@ -24,32 +23,30 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
-      <html lang="en">
-        <body className="antialiased min-h-screen flex flex-col">
-          <LoadingProvider>
-            <Navbar />
-            <div className="flex-1">{children}</div>
-            <footer
-              className="py-5 text-center"
-              style={{ borderTop: "1px solid var(--rd-border)", background: "var(--rd-paper)" }}
-            >
-              <p className="font-mono text-xs" style={{ color: "var(--rd-ink-muted)" }}>
-                © Reverse Dictionary ·{" "}
-                <a
-                  href="https://github.com/franzclarin/Reverse-Dictionary"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-                  style={{ outlineColor: "var(--rd-accent)" }}
-                >
-                  GitHub
-                </a>
-              </p>
-            </footer>
-          </LoadingProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en">
+      <body className="antialiased min-h-screen flex flex-col">
+        <LoadingProvider>
+          <Navbar />
+          <div className="flex-1">{children}</div>
+          <footer
+            className="py-5 text-center"
+            style={{ borderTop: "1px solid var(--rd-border)", background: "var(--rd-paper)" }}
+          >
+            <p className="font-mono text-xs" style={{ color: "var(--rd-ink-muted)" }}>
+              © Reverse Dictionary ·{" "}
+              <a
+                href="https://github.com/franzclarin/Reverse-Dictionary"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                style={{ outlineColor: "var(--rd-accent)" }}
+              >
+                GitHub
+              </a>
+            </p>
+          </footer>
+        </LoadingProvider>
+      </body>
+    </html>
   );
 }

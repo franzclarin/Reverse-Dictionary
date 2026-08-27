@@ -1,0 +1,160 @@
+<title>Reverse Dictionary · Tickets</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .list { list-style: none; padding: 0; margin: 0; }
+  .row {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+    padding: 18px 22px;
+    margin-bottom: 14px;
+    transition: transform 0.12s ease, border-color 0.12s ease;
+  }
+  .row:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .row-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 6px; }
+  .row-title { font-size: 1.08rem; font-weight: 600; }
+  .row-id { font-family: ui-monospace,monospace; font-size: 11px; color: var(--ink-soft); }
+  .row-sub { color: var(--ink-soft); font-size: 0.94rem; margin: 0; }
+  .row-tags { display: flex; gap: 8px; margin-top: 10px; font-family: ui-monospace,monospace; font-size: 10.5px; color: var(--ink-soft); }
+  .row-tags span { background: var(--mono-bg); padding: 3px 8px; border-radius: 6px; }
+</style>
+<div class="wrap">
+  <div class="crumbs">reverse-dictionary</div>
+  <h1>Tickets</h1>
+  <p class="lede">Ordered by priority — RD-01 and RD-02 are the two halves of the same fix (build the index, then decide to use it) and should be read together even though they're separate tickets.</p>
+
+  <section>
+    <h2>Size vs. impact</h2>
+    <div class="viz">
+      <svg viewBox="0 0 760 400" width="100%" role="img" aria-labelledby="matrixtitle">
+        <title id="matrixtitle">Ticket size versus impact, quadrant plot</title>
+        <g font-family="ui-monospace,monospace">
+          <!-- quadrant fills -->
+          <rect x="60" y="20" width="320" height="170" fill="var(--good-bg)" opacity="0.5"/>
+          <rect x="380" y="20" width="320" height="170" fill="var(--p1-bg)" opacity="0.4"/>
+          <rect x="60" y="190" width="320" height="170" fill="var(--mono-bg)" opacity="0.6"/>
+          <rect x="380" y="190" width="320" height="170" fill="var(--bad-bg)" opacity="0.35"/>
+
+          <!-- quadrant labels -->
+          <text x="70" y="38" font-size="10.5" fill="var(--good)" font-weight="700">DO FIRST — small, high impact</text>
+          <text x="690" y="38" text-anchor="end" font-size="10.5" fill="var(--p1)" font-weight="700">BIG BETS — large, high impact</text>
+          <text x="70" y="352" font-size="10.5" fill="var(--ink-soft)" font-weight="700">FILL-INS — small, low impact</text>
+          <text x="690" y="352" text-anchor="end" font-size="10.5" fill="var(--bad)" font-weight="700">RECONSIDER — large, low impact</text>
+
+          <!-- axes -->
+          <line x1="60" y1="20" x2="60" y2="360" stroke="var(--ink)" stroke-width="1.5"/>
+          <line x1="60" y1="360" x2="700" y2="360" stroke="var(--ink)" stroke-width="1.5"/>
+          <line x1="380" y1="20" x2="380" y2="360" stroke="var(--line)" stroke-dasharray="3,3"/>
+          <line x1="60" y1="190" x2="700" y2="190" stroke="var(--line)" stroke-dasharray="3,3"/>
+
+          <text x="380" y="382" text-anchor="middle" font-size="11" fill="var(--ink-soft)">size / effort →</text>
+          <text x="30" y="190" text-anchor="middle" font-size="11" fill="var(--ink-soft)" transform="rotate(-90 30 190)">impact →</text>
+
+          <!-- unlock arrow RD-01 -> RD-02 -->
+          <path d="M300 235 C 220 150, 180 90, 148 55" stroke="var(--ink-soft)" stroke-width="1.3" fill="none" stroke-dasharray="4,3" marker-end="url(#am)"/>
+          <text x="200" y="140" font-size="10" fill="var(--ink-soft)">unlocks</text>
+
+          <!-- points -->
+          <circle cx="140" cy="40" r="9" fill="var(--p0)"/>
+          <text x="140" y="20" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p0)">RD-02</text>
+
+          <circle cx="300" cy="235" r="9" fill="var(--p0)" opacity="0.55"/>
+          <text x="300" y="255" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p0)">RD-01</text>
+          <text x="300" y="269" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(impact is enabling, plotted low-direct)</text>
+
+          <circle cx="380" cy="225" r="9" fill="var(--p1)"/>
+          <text x="380" y="245" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-03</text>
+
+          <circle cx="60" cy="360" r="9" fill="var(--p2)"/>
+          <text x="60" y="343" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p2)">RD-04</text>
+
+          <circle cx="220" cy="343" r="9" fill="var(--p3)"/>
+          <text x="220" y="326" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p3)">RD-05</text>
+        </g>
+        <defs><marker id="am" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--ink-soft)"/></marker></defs>
+      </svg>
+      <div class="viz-caption">RD-02 is the only true "do first" — small and decisively high-impact. RD-01 sits lower only because its impact is entirely borrowed from unlocking RD-02, not direct.</div>
+    </div>
+  </section>
+
+  <section>
+    <ul class="list">
+      <li>
+        <a class="row" href="01-gloss-index-data-migration.html">
+          <div class="row-top">
+            <span class="row-title">RD-01 · Build the production gloss index under Neon's 512MB ceiling</span>
+            <span class="badge badge-done">✓ Done</span>
+          </div>
+          <p class="row-sub">Done 2026-08-26 — plan changed (Neon plan upgraded, index-drop skipped): GlossEmbedding populated with 117,791 rows, VocabEmbedding untouched, DB at 673MB. See ticket for the full result.</p>
+          <div class="row-tags"><span>data engineering</span><span>size: M</span><span>impact: enabling (unlocks RD-02)</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="02-embedding-cutover.html">
+          <div class="row-top">
+            <span class="row-title">RD-02 · Shadow-validate, then cut search over to the gloss index</span>
+            <span class="badge badge-p0">P0</span>
+          </div>
+          <p class="row-sub">Offline eval already shows +12.9–15.7pp lenient R@1 and echo 44%→14%. Validate on live traffic via the shadow log, then decide.</p>
+          <div class="row-tags"><span>sentence embeddings</span><span>size: S</span><span>impact: very high</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="03-embedder-dependency-security.html">
+          <div class="row-top">
+            <span class="row-title">RD-03 · Resolve embedder dependency vulnerabilities</span>
+            <span class="badge badge-p1">P1</span>
+          </div>
+          <p class="row-sub">3 critical / 17 high in @xenova/transformers' protobufjs/sharp chain. Fix without silently changing the pinned embedding pipeline.</p>
+          <div class="row-tags"><span>dependency security</span><span>size: M (uncertain)</span><span>impact: medium (risk, not recall)</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="04-remove-orphaned-games-code.html">
+          <div class="row-top">
+            <span class="row-title">RD-04 · Remove orphaned games/credit code</span>
+            <span class="badge badge-p2">P2</span>
+          </div>
+          <p class="row-sub">Superseded by RD-06 — its full scope, including credits/leaderboard, is being removed rather than left alone. This ticket's findings (verified zero-caller functions) still stand as a historical record.</p>
+          <div class="row-tags"><span>cleanup</span><span>size: S</span><span>impact: low</span><span>superseded</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="05-audit-doc-and-eval-set-followups.html">
+          <div class="row-top">
+            <span class="row-title">RD-05 · Audit doc and eval-set follow-ups</span>
+            <span class="badge badge-p3">P3</span>
+          </div>
+          <p class="row-sub">Decide MIGRATION_AUDIT.md's fate; optionally finish acceptable[] coverage on the frozen eval set (new version, never in-place).</p>
+          <div class="row-tags"><span>housekeeping</span><span>size: S/M</span><span>impact: low</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="06-remove-userbase-and-rate-limiting.html">
+          <div class="row-top">
+            <span class="row-title">RD-06 · Remove the userbase and rate limiting entirely</span>
+            <span class="badge badge-done">✓ Done</span>
+          </div>
+          <p class="row-sub">Done 2026-08-26 — Clerk auth, saved words, credits, leaderboard, and Upstash rate limiting all removed; search is now fully anonymous and unthrottled. Supersedes RD-04.</p>
+          <div class="row-tags"><span>product simplification</span><span>size: M</span><span>impact: simplification</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="07-add-favicon.html">
+          <div class="row-top">
+            <span class="row-title">RD-07 · Add a favicon</span>
+            <span class="badge badge-done">✓ Done</span>
+          </div>
+          <p class="row-sub">Done 2026-08-26 — app/icon.svg added using the nav's pilcrow mark, picked up automatically by Next's App Router file convention.</p>
+          <div class="row-tags"><span>polish</span><span>size: XS</span><span>impact: low</span></div>
+        </a>
+      </li>
+    </ul>
+  </section>
+
+  <footer class="done">7 tickets · generated from a live repo audit, 2026-08-26</footer>
+</div>

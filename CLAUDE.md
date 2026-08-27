@@ -10,8 +10,7 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 
 - **Next.js 14** (App Router, TypeScript) + **Tailwind CSS**
 - **Neon Postgres** + **Prisma 5** — `pgvector` extension for embeddings
-- **Clerk** auth (middleware runs on all routes; app is usable signed-out)
-- **Upstash Redis + Ratelimit** — Vercel Marketplace resource (`upstash/upstash-kv`). Built lazily by `getRatelimiters()`, no-op when env vars are absent, and **fails open** when the limiter itself errors
+- **No auth, no rate limiting.** Clerk and Upstash Redis/Ratelimit were removed entirely (RD-06, 2026-08-26) — the app has no userbase (no sign-in, saved words, credits, or leaderboard) and `/api/lookup` is fully anonymous and unthrottled. There is no `@clerk/nextjs`, `@upstash/ratelimit`, or `@upstash/redis` dependency and no `middleware.ts`.
 - **@xenova/transformers** (Transformers.js) — in-function ONNX embedding
 - **No generative AI dependency.** Claude was removed entirely on 2026-08-18 — search never used it, and word pages no longer do (see "Word pages"). There is no `@anthropic-ai/sdk` and no `ANTHROPIC_API_KEY`
 - Deployed on **Vercel** (region `iad1`); GitHub `franzclarin/Reverse-Dictionary`, branch `main`
@@ -41,7 +40,7 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 
 - An embedding model has no decoder, so it **cannot** produce a definition, etymology, pronunciation, or examples. Don't try to restore those from it.
 - `getRelatedWords()` (`lib/wordData.ts`) is the core of the page: nearest neighbours by cosine distance over `VocabEmbedding`. It reads the word's **stored** vector via a subquery, so it never loads ONNX — pure pgvector, fast.
-- `getWordData()` returns an existing `Word` row if present (words profiled before Claude was removed keep their definition — reading them is free), otherwise creates a **minimal row with empty text fields** so the word has a stable id for `SavedWord`. The page renders around whatever is empty.
+- `getWordData()` returns an existing `Word` row if present (words profiled before Claude was removed keep their definition — reading them is free), otherwise creates a **minimal row with empty text fields** so the word has a stable id and URL. The page renders around whatever is empty.
 - **Gotcha:** those minimal rows are indistinguishable from a real profile by presence alone. If a generative source is ever added back, regenerate on `definition === ""`, not on row-absence, or every word visited during this era will stay blank forever.
 - Both `getWordData` and `getRelatedWords` are wrapped in React `cache()` so the page and `generateMetadata` share one query per request instead of duplicating it.
 - `app/word/[word]/error.tsx` is the boundary that keeps a server-side exception from surfacing as Next's bare "Application error … Digest: …".
@@ -49,33 +48,28 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 
 ## Data model (`prisma/schema.prisma`)
 
-Models: `Word`, `SavedWord`, `User`, `Lookup`, `GameRound`, `VocabEmbedding`.
+Models: `Word`, `VocabEmbedding`, `GlossEmbedding`, `ShadowLookup`.
 - `VocabEmbedding { id, word @unique, embedding Unsupported("vector(384)") }` — 141,854 rows, IVFFlat index (`vector_cosine_ops`, `lists = 150`).
 - pgvector columns use `Unsupported("vector(384)")`; query them with `$queryRawUnsafe` and a `[..]` vector literal, never the typed Prisma client.
+- **`SavedWord`, `User`, `Lookup`, `GameRound` were removed entirely (RD-06, 2026-08-26)** along with Clerk auth and the credits/games system built on them. `Word.savedBy` went with `SavedWord`. None of the removed models had any relation to `VocabEmbedding`/`GlossEmbedding`/`ShadowLookup`, so the search path was untouched.
 
 ## API routes (`app/api/`)
 
-- `lookup/` — embedding search (primary).
-- `word/[word]/`, `word/[word]/save/` — word page data + saving.
-- `credits/`, `leaderboard/` — user credits / leaderboard.
+- `lookup/` — embedding search (primary). No auth, no rate limiting.
+- `word/[word]/` — word page data.
 
 ## Conventions & gotchas
 
 - **Read `response.json()` defensively**: parse in a try/catch, THEN check `response.ok`. An empty body (Vercel gateway 401/502, crashed function) otherwise throws "Unexpected end of JSON input". Both search routes and the client already do this.
-- Keep `auth()` and rate-limiting **inside** the route's top-level try/catch so failures return JSON, never an empty-body 500.
-- Rate limiters are optional — always null-check `getRatelimiters()`.
 - **"fetch failed" is never the real error.** Node/undici throws a bare `TypeError: fetch failed` for every network fault and hides the reason on `error.cause` (`code`, `errno`, `hostname`) — sometimes nested, sometimes inside an `AggregateError.errors`. Never log or return `err.message` alone. Use `describeError()` / `formatErrorShape()` from `lib/errors.ts`, which flatten the whole cause chain.
-- **Tag failures by subsystem.** `/api/lookup` has exactly three outbound-fetch dependencies; each one produces an identical "fetch failed". Wrap each and throw `SubsystemError(subsystem, …)` so the log line (`[lookup] FAILED subsystem=…`) and the client's `detail` name the culprit:
+- **Tag failures by subsystem.** `/api/lookup` has two outbound dependencies that can each produce an identical "fetch failed". Wrap each and throw `SubsystemError(subsystem, …)` so the log line (`[lookup] FAILED subsystem=…`) and the client's `detail` name the culprit:
   - `model` — Transformers.js pulling `franzclarin/ReverseDictionary` from the HF CDN on cold start.
   - `database` — the pgvector query. (Prisma here is **plain TCP**, not `@prisma/adapter-neon` / `@neondatabase/serverless`, so it does *not* use fetch. It only appears as "fetch failed" if someone swaps in a fetch-based driver.)
-  - `ratelimit` — `@upstash/redis` is REST-over-`fetch`.
-- **Rate limiting must fail open.** `getRatelimiters()` guards *absent* env vars, but a **present-but-stale** `UPSTASH_REDIS_REST_URL` (deleted DB, rotated creds) makes `.limit()` throw `fetch failed` / `ENOTFOUND` *before* the model is ever touched — it took down all of search. `checkRateLimit()` now catches, logs `FAILING OPEN`, and allows the request. Build the limiters **lazily**, not at module scope: a malformed URL makes `new Redis()` throw during route init, which yields an empty-body 500 that the client can't parse.
 - **Never cache a rejected promise.** `globalThis._embedderPromise` memoises the model load. If a rejected promise stays in that slot, every later request on the same warm instance fails instantly with the same stale error forever, even after the network heals. `getEmbedder()` clears the slot on rejection (guarded by identity check); `loadEmbedder()` retries 3× with exponential backoff and bails early on non-network errors so it doesn't burn the 60s budget.
 - Observed cause codes: `ENOTFOUND` (bad/stale host), `ECONNREFUSED` (host up, nothing listening), plus `EAI_AGAIN` / `UND_ERR_CONNECT_TIMEOUT` for DNS and CDN stalls.
-- The error `detail` returned to the client includes `subsystem` + `code`, but **`hostname` only outside production** (an Upstash REST host identifies a private DB). The full shape is always in the server logs.
+- The error `detail` returned to the client includes `subsystem` + `code`, but **`hostname` only outside production** (a database host can identify a private DB). The full shape is always in the server logs.
 - Migrations: Neon pooled connections break `prisma migrate deploy`'s advisory lock — apply SQL via `prisma db execute --file` instead.
-- Env: local `.env.local` needs `DATABASE_URL` (Neon owner role), Clerk keys, and optionally Upstash (`KV_REST_API_URL` / `KV_REST_API_TOKEN`). Vercel needs the same for the deployed app.
-- **Redis creds come from `KV_*`, not `UPSTASH_*`.** The Upstash Redis DB is a Vercel Marketplace resource (`upstash/upstash-kv`), which writes `KV_REST_API_URL` / `KV_REST_API_TOKEN` and keeps them in sync with the resource. `getRatelimiters()` reads those first and only falls back to `UPSTASH_REDIS_REST_URL` / `_TOKEN`. Don't hand-copy credentials into the `UPSTASH_*` pair — a hand-set pair outlived its deleted database by 166 days and caused the outage above. Re-provision with `vercel integration add upstash/upstash-kv`; `vercel integration list` shows whether a resource actually exists (env vars alone prove nothing).
+- Env: local `.env.local` needs only `DATABASE_URL` (Neon owner role). No Clerk or Upstash keys required anymore.
 
 ## Evaluation (`scripts/`, `eval/`) — additive tooling, read-only
 
@@ -87,7 +81,7 @@ Offline harness measuring the real retrieval path (`embed(query)` → pgvector t
 
 - **The WordNet training corpus is unsplit and unusable for evaluation.** The model card inside `reverse_dict_model.zip` (`sentence_model/README.md`) records 181,149 (gloss, lemma, negative-lemma) triplets, `MultipleNegativesRankingLoss`, **3 epochs, no evaluator, no held-out split** (`eval_on_start: False`, `prediction_loss_only: True`). Its sample rows are verbatim WordNet glosses. Any WordNet-gloss-derived eval slice is ~100% leaked. This is why the eval set is hand-authored.
 - **`VocabEmbedding` stores bare-lemma embeddings.** `cos(embed(word), stored[word]) = 1.000000 ± 1e-6` across 24 probe words (`scripts/probe-representation.ts`). Corroborated structurally: `vocab.index` is 217,887,789 bytes = 141,854 × 384 × 4 + 45. Search matches a 12-word description against a 1-token document. This is *consistent with* training (`directions: ["query_to_doc"]`), so it is not a train/serve mismatch — the fine-tune simply did not achieve its own objective.
-- **No query text has ever been logged.** `Lookup` is `{id, userId, createdAt}` — a rate-limit counter. `GameRound` is the credits casino (`coinflip`, `slots`, …), not a word game. There is no sample of real user queries to draw on, and the eval set cannot pretend to be one.
+- **No query text has ever been logged.** Before RD-06 removed them, `Lookup` was `{id, userId, createdAt}` — a rate-limit counter — and `GameRound` was the credits casino (`coinflip`, `slots`, …), not a word game; neither ever stored query text. There is no sample of real user queries to draw on, and the eval set cannot pretend to be one.
 - **`VocabEmbedding` ⊂ WordNet 3.0, ~95% of it, with no POS skew.** Presence excluding numerals: noun 96.1%, verb 94.9%, adj 95.2%, adv 92.2%. Only 139 rows aren't WordNet lemmas. The missing ~7,148 are mostly Latin taxonomy (`abies`, `acanthuridae`) plus ~258 orphaned verbs (`adore`, `convene`, `doff`). A diffuse coverage tax, not a structural hole. **The vocabulary was never curated** — treat any rebuild as a deliberate re-selection, not a re-encode of what happens to be in the table.
 - **The junk-vocabulary hypothesis is measured and small.** 22.7% of the index is proper nouns, but only **2.8%** of top-10 results are (5 of 7 being case-duplicates of a word already in the same list). `--filter-junk` moved recall **0.0 points**. Kept for the record; not a lever. The predicate lives in one place — `junkPredicate()` in `scripts/lib/retrieval.ts` — and backs both `--filter-junk` (inline) and the `answerable_vocab` **view** created in the database (109,596 of 141,854 rows; excludes capitalised/digit/punctuation lemmas, deliberately **keeps** multi-word ones since `deja vu` and `stiff upper lip` are legitimate answers). A view stores nothing, so it costs no space and is reversible with `DROP VIEW`.
 - **Lexical echo is the central phenomenon, and it is structural.** 34.4% of top-10 results share a stem with a query content word (`rain → raininess, rainstorm, raindrop`). Echo results outscore the true target by **+0.134** mean cosine; *non*-echo results outscore it by **+0.094**. The target sits below nearly everything returned, so a reranker over the top 10 has nothing to reorder. Of 17 misses in the 25-query probe, only 2 were approximate-index failures; 15 were true ranking failures.

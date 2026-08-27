@@ -1,0 +1,61 @@
+<title>RD-07 · Add a favicon</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-07</div>
+
+  <div class="ticket-head">
+    <h1>Add a favicon — the site currently ships with none at all</h1>
+    <span class="badge badge-p3">P3 · polish</span>
+    <span class="badge badge-done">✓ Done · 2026-08-26</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Touches:</b> <code>app/icon.svg</code> (new, App Router auto-detected)</span>
+    <span><b>Risk:</b> none</span>
+    <span><b>Est:</b> ~15 min</span>
+  </div>
+
+  <p class="lede">Verified before starting: no <code>public/</code> directory exists in the repo, nothing under <code>app/</code> matches <code>favicon</code>/<code>icon</code>, and <code>app/layout.tsx</code>'s <code>metadata</code> export has no <code>icons</code> field. The browser tab currently shows no icon at all — not even Next's own default.</p>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — XS</div>
+      <div class="stat-value">1 new file, zero code changes</div>
+      <div class="stat-note">Next.js 14 App Router auto-detects <code>app/icon.*</code> by file convention — dropping the file in is the entire implementation, no <code>layout.tsx</code> metadata wiring required.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — low, cosmetic</div>
+      <div class="stat-value">Every browser tab, bookmark, and history entry</div>
+      <div class="stat-note">Doesn't touch search or retrieval. Purely finishes the editorial redesign — the nav already uses a serif "¶" pilcrow mark as its logo glyph, so the favicon reuses that instead of inventing new iconography.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li>Add <code>app/icon.svg</code>: a pilcrow (¶) glyph on the site's accent color, matching <code>components/Navbar.tsx</code>'s logo mark so the tab icon and the in-page logo read as the same brand.</li>
+      <li>No <code>layout.tsx</code> change needed — Next 14 App Router picks up <code>app/icon.svg</code> automatically and serves it at <code>/icon.svg</code> with the correct <code>&lt;link rel="icon"&gt;</code> tag injected into every page's <code>&lt;head&gt;</code>.</li>
+      <li>Verify in a running dev server that the tab shows the icon and <code>/icon.svg</code> resolves.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <p>Next.js's file-convention icons (<code>app/icon.{ico,jpg,jpeg,png,svg}</code>, optionally <code>app/apple-icon.png</code> for iOS home-screen use) are resolved at the segment level and merged into <code>generateMetadata</code>'s output automatically. This is the only icon mechanism this app needs — there's no multi-brand or per-locale icon requirement that would call for the alternative <code>public/favicon.ico</code> + manual <code>metadata.icons</code> approach.</p>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Zero-config was actually zero-config.</b> No <code>public/</code> directory needed to exist first, and no metadata object needed editing — the App Router's file-convention detection handled everything once <code>app/icon.svg</code> was in place.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li class="done"><code>app/icon.svg</code> exists and matches the nav's pilcrow mark</li>
+      <li class="done">Browser tab shows the icon when running <code>npm run dev</code></li>
+      <li class="done"><code>/icon.svg</code> resolves with a 200 and correct content type</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-07 · reverse-dictionary</footer>
+</div>

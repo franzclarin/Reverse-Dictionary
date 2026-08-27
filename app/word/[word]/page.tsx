@@ -1,12 +1,8 @@
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { auth } from "@clerk/nextjs/server";
 import WordLink from "@/components/WordLink";
 import { getWordData, getRelatedWords } from "@/lib/wordData";
-import { prisma } from "@/lib/prisma";
 import WordShareButtons from "@/components/WordShareButtons";
-import SaveWordButton from "@/components/SaveWordButton";
 
 export const dynamic = "force-dynamic";
 
@@ -48,16 +44,6 @@ export default async function WordPage({ params }: PageProps) {
   if (!wordData) notFound();
 
   const related = await getRelatedWords(wordData.word);
-
-  const { userId } = auth();
-  let isSaved = false;
-
-  if (userId) {
-    const saved = await prisma.savedWord.findUnique({
-      where: { userId_wordId: { userId, wordId: wordData.id } },
-    });
-    isSaved = !!saved;
-  }
 
   return (
     <main className="min-h-screen" style={{ background: "var(--rd-paper)" }}>
@@ -105,9 +91,6 @@ export default async function WordPage({ params }: PageProps) {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap mt-1">
-              {userId && (
-                <SaveWordButton word={wordData.word} initialSaved={isSaved} />
-              )}
               <WordShareButtons
                 word={wordData.word}
                 definition={wordData.definition}
@@ -212,27 +195,6 @@ export default async function WordPage({ params }: PageProps) {
               ))}
             </div>
           </section>
-        )}
-
-        <hr style={{ borderColor: "var(--rd-border)", marginBottom: "2rem" }} />
-
-        {/* Sign-in CTA for guests */}
-        {!userId && (
-          <div
-            className="p-6 rounded-lg text-center"
-            style={{ border: "1px solid var(--rd-border)", background: "var(--rd-hover)" }}
-          >
-            <p className="font-sans mb-4" style={{ color: "var(--rd-ink-secondary)" }}>
-              Sign in to save words to your personal collection.
-            </p>
-            <Link
-              href="/sign-in"
-              className="font-sans inline-block px-5 py-2 text-sm font-medium rounded-md transition-colors hover:bg-[var(--rd-accent-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-              style={{ background: "var(--rd-accent)", color: "#ffffff", outlineColor: "var(--rd-accent)" }}
-            >
-              Sign in free →
-            </Link>
-          </div>
         )}
       </div>
     </main>

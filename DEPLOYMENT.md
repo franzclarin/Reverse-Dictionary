@@ -8,8 +8,6 @@ This app is deployed on **Vercel only**. That isn't just a preference — the se
 
 - A GitHub account, with this repo pushed there
 - A Neon Postgres database with the `pgvector` extension enabled
-- A Clerk account
-- Optional: an Upstash Redis database provisioned via the Vercel Marketplace (`upstash/upstash-kv`) — search works without it, just with no rate limiting
 
 ### Step 1 — Import the project
 
@@ -23,8 +21,6 @@ Add these under Settings → Environment Variables (Production, Preview, and Dev
 | Variable | Source |
 |---|---|
 | `DATABASE_URL` | Neon connection string (owner role for migrations; a read-only role is enough for the app itself) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` | Clerk dashboard |
-| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Written automatically if you provision Redis via `vercel integration add upstash/upstash-kv` — don't hand-copy these from elsewhere; a stale hand-set pair here previously caused a full search outage (see CLAUDE.md) |
 | `NEXT_PUBLIC_SITE_URL` | Your production domain, if it's not `reversedictionary.xyz` |
 
 ### Step 3 — Apply migrations
@@ -57,8 +53,7 @@ Settings → Domains → add your domain, update DNS as instructed. Also set `NE
 
 ### Monitoring
 
-- **Logs**: Vercel's Deployments → function logs. `/api/lookup` logs `embed ok ms=… dims=…`, `db ok ms=… rows=…`, or on failure `[lookup] FAILED subsystem=<model|database|ratelimit|unknown> …` — the subsystem tag is deliberate (see CLAUDE.md's "Tag failures by subsystem") so a generic `fetch failed` never has to be diagnosed blind.
-- **Rate limiting failures fail open** — a stale or deleted Upstash database degrades to "no rate limiting," not a search outage. Still worth alerting on if `[lookup] rate limit check failed — FAILING OPEN` appears repeatedly.
+- **Logs**: Vercel's Deployments → function logs. `/api/lookup` logs `embed ok ms=… dims=…`, `db ok ms=… rows=…`, or on failure `[lookup] FAILED subsystem=<model|database|unknown> …` — the subsystem tag is deliberate (see CLAUDE.md's "Tag failures by subsystem") so a generic `fetch failed` never has to be diagnosed blind.
 
 ### Updating
 
@@ -76,7 +71,7 @@ Vercel deploys automatically on push to `main`.
 - Confirm `npx tsc --noEmit` and `npm run build` succeed locally first.
 
 ### Search returns a 500
-- Check the function log's `subsystem` tag (`model`, `database`, or `ratelimit`) and `code` — see CLAUDE.md's "Observed cause codes" for what `ENOTFOUND`/`ECONNREFUSED`/`EAI_AGAIN` typically mean in this app.
+- Check the function log's `subsystem` tag (`model` or `database`) and `code` — see CLAUDE.md's "Observed cause codes" for what `ENOTFOUND`/`ECONNREFUSED`/`EAI_AGAIN` typically mean in this app.
 - A cold-start model download can legitimately take up to ~20s; `maxDuration = 60` accounts for this, so a genuine timeout points at a network problem reaching the Hugging Face CDN, not a slow-but-working load.
 
 ### Search is slow
@@ -85,4 +80,4 @@ Vercel deploys automatically on push to `main`.
 ## Scaling Considerations
 
 - **Storage ceiling**: the Neon project is capped at 512MB; `VocabEmbedding` alone is ~452MB. There is no headroom for a second full-size vector index without dropping something first — see CLAUDE.md if you're considering the staged `GlossEmbedding` cutover.
-- **Rate limiting** is already in place (Upstash sliding window); raising limits is a one-line change in `app/api/lookup/route.ts`, not new infrastructure.
+- **No rate limiting** — search is fully anonymous and unthrottled. If traffic ever warrants it, this is new infrastructure to add, not a config flip (Upstash/Clerk were removed 2026-08-26, see CLAUDE.md).

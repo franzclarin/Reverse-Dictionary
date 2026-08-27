@@ -2,10 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SignInButton } from "@clerk/nextjs";
 import SearchInput from "@/components/SearchInput";
 import ResultListItem from "@/components/ResultListItem";
-import { RateLimitInfo } from "@/types";
 
 interface LookupResult {
   word: string;
@@ -57,7 +55,6 @@ export default function SearchResults({ query }: SearchResultsProps) {
   const [timingMs, setTimingMs] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
   const requestIdRef = useRef(0);
 
   // A new query resets pagination — otherwise "load more" on one query would
@@ -96,16 +93,10 @@ export default function SearchResults({ query }: SearchResultsProps) {
         if (requestIdRef.current !== requestId) return;
 
         if (!response.ok) {
-          if (response.status === 429) {
-            setError((data.error as string) || "Rate limit exceeded");
-            if (data.rateLimit) setRateLimit(data.rateLimit as RateLimitInfo);
-          } else {
-            const detail = data.detail ? ` — ${data.detail as string}` : "";
-            throw new Error(
-              `${(data.error as string) || "Search failed"} (HTTP ${response.status})${detail}`
-            );
-          }
-          return;
+          const detail = data.detail ? ` — ${data.detail as string}` : "";
+          throw new Error(
+            `${(data.error as string) || "Search failed"} (HTTP ${response.status})${detail}`
+          );
         }
 
         setResults((data.results as LookupResult[]) ?? []);
@@ -153,25 +144,6 @@ export default function SearchResults({ query }: SearchResultsProps) {
                   timingMs !== null ? ` · ${(timingMs / 1000).toFixed(2)}s` : ""
                 }`}
           </p>
-        )}
-
-        {rateLimit && (
-          <div
-            className="font-sans mb-4 flex items-center justify-between gap-4 rounded-lg px-4 py-3 text-sm"
-            style={{ background: "var(--rd-hover)", border: "1px solid var(--rd-border)" }}
-          >
-            <span style={{ color: "var(--rd-ink-secondary)" }}>
-              {rateLimit.remaining} of {rateLimit.limit} free lookups remaining today
-            </span>
-            <SignInButton mode="redirect">
-              <button
-                className="shrink-0 font-medium hover:underline"
-                style={{ color: "var(--rd-accent)" }}
-              >
-                Sign in for 200/day →
-              </button>
-            </SignInButton>
-          </div>
         )}
 
         {error && (

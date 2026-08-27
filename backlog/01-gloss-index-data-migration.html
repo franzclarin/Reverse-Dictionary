@@ -1,0 +1,151 @@
+<title>RD-01 · Build the production gloss index</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-01</div>
+
+  <div class="ticket-head">
+    <h1>Build the production gloss index under Neon's 512MB ceiling</h1>
+    <span class="badge badge-p0">P0 · data engineering</span>
+    <span class="badge badge-done">✓ Done · 2026-08-26</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Blocks:</b> RD-02</span>
+    <span><b>Touches:</b> Neon Postgres, <code>GlossEmbedding</code>, <code>VocabEmbedding</code></span>
+    <span><b>Risk:</b> production schema change, index drop</span>
+    <span><b>Est:</b> ~1–2 hrs execution + ~35 min embed time</span>
+  </div>
+
+  <p class="lede">The single highest-leverage retrieval fix measured for this app — embedding WordNet definitions per sense instead of bare words — is fully designed, type-checked, and committed as dormant scaffolding. It has never been run against production because doing so requires freeing storage headroom that doesn't currently exist. This ticket is the mechanical work of making room and populating the table. It does <b>not</b> include flipping search over to it — that's RD-02.</p>
+
+  <div class="callout">
+    <span class="callout-label">Result — plan changed mid-flight</span>
+    <p>Executed 2026-08-26 after the user upgraded their Neon plan, which removed the original reason for step 3 (the <code>DROP INDEX</code> on <code>VocabEmbedding</code>). <b>That step was skipped entirely</b> — <code>VocabEmbedding</code> and its IVFFlat index are untouched, confirmed live via <code>EXPLAIN</code> (index scan, not sequential scan) after the run. <code>GlossEmbedding</code> now holds <b>117,791 rows</b> (vs. the ~114,662 estimated here — +2.7%, likely <code>wordnet-db</code> version drift, flagged automatically by the script and not investigated further). Self-retrieval: <b>60/60</b> gloss probes by synset, <b>59/60</b> vocab probes (pre-existing index-approximation noise, not a regression). Final <code>pg_database_size</code>: <b>673MB</b> — higher than this ticket's ~452MB estimate <i>because</i> the index-drop was skipped, exactly as expected once that step changed. Not verified against the upgraded plan's actual cap (no Neon CLI access this session) — confirm separately. Full blow-by-blow in <code>MIGRATION_AUDIT.md</code>, "Phase 5."</p>
+  </div>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — M</div>
+      <div class="stat-value">1 migration, 1 script run, 1 hard-stop gate</div>
+      <div class="stat-note">Code and script already exist and are type-checked (RD from the prior session). Effort here is executing a sequenced, partly-irreversible production change carefully, not writing new logic. ~35 min is unattended embed time, not hands-on effort.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — enabling, not direct</div>
+      <div class="stat-value">Zero user-facing change by itself</div>
+      <div class="stat-note"><code>/api/lookup</code> keeps querying <code>VocabEmbedding</code> until RD-02 lands. This ticket's entire value is unlocking RD-02 — track it as a dependency, not as a standalone win.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li>Confirm current Neon usage: <code>SELECT pg_size_pretty(pg_database_size(current_database()))</code> — expect ≈460MB against the 512MB project cap.</li>
+      <li>Apply <code>prisma/migrations/20260822000000_add_gloss_embeddings/migration.sql</code> up through the <code>CREATE INDEX</code> line (already safe to run — it only adds a new, empty table). Do <b>not</b> touch the commented-out <code>DROP INDEX</code> yet.</li>
+      <li>Get explicit written confirmation before crossing the hard stop, then uncomment and run: <code>DROP INDEX "VocabEmbedding_embedding_ivfflat_idx";</code> — this frees ~230MB. <code>VocabEmbedding</code>'s bare vectors stay in the table as the exact-search rollback path; only the index over them is gone.</li>
+      <li>Run the real insert phase: <code>npx tsx scripts/build-gloss-index.ts</code> (drop <code>--dry-run</code> only after step 3). Batches of 500, ~114,662 rows, using the production <code>embed()</code> — expect ~35 minutes.</li>
+      <li>Verify: row count matches <code>EXPECTED_SYNSET_COUNT</code> (114,662 ± wordnet-db version drift), then run <code>scripts/verify-eval-pool.ts</code>-style self-retrieval spot checks — lemma cells must hit 60/60 at rank 1, gloss cells 59–60/60 <i>by synset</i> (see Learnings).</li>
+      <li>Re-check <code>pg_database_size</code> — should land near 452MB (222MB <code>VocabEmbedding</code> table, kept + ~88MB <code>GlossEmbedding</code> halfvec payload + its own new IVFFlat index), comfortably under 512MB.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <h3>Why this can't just be added alongside the existing index</h3>
+    <p>A prior attempt to stage a second vector index without dropping the first failed outright with Postgres error <code>53100 project size limit exceeded</code>. This isn't a performance tuning question — it's a hard capacity wall.</p>
+    <div class="viz">
+      <svg viewBox="0 0 760 240" width="100%" role="img" aria-labelledby="storagetitle">
+        <title id="storagetitle">Storage budget before and after the migration</title>
+        <text x="0" y="16" font-family="ui-monospace,monospace" font-size="11" fill="var(--ink-soft)">Neon project cap: 512 MB</text>
+        <line x1="0" y1="26" x2="760" y2="26" stroke="var(--line)" stroke-width="1"/>
+
+        <!-- scale: 1MB = 1.4px, budget 512MB -> ~717px, use 700px width -->
+        <!-- BEFORE bar -->
+        <text x="0" y="58" font-family="ui-monospace,monospace" font-size="11.5" fill="var(--ink)" font-weight="600">before</text>
+        <rect x="0" y="66" width="311" height="30" fill="var(--p2)" opacity="0.85"/>
+        <rect x="311" y="66" width="322" height="30" fill="var(--bad)" opacity="0.8"/>
+        <text x="155" y="86" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10.5" fill="white">table 222MB</text>
+        <text x="472" y="86" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10.5" fill="white">ivfflat idx 230MB</text>
+        <text x="650" y="86" font-family="ui-monospace,monospace" font-size="10.5" fill="var(--ink-soft)">≈460MB used</text>
+
+        <!-- attempted (fails) -->
+        <text x="0" y="126" font-family="ui-monospace,monospace" font-size="11.5" fill="var(--ink)" font-weight="600">+ GlossEmbedding, index kept</text>
+        <rect x="0" y="134" width="311" height="24" fill="var(--p2)" opacity="0.85"/>
+        <rect x="311" y="134" width="322" height="24" fill="var(--bad)" opacity="0.8"/>
+        <rect x="633" y="134" width="123" height="24" fill="var(--p1)" opacity="0.9"/>
+        <text x="694" y="150" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9.5" fill="white">88MB</text>
+        <rect x="0" y="164" width="756" height="2" fill="var(--bad)"/>
+        <text x="0" y="180" font-family="ui-monospace,monospace" font-size="10.5" fill="var(--bad)">✕ 53100 project size limit exceeded — measured, not hypothetical</text>
+
+        <!-- AFTER bar -->
+        <text x="0" y="212" font-family="ui-monospace,monospace" font-size="11.5" fill="var(--ink)" font-weight="600">after (this ticket)</text>
+        <rect x="0" y="220" width="311" height="16" fill="var(--p2)" opacity="0.85"/>
+        <rect x="311" y="220" width="123" height="16" fill="var(--p1)" opacity="0.9"/>
+        <text x="705" y="232" font-family="ui-monospace,monospace" font-size="10" fill="var(--good)">≈452MB, 60MB headroom</text>
+      </svg>
+      <div class="viz-caption">VocabEmbedding table (kept, rollback path) · VocabEmbedding IVFFlat index (dropped) · GlossEmbedding halfvec payload (added)</div>
+    </div>
+
+    <h3>The pipeline this script runs</h3>
+    <div class="viz">
+      <svg viewBox="0 0 760 130" width="100%" role="img" aria-labelledby="pipetitle">
+        <title id="pipetitle">WordNet senses grouped into per-synset gloss rows</title>
+        <g font-family="ui-monospace,monospace" font-size="11.5" fill="var(--ink)">
+          <rect x="0" y="30" width="150" height="50" rx="8" fill="var(--card)" stroke="var(--line)"/>
+          <text x="75" y="52" text-anchor="middle">WordNet 3.0</text>
+          <text x="75" y="66" text-anchor="middle" fill="var(--ink-soft)" font-size="10">204,549 senses</text>
+
+          <path d="M155 55 L200 55" stroke="var(--ink-soft)" stroke-width="1.5" marker-end="url(#arrow1)"/>
+
+          <rect x="205" y="30" width="170" height="50" rx="8" fill="var(--card)" stroke="var(--line)"/>
+          <text x="290" y="52" text-anchor="middle">group by synset</text>
+          <text x="290" y="66" text-anchor="middle" fill="var(--ink-soft)" font-size="10">pos:offset key</text>
+
+          <path d="M380 55 L425 55" stroke="var(--ink-soft)" stroke-width="1.5" marker-end="url(#arrow1)"/>
+
+          <rect x="430" y="30" width="150" height="50" rx="8" fill="var(--card)" stroke="var(--line)"/>
+          <text x="505" y="52" text-anchor="middle">embed(gloss)</text>
+          <text x="505" y="66" text-anchor="middle" fill="var(--ink-soft)" font-size="10">production model</text>
+
+          <path d="M585 55 L630 55" stroke="var(--ink-soft)" stroke-width="1.5" marker-end="url(#arrow1)"/>
+
+          <rect x="635" y="30" width="125" height="50" rx="8" fill="var(--p1-bg)" stroke="var(--p1)"/>
+          <text x="697" y="52" text-anchor="middle" fill="var(--p1)">114,662 rows</text>
+          <text x="697" y="66" text-anchor="middle" fill="var(--p1)" font-size="10">GlossEmbedding</text>
+        </g>
+        <text x="0" y="118" font-family="ui-monospace,monospace" font-size="10" fill="var(--ink-soft)">43.9% collapse — a synset's members share one gloss and one vector; expansion at query time spends no slot the per-sense version wasn't already spending.</text>
+        <defs>
+          <marker id="arrow1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--ink-soft)"/></marker>
+        </defs>
+      </svg>
+    </div>
+
+    <h3>Reading list before touching this</h3>
+    <ul>
+      <li><code>scripts/build-gloss-index.ts</code> — the script itself; read the header comment before running.</li>
+      <li><code>prisma/migrations/20260822000000_add_gloss_embeddings/migration.sql</code> — note the <code>*** HARD STOP ***</code> banner around the <code>DROP INDEX</code> line.</li>
+      <li><code>CLAUDE.md</code> §"Storage ceiling" and §"Phase E" for how the 114,662/88MB/43.9% figures were derived.</li>
+      <li><code>halfvec</code> vs <code>vector</code>: pgvector 0.8.0's half-precision type. Confirmed lossless at 384 dims (0 discordant pairs against full-precision in the eval cells) — <code>halfvec(256)</code> is a different thing (truncation, not quantization) and costs real recall. Use 384. Don't "optimize" this further without re-reading why.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The synset collapse is lossless, not a lossy shortcut.</b> Verified per-query identical to the uncollapsed per-sense version across all 287 eval queries — 0 discordant rank-1 pairs. This was a real open question (flagged "⚠ cross-surface" earlier) and has since been falsified as a concern.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b><code>halfvec(384)</code> costs nothing measurable.</b> Mean <code>cos(before, after)</code> = 0.99999998 across the eval cells. This is the fact that makes the storage math close at all — without it, a full-precision gloss index doesn't fit under any index-dropping strategy.</p></div>
+    <div class="learning"><div class="learning-mark risk">!</div><p><b>The production build differs from the Phase E eval cells on purpose.</b> Eval cells used a matched 20k-word pool restricted to words with WordNet coverage; production indexes the full WordNet lemma set, which incidentally repairs ~5% of <code>VocabEmbedding</code>'s coverage gap. Don't expect the eval numbers to transfer 1:1 in absolute terms — only the relative comparison (lemma vs. gloss indexing) is validated. Log actual row counts and revisit if they diverge meaningfully from 114,662.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The <code>DROP INDEX</code> step is not reversible without re-running an IVFFlat build.</b> <code>VocabEmbedding</code>'s rows survive as an exact-scan rollback, but rebuilding the approximate index afterward (if RD-02 is abandoned) means re-running <code>CREATE INDEX ... USING ivfflat</code>, which itself takes meaningful time on 141,854 rows. Confirm the decision on RD-02's direction before crossing this step, not after. <i>(Moot for the 2026-08-26 run — this step was skipped per the plan change above — but still true if a future run needs it.)</i></p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The population script's insert phase was ~100x slower than estimated on first run — a real bug, not just pessimistic sizing.</b> The original loop ran 500 sequential single-row <code>$executeRawUnsafe</code> calls per batch inside one <code>$transaction</code>, paying a full Neon round-trip per row; measured at ~90s/500-row batch, projecting to ~6 hours for 117,791 rows against a ~35min estimate. Fixed by collapsing each batch into one multi-row <code>INSERT ... VALUES (...), (...)</code> statement — one round-trip per batch instead of 500. Also hit one transient <code>Can't reach database server</code> failure on the very first run, with zero rows written (safe — no cleanup needed); most likely Neon's compute idling during the ~8.4min DB-silent embedding phase. Both fixes are in <code>scripts/build-gloss-index.ts</code> as of this run; <b>that edit was uncommitted as of the ticket closing</b> — review before relying on the ~35min estimate again.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li class="done"><code>GlossEmbedding</code> has ~114,662 rows, verified against a fresh WordNet read — <b>117,791 actual</b> (+2.7%, wordnet-db drift, flagged not investigated)</li>
+      <li class="done">Self-retrieval spot check: lemma probes 60/60 at rank 1, gloss probes 59–60/60 at rank 1 <i>by synset membership</i> — <b>59/60 vocab, 60/60 gloss</b></li>
+      <li class="done"><code>pg_database_size</code> comfortably under 512MB with headroom logged — <b>plan changed: 673MB against an upgraded (unverified-here) cap, not the original 512MB ceiling</b></li>
+      <li class="done"><code>VocabEmbedding</code> table intact and still queryable via sequential scan (rollback path confirmed live, not just assumed) — <b>confirmed; index scan too, since it was never dropped</b></li>
+      <li class="done">Nothing in <code>/api/lookup</code> changed behavior — this ticket populates data, RD-02 flips the route — <b>confirmed, route untouched</b></li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-01 · reverse-dictionary · priority 1 of 5</footer>
+</div>

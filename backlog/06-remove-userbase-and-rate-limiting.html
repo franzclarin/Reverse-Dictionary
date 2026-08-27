@@ -1,0 +1,110 @@
+<title>RD-06 · Remove the userbase and rate limiting entirely</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-06</div>
+
+  <div class="ticket-head">
+    <h1>Remove the userbase (Clerk auth, credits, saved words, leaderboard) and rate limiting entirely</h1>
+    <span class="badge badge-p1">P1 · product simplification</span>
+    <span class="badge badge-done">✓ Done · 2026-08-26</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Supersedes:</b> RD-04 (its full scope, not just the already-dead games code)</span>
+    <span><b>Touches:</b> Clerk, Upstash, <code>User</code>/<code>SavedWord</code>/<code>Lookup</code>/<code>GameRound</code>, <code>/api/lookup</code></span>
+    <span><b>Risk:</b> irreversible schema drop; production data loss for saved words/credits</span>
+    <span><b>Est:</b> ~2–3 hrs</span>
+  </div>
+
+  <p class="lede">The app shipped a full Clerk-auth-backed userbase — sign-in/up, saved-word collections, a credits/streak system, and an unused leaderboard — plus Upstash-Redis rate limiting on <code>/api/lookup</code>. None of it is required for the app's actual purpose (semantic word search), and RD-04 had already found dead games code hanging off the same credits system. Rather than trim the dead branches, this ticket removes the whole tree: auth, the userbase tables, and rate limiting, leaving search as a fully anonymous, unthrottled feature.</p>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — M</div>
+      <div class="stat-value">3 whole routes, 5 components, 4 Prisma models, 3 deps deleted</div>
+      <div class="stat-note">Mechanical removal across ~15 files plus a schema migration. No new logic written — every call site was verified by grep before deleting, not inferred from commit messages (the lesson RD-04 already learned the hard way).</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — simplification</div>
+      <div class="stat-value">Zero retrieval-quality change, smaller attack/maintenance surface</div>
+      <div class="stat-note">Doesn't touch <code>VocabEmbedding</code>/<code>GlossEmbedding</code>/<code>ShadowLookup</code> or the search path itself — those have no relation to any userbase table. The win is fewer moving parts: no Clerk keys, no Upstash credentials, no "fail open" rate-limit edge cases to reason about.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li>Delete whole files/dirs: <code>middleware.ts</code>, <code>app/sign-in/</code>, <code>app/sign-up/</code>, <code>app/collection/</code>, <code>app/api/credits/</code>, <code>app/api/leaderboard/</code>, <code>app/api/word/[word]/save/</code>, <code>components/CollectionGrid.tsx</code>, <code>components/SaveWordButton.tsx</code>, <code>lib/credits.ts</code>, <code>lib/gameTokens.ts</code>, <code>lib/gameUtils.ts</code>.</li>
+      <li>Strip Clerk out of <code>app/layout.tsx</code> (drop <code>&lt;ClerkProvider&gt;</code>) and <code>components/Navbar.tsx</code> (drop sign-in/up, <code>UserButton</code>, "My Words").</li>
+      <li>Strip auth-gated UI out of <code>app/word/[word]/page.tsx</code> (the <code>auth()</code> call, <code>SavedWord</code> lookup, <code>SaveWordButton</code>, guest sign-in CTA) and <code>components/SearchResults.tsx</code> (the rate-limit banner + <code>SignInButton</code>).</li>
+      <li>Strip rate limiting and auth out of <code>app/api/lookup/route.ts</code> (<code>getRatelimiters</code>, <code>checkRateLimit</code>, the <code>auth()</code> call, the 429 branch), and drop the now-unreachable <code>"ratelimit"</code> member from the <code>Subsystem</code> union in <code>lib/errors.ts</code>.</li>
+      <li>Drop <code>RateLimitInfo</code> and the <code>rateLimit</code>/<code>creditsAwarded</code> fields from <code>types/index.ts</code>.</li>
+      <li>Remove <code>User</code>, <code>SavedWord</code>, <code>Lookup</code>, <code>GameRound</code> from <code>prisma/schema.prisma</code> (and <code>Word.savedBy</code>, the only relation touching real word data), then migrate.</li>
+      <li>Remove <code>@clerk/nextjs</code>, <code>@upstash/ratelimit</code>, <code>@upstash/redis</code> from <code>package.json</code> and reinstall.</li>
+      <li>Update <code>CLAUDE.md</code>'s Stack/API-routes/Env/Conventions sections to match.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <h3>What's actually load-bearing vs. dead, verified by grep</h3>
+    <div class="viz">
+      <svg viewBox="0 0 760 220" width="100%" role="img" aria-labelledby="rd6calltitle">
+        <title id="rd6calltitle">Everything hanging off Clerk auth, all removed together</title>
+        <g font-family="ui-monospace,monospace" font-size="10.5">
+          <rect x="0" y="90" width="170" height="34" rx="7" fill="var(--p1-bg)" stroke="var(--p1)"/>
+          <text x="85" y="111" text-anchor="middle" fill="var(--p1)">clerkMiddleware()</text>
+
+          <path d="M175 107 L280 40" stroke="var(--ink-soft)" marker-end="url(#a6)"/>
+          <path d="M175 107 L280 107" stroke="var(--ink-soft)" marker-end="url(#a6)"/>
+          <path d="M175 107 L280 174" stroke="var(--ink-soft)" marker-end="url(#a6)"/>
+
+          <rect x="285" y="24" width="200" height="32" rx="7" fill="var(--card)" stroke="var(--line)"/>
+          <text x="385" y="44" text-anchor="middle">sign-in / sign-up pages</text>
+
+          <rect x="285" y="91" width="200" height="32" rx="7" fill="var(--card)" stroke="var(--line)"/>
+          <text x="385" y="111" text-anchor="middle">collection + save/[word]</text>
+
+          <rect x="285" y="158" width="200" height="32" rx="7" fill="var(--card)" stroke="var(--line)"/>
+          <text x="385" y="178" text-anchor="middle">credits + leaderboard</text>
+
+          <path d="M490 107 L560 107" stroke="var(--bad)" stroke-dasharray="3,2" marker-end="url(#a7)"/>
+          <rect x="565" y="91" width="180" height="32" rx="7" fill="var(--bad-bg)" stroke="var(--bad)"/>
+          <text x="655" y="111" text-anchor="middle" fill="var(--bad)">no leaderboard UI —</text>
+          <text x="655" y="123" text-anchor="middle" fill="var(--bad)" font-size="9">API-only, unused</text>
+        </g>
+        <defs>
+          <marker id="a6" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--ink-soft)"/></marker>
+          <marker id="a7" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--bad)"/></marker>
+        </defs>
+      </svg>
+      <div class="viz-caption">All three branches are auth-gated by the same middleware — removing the middleware makes every one of them dead, so they come out together rather than piecemeal</div>
+    </div>
+
+    <h3>Why this supersedes RD-04 instead of running alongside it</h3>
+    <p>RD-04 explicitly scoped itself to the already-orphaned games plumbing and said "this isn't delete the whole credits feature" — at the time, credits/saved-words/leaderboard were still considered live product surface. This ticket changes that decision: the whole feature is going, not just its dead branches. Every file RD-04 named is deleted here too (<code>lib/gameTokens.ts</code>, <code>lib/gameUtils.ts</code>, and the three dead <code>lib/credits.ts</code> functions), plus everything RD-04 deliberately kept.</p>
+
+    <h3>Schema removal order</h3>
+    <p><code>SavedWord.wordId</code> is the only foreign key from the userbase side into real word data (<code>Word.savedBy</code>). <code>VocabEmbedding</code>, <code>GlossEmbedding</code>, and <code>ShadowLookup</code> — the actual search infrastructure — have zero relation to <code>User</code>/<code>SavedWord</code>/<code>Lookup</code>/<code>GameRound</code>, so the migration only ever touches the four userbase tables plus one relation field on <code>Word</code>.</p>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The leaderboard API had no caller.</b> <code>app/api/leaderboard/route.ts</code> existed and worked, but grep found zero UI referencing it anywhere in <code>app/</code> or <code>components/</code> — it was already dead weight before this ticket, just not caught by RD-04 because RD-04 didn't look past the games-specific functions.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The rate-limit <code>Subsystem</code> branch was already unreachable.</b> <code>checkRateLimit()</code> always fails open — it never throws <code>SubsystemError("ratelimit", …)</code> — so <code>SUBSYSTEM_MESSAGES.ratelimit</code> in the old <code>/api/lookup</code> route was dead code even before this removal. One less thing to explain to a future reader once <code>"ratelimit"</code> comes out of the <code>Subsystem</code> union too.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Dropping <code>User</code>/<code>SavedWord</code>/<code>Lookup</code>/<code>GameRound</code> is a destructive migration.</b> This repo has no separate local database — <code>.env.local</code>'s <code>DATABASE_URL</code> points straight at the shared Neon instance — so the migration was written by hand and applied only after explicit confirmation, via <code>prisma db execute --file</code> per <code>CLAUDE.md</code>'s migration gotcha (Neon's pooled connection breaks <code>migrate deploy</code>'s advisory lock). Ran clean; verified via a direct table listing that the four tables are gone and <code>Word</code>/<code>VocabEmbedding</code>/<code>GlossEmbedding</code>/<code>ShadowLookup</code> are untouched.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Found and fixed pre-existing migration-history drift while here.</b> <code>prisma migrate status</code> showed the two most recent prior migrations (<code>add_gloss_embeddings</code>, <code>add_shadow_lookup</code>) as "not yet applied" even though their tables demonstrably existed with data — they'd been run via <code>db execute --file</code> (the same Neon workaround this ticket used) without ever being recorded in <code>_prisma_migrations</code>. Backfilled with <code>prisma migrate resolve --applied</code> so <code>migrate status</code> now reads clean.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li class="done">No Clerk or Upstash import remains anywhere in <code>app/</code>, <code>components/</code>, or <code>lib/</code></li>
+      <li class="done"><code>@clerk/nextjs</code>, <code>@upstash/ratelimit</code>, <code>@upstash/redis</code> removed from <code>package.json</code></li>
+      <li class="done"><code>User</code>, <code>SavedWord</code>, <code>Lookup</code>, <code>GameRound</code> removed from <code>prisma/schema.prisma</code>; migration applied to the live Neon database and verified by direct table listing</li>
+      <li class="done"><code>npx tsc --noEmit</code> and <code>npm run lint</code> clean</li>
+      <li class="done">Homepage search, results page, and a word page all render with no console errors and no leftover sign-in/save/rate-limit UI</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-06 · reverse-dictionary · supersedes RD-04</footer>
+</div>

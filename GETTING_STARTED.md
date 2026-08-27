@@ -5,8 +5,7 @@
 ### 1. Environment Setup
 
 - [ ] Get a Neon Postgres connection string with `pgvector` enabled (or pull it: `npx vercel link && npx vercel env pull .env.local`)
-- [ ] Get Clerk publishable + secret keys
-- [ ] Create `.env.local` with `DATABASE_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` (see [SETUP.md](SETUP.md) for the full list, including the optional Upstash rate-limiting pair)
+- [ ] Create `.env.local` with `DATABASE_URL` (see [SETUP.md](SETUP.md) — it's the only required variable)
 
 ### 2. Run Locally
 
@@ -30,23 +29,19 @@ Unlike the old Claude-powered version of this app, results are **not guaranteed 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the full walkthrough. In short:
 
 - [ ] Push to GitHub, import the repo on Vercel
-- [ ] Set `DATABASE_URL`, Clerk keys, and optionally `KV_REST_API_URL`/`KV_REST_API_TOKEN` in Vercel's environment variables
+- [ ] Set `DATABASE_URL` in Vercel's environment variables
 - [ ] **Deploy by pushing to `main`** — not `vercel deploy --prod` (see DEPLOYMENT.md for why)
 - [ ] Verify the deployed URL, checking function logs for `[lookup] embed ok` / `[lookup] db ok`
 
 ## Testing Checklist
 
 - [ ] Run a handful of varied queries and confirm results return with similarity scores
-- [ ] Sign in via Clerk and confirm the rate limit changes from 50/day to 200/day
-- [ ] Save a word from its word page and confirm it appears in `/collection`
-- [ ] Confirm credits increase after saving a new (not previously saved) word
-- [ ] Check `/api/leaderboard` returns a ranked list
 - [ ] Test on mobile
 
 ## Customization Ideas
 
 - [ ] Adjust the color scheme / typography in `app/globals.css` and `tailwind.config.ts`
-- [ ] Change `k` (result count) or the rate-limit windows in `app/api/lookup/route.ts`
+- [ ] Change `k` (result count) in `app/api/lookup/route.ts`
 - [ ] Customize `components/SearchInput.tsx` / `components/SearchResults.tsx`
 - [ ] Update metadata in `app/layout.tsx` and `app/sitemap.ts`'s `NEXT_PUBLIC_SITE_URL` fallback
 
@@ -60,7 +55,6 @@ This is the actual open problem in this app, not a customization nicety. Start w
 |-------|----------|
 | 500 with `subsystem: "database"` | Check `DATABASE_URL`, confirm `pgvector` is enabled and `VocabEmbedding` is populated |
 | 500 with `subsystem: "model"` | First request per warm instance downloads the embedding model from the HF CDN — needs outbound network, can take up to ~20s |
-| 500 with `subsystem: "ratelimit"` | Should not surface to users — rate limiting fails open by design; if you see this, something upstream of `checkRateLimit`'s try/catch broke |
 | Build fails | `npm install`, then `rm -rf .next && npm run build` |
 | `next dev` exits instantly, no server | Check if the repo is under OneDrive or similar cloud sync — see CLAUDE.md's "Repo hygiene" |
 
@@ -74,4 +68,4 @@ This is the actual open problem in this app, not a customization nicety. Start w
 
 ## Project Status
 
-Search, word pages, auth, saved collection, credits, and the leaderboard are live in production. Search quality is a known, measured, ongoing limitation (see above) — not something to report as broken, but also not something to describe as "done." A gloss-indexed retrieval improvement is designed and staged, not yet deployed.
+Search and word pages are live in production, fully anonymous — there is no userbase (auth, saved words, credits, leaderboard were removed 2026-08-26). Search quality is a known, measured, ongoing limitation (see above) — not something to report as broken, but also not something to describe as "done." A gloss-indexed retrieval improvement is designed and staged, not yet deployed.

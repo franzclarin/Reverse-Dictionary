@@ -1,0 +1,115 @@
+<title>RD-02 · Cut search over to the gloss index</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-02</div>
+
+  <div class="ticket-head">
+    <h1>Shadow-validate, then cut <code>/api/lookup</code> over to the gloss index</h1>
+    <span class="badge badge-p0">P0 · sentence embeddings</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Depends on:</b> RD-01 (done 2026-08-26 — unblocked)</span>
+    <span><b>Touches:</b> <code>app/api/lookup/route.ts</code>, <code>ShadowLookup</code></span>
+    <span><b>Risk:</b> production search behavior change</span>
+    <span><b>Est:</b> 1 day rollout + soak period before final decision</span>
+  </div>
+
+  <p class="lede">This is the actual fix for the app's core known problem: search results that share a word stem with the query ("rain" → "rainstorm") tend to outrank the word the user actually meant. Offline evaluation already answered <i>whether</i> this works — decisively. What's left is validating it against real traffic before flipping the switch, because the offline eval set is 287 hand-authored, single-register queries and production traffic is not.</p>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — S</div>
+      <div class="stat-value">1 flag flip + 1 route query swap</div>
+      <div class="stat-note">The code path is already written and gated (<code>SHADOW_LOOKUP_ENABLED</code>). The actual line-count change is tiny — most of this ticket's cost is calendar time (the soak period) and judgment (reading disagreements), not implementation.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — very high</div>
+      <div class="stat-value">+12.9 to +15.7pp lenient R@1, echo 44%→14%</div>
+      <div class="stat-note">Directly fixes the single largest, most structural limitation this app has measured — larger than the fine-tune's own contribution (+4.5pp) by roughly threefold. This is the highest-impact ticket in the set.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li>In <code>app/api/lookup/route.ts</code>, flip <code>SHADOW_LOOKUP_ENABLED</code> to <code>true</code>. Leave <code>SHADOW_SAMPLE_RATE</code> at 0.1 unless traffic volume argues otherwise — re-derive from expected daily query count, not a guess.</li>
+      <li>Deploy. Confirm <code>[lookup] shadow log failed</code> does <b>not</b> appear in logs (it would mean <code>GlossEmbedding</code> isn't populated — check RD-01 landed first).</li>
+      <li>Let it run for a real soak period — long enough to accumulate a few hundred sampled queries at minimum, across normal daily/weekly traffic patterns, not a single afternoon.</li>
+      <li>Run <code>npx tsx scripts/shadow-compare.ts</code>. Read its disagreement sample by hand — this is qualitative review, not just the headline agreement rate.</li>
+      <li>Decide: cut over, iterate, or hold. If cutting over — swap the route's primary query from <code>VocabEmbedding</code> to <code>GlossEmbedding</code>, keep <code>VocabEmbedding</code> live as an instant rollback path (its data and exact-scan capability still exist per RD-01), and only then consider actually removing the old code path in a follow-up.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <h3>Why the offline numbers alone don't authorize a cutover</h3>
+    <p><code>scripts/shadow-compare.ts</code>'s own header comment is explicit about this: it can report <i>agreement rate</i> between the old and new systems on live traffic, never <i>accuracy</i>, because no query text has ever been logged and there is no ground-truth label for a real user's query. The eval set's McNemar result (below) is the prior; shadow agreement is the live-traffic sanity check against that prior — not a replacement for it, and not a second independent accuracy measurement.</p>
+
+    <h3>The offline result this is acting on</h3>
+    <div class="viz">
+      <svg viewBox="0 0 760 260" width="100%" role="img" aria-labelledby="bartitle">
+        <title id="bartitle">Lenient Recall@1 and echo rate, lemma index vs gloss index</title>
+        <g font-family="ui-monospace,monospace" font-size="11">
+          <!-- axis -->
+          <line x1="140" y1="10" x2="140" y2="210" stroke="var(--line)"/>
+          <!-- gridlines every 10% up to 30 -->
+          <line x1="140" y1="210" x2="700" y2="210" stroke="var(--ink-soft)" stroke-width="1"/>
+
+          <!-- baseline recall bar -->
+          <text x="130" y="55" text-anchor="end" fill="var(--ink)">baseline (lemma)</text>
+          <rect x="140" y="42" width="113" height="24" fill="var(--p2)" opacity="0.85"/>
+          <text x="260" y="59" fill="var(--ink)">10.1% lenient R@1</text>
+
+          <!-- gloss recall bar -->
+          <text x="130" y="95" text-anchor="end" fill="var(--ink)">gloss (synset)</text>
+          <rect x="140" y="82" width="289" height="24" fill="var(--good)" opacity="0.9"/>
+          <text x="436" y="99" fill="var(--good)" font-weight="700">25.8% lenient R@1</text>
+
+          <line x1="140" y1="120" x2="700" y2="120" stroke="var(--line)" stroke-dasharray="3,3"/>
+
+          <!-- baseline echo bar -->
+          <text x="130" y="155" text-anchor="end" fill="var(--ink)">baseline echo rate</text>
+          <rect x="140" y="142" width="456" height="24" fill="var(--bad)" opacity="0.8"/>
+          <text x="602" y="159" fill="var(--bad)">40.7%</text>
+
+          <!-- gloss echo bar -->
+          <text x="130" y="195" text-anchor="end" fill="var(--ink)">gloss echo rate</text>
+          <rect x="140" y="182" width="161" height="24" fill="var(--good)" opacity="0.9"/>
+          <text x="307" y="199" fill="var(--good)" font-weight="700">14.4%</text>
+
+          <text x="140" y="230" fill="var(--ink-soft)" font-size="10">n=287 authored eval queries · cell_lemma_ft vs cell_gloss_ft_synset · 53 wins / 16 regressions, p &lt; 0.0001</text>
+        </g>
+      </svg>
+      <div class="viz-caption">Recall and echo move together — the fix targets the actual mechanism, not just the score</div>
+    </div>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>CLAUDE.md</code> §"Headline results" — the full 10-cell table this ticket's chart is one slice of.</li>
+      <li><code>lib/shadowLookup.ts</code> header comment — what's logged (hash + top-1 only) and why, and the privacy invariant it preserves.</li>
+      <li><code>scripts/shadow-compare.ts</code> header comment — why McNemar doesn't apply here even though the machinery is imported.</li>
+      <li>The lexical-echo phenomenon itself: <code>CLAUDE.md</code> §"Established facts" — echo results outscore the true target by +0.134 mean cosine on the old index. This is <i>why</i> a reranker over top-10 wouldn't have fixed this; the target sits below nearly everything returned, so there's nothing to reorder.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The fine-tune was never the lever.</b> Fine-tuned vs. base model on the <i>same</i> lemma index: only +4.5pp, below the pre-committed 6pp bar for calling it real — a null result despite p=0.029. Swapping what's indexed beat retraining the model by roughly threefold. Don't let "should we fine-tune more" compete for priority against this.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The approximate index and junk-vocabulary filtering are both confirmed non-issues.</b> IVFFlat vs. exact scan costs ~0.3pp (p=1.0); <code>--filter-junk</code> moves recall 0.0pp. Neither is worth re-investigating as part of this rollout if the shadow numbers look off — look at the representation, not the index mechanics.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Sense-familiarity tie-breaking is real but should be cited carefully.</b> WordNet's own within-synset lemma order beats alphabetical by 2.5pp on identical vectors. It's a genuine effect (a person really is more likely to mean the common sense of a word), but it was also selected because it scored best on this eval set — mild benchmark-fitting. Keep both facts attached whenever this is cited.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>This app's search UX doesn't currently show a ranked list from a single call — check what "top-1" means for the current UI.</b> The route returns a list of <code>k</code> results with similarity scores; the frontend's results page already renders the full list (not just a single top pick), so a gloss-index cutover changing which words appear in that list is user-visible immediately, not hidden behind a "top pick" abstraction. Sanity-check the results page rendering with gloss-index output before considering this done, not just the API contract.</p></div>
+  </section>
+
+  <section>
+    <h2>Decision record template</h2>
+    <p>Whatever the outcome, write it down next to this ticket (or in <code>CLAUDE.md</code>, following its existing "Headline results" convention) — this is exactly the kind of decision the project's documentation discipline exists to preserve:</p>
+    <div class="card">
+      <p><b>Shadow agreement rate:</b> ___% (n=___, over ___ days)</p>
+      <p><b>Disagreements reviewed:</b> ___ / ___ manually inspected</p>
+      <p><b>Decision:</b> cut over / hold / iterate — and why</p>
+      <p><b>Rollback plan if cut over:</b> revert to <code>VocabEmbedding</code> query, still present and exact-scan-capable</p>
+    </div>
+  </section>
+
+  <footer class="done">RD-02 · reverse-dictionary · priority 2 of 5</footer>
+</div>
