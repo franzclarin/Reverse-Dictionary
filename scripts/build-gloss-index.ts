@@ -110,26 +110,27 @@ async function main(): Promise<void> {
       `not by this script, before running for real.`
   );
 
+  // One multi-row INSERT per batch (not 500 sequential single-row round-trips
+  // inside a $transaction) — the latter measured at ~90s/batch against Neon,
+  // projecting to ~6 hours total; this collapses each batch to one round-trip.
   for (let i = 0; i < embedded.length; i += BATCH_SIZE) {
     const batch = embedded.slice(i, i + BATCH_SIZE);
-    await prisma.$transaction(
-      batch.map(({ group, vector }) => {
-        const vectorLiteral = `[${vector.join(",")}]`;
-        return prisma.$executeRawUnsafe(
-          `INSERT INTO "GlossEmbedding" ("synsetKey", "pos", "gloss", "lemmas", "embedding")
-           VALUES ($1, $2, $3, $4::text[], $5::halfvec)
-           ON CONFLICT ("synsetKey") DO UPDATE SET
-             "pos" = EXCLUDED."pos",
-             "gloss" = EXCLUDED."gloss",
-             "lemmas" = EXCLUDED."lemmas",
-             "embedding" = EXCLUDED."embedding"`,
-          group.synsetKey,
-          group.pos,
-          group.gloss,
-          group.lemmas,
-          vectorLiteral
-        );
-      })
+    const values: string[] = [];
+    const params: unknown[] = [];
+    batch.forEach(({ group, vector }, idx) => {
+      const base = idx * 5;
+      values.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}::text[], $${base + 5}::halfvec)`);
+      params.push(group.synsetKey, group.pos, group.gloss, group.lemmas, `[${vector.join(",")}]`);
+    });
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "GlossEmbedding" ("synsetKey", "pos", "gloss", "lemmas", "embedding")
+       VALUES ${values.join(",\n              ")}
+       ON CONFLICT ("synsetKey") DO UPDATE SET
+         "pos" = EXCLUDED."pos",
+         "gloss" = EXCLUDED."gloss",
+         "lemmas" = EXCLUDED."lemmas",
+         "embedding" = EXCLUDED."embedding"`,
+      ...params
     );
     console.log(
       `  inserted ${Math.min(i + BATCH_SIZE, embedded.length).toLocaleString()}/${embedded.length.toLocaleString()}`
