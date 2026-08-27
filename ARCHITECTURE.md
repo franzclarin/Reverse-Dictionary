@@ -34,7 +34,7 @@ Claude/Anthropic was removed from this app entirely on 2026-08-18. There is no `
 │  │  Next.js Frontend                                      │  │
 │  │  • SearchInput (landing page)                          │  │
 │  │  • SearchResults / ResultListItem (results page)       │  │
-│  │  • Word page (related words, save button)              │  │
+│  │  • Word page (related words)                            │  │
 │  └──────────────────┬──────────────────────────────────┘    │
 └────────────────────│─────────────────────────────────────────┘
                      │ HTTPS
@@ -102,12 +102,7 @@ Reverse-Dictionary/
 └── next.config.js
 ```
 
-## Environment Variables
-
-```env
-DATABASE_URL=postgres://...          # Neon, pgvector enabled
-NEXT_PUBLIC_SITE_URL=...             # Optional — sitemap origin
-```
+Environment variables are listed in README.md; there are only two (`DATABASE_URL`, `NEXT_PUBLIC_SITE_URL`).
 
 ## Security Considerations
 
@@ -122,14 +117,7 @@ NEXT_PUBLIC_SITE_URL=...             # Optional — sitemap origin
 2. **Approximate index**: IVFFlat trades a small amount of recall for large speed gains over an exact scan — see CLAUDE.md for the measured cost.
 3. **`React cache()`** on `getWordData`/`getRelatedWords` means the word page and its `generateMetadata` share one query per request instead of duplicating it.
 
-## Deployment Checklist
-
-- [ ] `DATABASE_URL` set in Vercel
-- [ ] `npm run build` succeeds locally
-- [ ] `npx tsc --noEmit` clean
-- [ ] Deployed by pushing to `main` — **not** `vercel deploy --prod` (see DEPLOYMENT.md)
-- [ ] Mobile responsive verified
-- [ ] Sitemap resolves the correct production domain (`NEXT_PUBLIC_SITE_URL` if not the default)
+Deployment steps, checklist, and production troubleshooting live in **[DEPLOYMENT.md](DEPLOYMENT.md)** — not duplicated here.
 
 ## Open / Staged Work
 

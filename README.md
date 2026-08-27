@@ -27,18 +27,20 @@ Queries like these are what the app is built for — semantic search over single
 - **Database**: Neon Postgres + `pgvector`, via Prisma 5
 - **Deployment**: Vercel
 
-For how the retrieval model actually works, its measured limitations, and the offline evaluation harness, see **[CLAUDE.md](CLAUDE.md)** — it's the maintained source of truth for the search internals.
+For how the app is put together — system diagram, data flow, project structure — see **[ARCHITECTURE.md](ARCHITECTURE.md)**. For how the retrieval model actually works, its measured limitations, and the offline evaluation harness, see **[CLAUDE.md](CLAUDE.md)** — it's the maintained source of truth for the search internals.
 
 ## A note on search quality
 
-`VocabEmbedding` stores the embedding of each bare word, not a definition — so a multi-word description is compared against single-token vectors. This produces a well-documented "lexical echo" effect (results that share a word stem with the query tend to outscore the actual answer). Measured Recall@1 on a hand-authored 287-query eval set is ~10% strict / ~10-11% lenient at the approximate index — see CLAUDE.md's "Headline results" for the full numbers, including an experimental gloss-indexed approach that measured +13-16 points better offline but is not yet in production.
+`VocabEmbedding` stores the embedding of each bare word, not a definition — so a multi-word description is compared against single-token vectors. This produces a well-documented "lexical echo" effect (results that share a word stem with the query tend to outscore the actual answer). Measured Recall@1 on a hand-authored 287-query eval set is ~10% strict / ~10-11% lenient at the approximate index. If a query doesn't return the word you expected, that's the current, known state of retrieval quality, not a bug in your setup.
+
+A gloss-indexed alternative (embedding WordNet definitions per sense instead of bare words) has already been measured offline to fix most of this (+13-16 points of lenient Recall@1) and is designed, type-checked, and committed as dormant scaffolding (`GlossEmbedding`/`ShadowLookup` in `prisma/schema.prisma`) — not yet applied to production. That's the highest-leverage next step for this app. See CLAUDE.md's "Established facts" and "Headline results" for the full numbers.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
-- A Postgres database with the `pgvector` extension (this project uses [Neon](https://neon.tech))
+- A Postgres database with the `pgvector` extension (this project uses [Neon](https://neon.tech)) — or ask whoever owns this project for the shared dev database
 
 ### Installation
 
@@ -49,20 +51,25 @@ cd Reverse-Dictionary
 npm install
 ```
 
-2. Create `.env.local` with the variables below. If the project is already linked to Vercel, `vercel env pull .env.local` is the fastest way to get real values.
+2. Create `.env.local` — `DATABASE_URL` is the only required variable (see "Environment Variables" below). If this project is already linked to a Vercel team, the fastest path is to pull real values directly:
+```bash
+npx vercel login
+npx vercel link
+npx vercel env pull .env.local
+```
 
-3. Apply migrations. Neon's pooled connection breaks `prisma migrate deploy`'s advisory lock, so apply the SQL directly instead:
+3. If you're standing this app up against a genuinely fresh database, apply migrations. Neon's pooled connection breaks `prisma migrate deploy`'s advisory lock, so apply the SQL directly instead:
 ```bash
 npx prisma db execute --file prisma/migrations/<migration>/migration.sql
 ```
-(`VocabEmbedding` itself — 141,854 rows of pre-computed embeddings — is a data migration, not something `npm install` seeds; see CLAUDE.md if you're standing up a fresh database.)
+`postinstall` runs `prisma generate` automatically, and you don't need this step at all against a database that already has the schema applied. `VocabEmbedding` itself — 141,854 rows of pre-computed embeddings — is a data seed, not something a migration or `npm install` generates for you; see CLAUDE.md if you need to rebuild it.
 
 4. Run the development server:
 ```bash
 npm run dev
 ```
 
-5. Open [http://localhost:3000](http://localhost:3000).
+5. Open [http://localhost:3000](http://localhost:3000) and try a query like "the smell of rain on dry earth" — see "A note on search quality" above for what to expect from the result.
 
 ## Environment Variables
 
@@ -71,32 +78,7 @@ npm run dev
 | `DATABASE_URL` | Postgres (Neon) connection string, `pgvector` enabled | Yes |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin for the sitemap | No — falls back to the production domain |
 
-## Project Structure
-
-```
-Reverse-Dictionary/
-├── app/
-│   ├── api/
-│   │   ├── lookup/route.ts           # Search: embed query → pgvector → top-k
-│   │   └── word/[word]/route.ts      # Word page data (existing row or minimal stub)
-│   ├── word/[word]/page.tsx          # Word detail page + related words
-│   ├── search/page.tsx               # Results list (owns the /api/lookup call)
-│   ├── sitemap.ts
-│   ├── icon.svg                      # Favicon (Next App Router file convention)
-│   ├── layout.tsx                    # Root layout
-│   └── page.tsx                      # Landing / search entry
-├── components/
-│   ├── SearchInput.tsx, SearchResults.tsx, ResultListItem.tsx
-│   ├── Navbar.tsx, WordLink.tsx, WordShareButtons.tsx
-├── lib/
-│   ├── embedder.ts                   # Transformers.js singleton (the ONNX model)
-│   ├── wordData.ts                   # getWordData / getRelatedWords (React cache())
-│   ├── prisma.ts                     # Singleton PrismaClient
-│   └── errors.ts                     # SubsystemError / describeError for fetch-failed triage
-├── prisma/
-│   └── schema.prisma                 # Word, VocabEmbedding, GlossEmbedding, ShadowLookup
-└── scripts/, eval/                   # Offline retrieval evaluation harness (dev-only, read-only)
-```
+There's no `.env.example` checked in — the table above is the complete set.
 
 ## API Reference
 
@@ -134,9 +116,32 @@ npx prisma studio        # Browse the database
 npm run eval              # Offline retrieval eval — see CLAUDE.md "Evaluation"
 ```
 
+### Customization
+
+- Adjust the color scheme / typography in `app/globals.css` and `tailwind.config.ts`
+- Change `k` (result count) in `app/api/lookup/route.ts`
+- Customize `components/SearchInput.tsx` / `components/SearchResults.tsx`
+- Update metadata in `app/layout.tsx` and `app/sitemap.ts`'s `NEXT_PUBLIC_SITE_URL` fallback
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| 500 with `subsystem: "database"` | Check `DATABASE_URL`, confirm `pgvector` is enabled and `VocabEmbedding` is populated |
+| 500 with `subsystem: "model"` | First request per warm instance downloads the embedding model from the HF CDN — needs outbound network, can take up to ~20s |
+| Build fails | `npm install`, then `rm -rf .next && npm run build` |
+| `next dev` exits instantly, no server | Check if the repo is under OneDrive or similar cloud sync — see CLAUDE.md's "Repo hygiene" |
+
 ## Deployment
 
-**Deploy by pushing to `main`** — Vercel's Git integration is the only supported path. `vercel deploy --prod` uploads the working directory directly and ignores `.gitignore`, which sweeps in a ~1.5GB gitignored model artifact and blows Vercel's per-file cap. See [DEPLOYMENT.md](DEPLOYMENT.md).
+**Deploy by pushing to `main`** — Vercel's Git integration is the only supported path. `vercel deploy --prod` uploads the working directory directly and ignores `.gitignore`, which sweeps in a ~1.5GB gitignored model artifact and blows Vercel's per-file cap. See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full walkthrough, production troubleshooting, and scaling notes.
+
+## Documentation
+
+- **README.md** (this file) — overview, local setup, API reference
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, data flow, project structure
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** — deploying to Vercel, monitoring, troubleshooting production
+- **[CLAUDE.md](CLAUDE.md)** — how retrieval actually works, its measured limitations, and the offline eval harness; the maintained source of truth for search internals
 
 ## License
 
