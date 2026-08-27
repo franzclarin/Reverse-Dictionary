@@ -13,7 +13,7 @@ Queries like these are what the app is built for — semantic search over single
 
 ## Features
 
-- **Semantic search**: a query is embedded and compared against 141,854 pre-computed word vectors via pgvector cosine similarity — no generative model in the loop.
+- **Semantic search**: a query is embedded and compared against 117,791 pre-computed WordNet *sense definitions* via pgvector cosine similarity, then each matching sense is expanded into the words that share it — no generative model in the loop.
 - **Word pages**: each result has a dedicated page at `/word/[word]` with related words (nearest neighbours in embedding space).
 - **Share**: copy link or share results directly to X.
 - **No auth, no rate limiting**: search is fully anonymous and unthrottled. There is no userbase — no sign-in, saved words, credits, or leaderboard (removed 2026-08-26, see CLAUDE.md).
@@ -31,9 +31,11 @@ For how the app is put together — system diagram, data flow, project structure
 
 ## A note on search quality
 
-`VocabEmbedding` stores the embedding of each bare word, not a definition — so a multi-word description is compared against single-token vectors. This produces a well-documented "lexical echo" effect (results that share a word stem with the query tend to outscore the actual answer). Measured Recall@1 on a hand-authored 287-query eval set is ~10% strict / ~10-11% lenient at the approximate index. If a query doesn't return the word you expected, that's the current, known state of retrieval quality, not a bug in your setup.
+**Search finds the intended word first about a quarter of the time, and somewhere in the top ten about half the time.** Measured on a hand-authored 287-query eval set: lenient Recall@1 **24.0%**, strict 20.6%, Recall@10 **49.8%**. If a query doesn't return the word you expected, that's the current, known state of retrieval quality, not a bug in your setup — and the results page shows the full ranked list precisely because the top pick is often not the right one.
 
-A gloss-indexed alternative (embedding WordNet definitions per sense instead of bare words) has already been measured offline to fix most of this (+13-16 points of lenient Recall@1) and is designed, type-checked, and committed as dormant scaffolding (`GlossEmbedding`/`ShadowLookup` in `prisma/schema.prisma`) — not yet applied to production. That's the highest-leverage next step for this app. See CLAUDE.md's "Established facts" and "Headline results" for the full numbers.
+That is a large improvement on where this app started. Until 2026-08-27 search compared queries against the embedding of each *bare word*, which produced a pronounced "lexical echo" effect — a query about rain returned `raininess`, `rainstorm`, `raindrop` ahead of the actual answer, with ~41% of results sharing a stem with the query. Indexing WordNet's *sense definitions* instead cut echo to 14.5%, roughly doubled Recall@10, and lifted lenient Recall@1 from 10.1% to 24.0% (64 wins / 17 regressions, p < 0.00001).
+
+Two honest caveats. The eval set was written blind by a single author in a single session, so it is single-register and is **not** a sample of real user queries — no query text has ever been logged. And roughly 5% of the vocabulary isn't reachable at all. See CLAUDE.md's "Established facts" and "Headline results" for the full numbers and methodology.
 
 ## Getting Started
 
@@ -62,7 +64,7 @@ npx vercel env pull .env.local
 ```bash
 npx prisma db execute --file prisma/migrations/<migration>/migration.sql
 ```
-`postinstall` runs `prisma generate` automatically, and you don't need this step at all against a database that already has the schema applied. `VocabEmbedding` itself — 141,854 rows of pre-computed embeddings — is a data seed, not something a migration or `npm install` generates for you; see CLAUDE.md if you need to rebuild it.
+`postinstall` runs `prisma generate` automatically, and you don't need this step at all against a database that already has the schema applied. The vector tables are **data seeds**, not something a migration or `npm install` generates for you: `GlossEmbedding` (117,791 synset rows — what search reads) is rebuilt with `npx tsx scripts/build-gloss-index.ts`, while `VocabEmbedding` (141,854 bare-lemma rows — word pages and the search rollback path) predates it. See CLAUDE.md if you need to rebuild either.
 
 4. Run the development server:
 ```bash
@@ -127,7 +129,7 @@ npm run eval              # Offline retrieval eval — see CLAUDE.md "Evaluation
 
 | Issue | Solution |
 |-------|----------|
-| 500 with `subsystem: "database"` | Check `DATABASE_URL`, confirm `pgvector` is enabled and `VocabEmbedding` is populated |
+| 500 with `subsystem: "database"` | Check `DATABASE_URL`, confirm `pgvector` is enabled and `GlossEmbedding` is populated (search reads it; `VocabEmbedding` backs word pages and rollback) |
 | 500 with `subsystem: "model"` | First request per warm instance downloads the embedding model from the HF CDN — needs outbound network, can take up to ~20s |
 | Build fails | `npm install`, then `rm -rf .next && npm run build` |
 | `next dev` exits instantly, no server | Check if the repo is under OneDrive or similar cloud sync — see CLAUDE.md's "Repo hygiene" |

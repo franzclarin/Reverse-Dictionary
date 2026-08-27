@@ -44,15 +44,20 @@ Claude/Anthropic was removed from this app entirely on 2026-08-18. There is no `
 │                                                               │
 │  1. embed(query) — Transformers.js ONNX, in-function         │
 │  2. pgvector: ORDER BY embedding <=> $1 LIMIT k              │
-│     (SET LOCAL ivfflat.probes = 10, inside a transaction)    │
-│  3. return { results: [{ word, similarity }], timingMs }     │
+│     (SET LOCAL ivfflat.probes = 40, inside a transaction)    │
+│  3. expandSynsets(): synsets → member lemmas, deduped        │
+│  4. return { results: [{ word, similarity }], timingMs }     │
 └────────────────────│─────────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
-│            Neon Postgres — "VocabEmbedding"                  │
-│  141,854 rows, one per vocabulary word, vector(384),          │
-│  IVFFlat index (vector_cosine_ops, lists = 150)               │
+│            Neon Postgres — "GlossEmbedding"                  │
+│  117,791 rows, one per WordNet synset, halfvec(384),          │
+│  IVFFlat index (halfvec_cosine_ops, lists = 115)              │
+│                                                               │
+│  "VocabEmbedding" (141,854 bare lemmas, vector(384),          │
+│  lists = 150) stays populated and indexed as the rollback     │
+│  path, and still backs word pages' related-words lookup.      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,17 +68,20 @@ Word pages (`/word/[word]`) follow a separate, cheaper path: `getRelatedWords()`
 1. **User input** — a query typed on the landing page (`app/page.tsx`) routes to `/search?q=...`, which owns the actual `/api/lookup` call so every entry point (landing page, results page's own search bar) goes through one code path.
 2. **Frontend → `/api/lookup`** — `POST { query: string, k?: number }`.
 3. **Embed** — `embed(query)` produces a 384-dim, L2-normalized vector (mean pooling over token embeddings, then normalize).
-4. **pgvector search** — cosine distance (`<=>`) against `VocabEmbedding`'s 141,854 rows via an approximate IVFFlat index (`lists = 150`, `probes = 10` set per-query). This trades a small amount of recall (~0.3pp measured) for speed over an exact sequential scan.
-5. **Response** — `{ results: [{ word, similarity }], timingMs }`; `similarity = 1 - cosine_distance`.
-6. **Frontend display** — the results page renders the ranked list; clicking a word navigates to its page, which runs the separate `getRelatedWords()`/`getWordData()` path described above.
+4. **pgvector search** — cosine distance (`<=>`) against `GlossEmbedding`'s 117,791 synset rows via an approximate IVFFlat index (`lists = 115`, `probes = 40` set per-query). `probes` is **40, not the lemma index's 10**: the same setting that costs ~0.3pp on `VocabEmbedding` costs 5.5 points of lenient Recall@1 here, because gloss vectors cluster far less cleanly than bare lemmas. See `GLOSS_PROBES` in `lib/glossSearch.ts` for the measured sweep.
+5. **Synset expansion** — rows come back as synsets, not words. `expandSynsets()` (`lib/glossSearch.ts`) unpacks each into its member lemmas in WordNet's own within-synset order, dedupes by word across synsets, and truncates to `k`; each word inherits its synset's similarity. Synset mates carry bit-identical vectors, so their relative order is a deliberate *policy* (sense familiarity), not a retrieval result — and the array must never be sorted.
+6. **Response** — `{ results: [{ word, similarity }], timingMs }`; `similarity = 1 - cosine_distance`. Unchanged by the cutover, which is why the frontend needed no modification.
+7. **Frontend display** — the results page renders the ranked list; clicking a word navigates to its page, which runs the separate `getRelatedWords()`/`getWordData()` path described above.
 
 There is no system prompt, no JSON-contract parsing, and no retry-on-malformed-response logic anywhere in this flow — retrieval is a single vector comparison, not a model "answering" a question.
 
 ## Known Limitations (measured, not hypothetical)
 
-- **Lexical echo**: `VocabEmbedding` stores each word's *own* embedding (not a definition), so a multi-word query is compared against single-token vectors. ~34% of top-10 results share a word stem with the query and outscore the actual intended answer.
-- **The fine-tune's contribution is small**: swapping in the untouched base model only costs ~4.5 points of lenient Recall@1 — a measured null result against the pre-committed bar.
-- **A gloss-indexed alternative** (embedding WordNet definitions per sense instead of bare words) measured +13-16 points of lenient Recall@1 offline and is **designed but not deployed** — see CLAUDE.md's "Phase E" and the dormant `GlossEmbedding`/`ShadowLookup` schema in `prisma/schema.prisma`.
+- **Retrieval is still the weak part of this app.** Lenient Recall@1 is **24.0%** on the frozen 287-query set (strict 20.6%, R@10 49.8%). Roughly one query in four puts the intended word first, and about half put it somewhere in the top ten. That is a large improvement on what came before, not a solved problem.
+- **Lexical echo is largely fixed, and this is what fixed it.** When search ran over bare lemmas in `VocabEmbedding`, ~41% of top-10 results shared a word stem with the query (`rain` → `raininess`, `rainstorm`, `raindrop`) and outscored the intended answer. Indexing gloss text per synset cut that to **14.5%** and roughly doubled R@10 — recall and echo moved together, which is what a genuine representation fix looks like. Cut over 2026-08-27; see CLAUDE.md's "Headline results" for the paired test (64 wins / 17 regressions, p < 0.00001).
+- **The fine-tune's contribution is small**: swapping in the untouched base model only costs ~4.5 points of lenient Recall@1 — a measured null result against the pre-committed bar. Changing *what is indexed* beat retraining the model by roughly threefold.
+- **The eval set is single-register.** All 287 authored queries were written blind by one person in one session. It is not a sample of real user queries — no query text has ever been logged — so these numbers describe one writer's phrasing, not the general case. Tracked as RD-10 in `backlog/`.
+- **~5% of the vocabulary is unreachable**: `VocabEmbedding` covers ~95% of WordNet 3.0, and the missing rows are mostly Latin taxonomy plus ~258 orphaned verbs. A diffuse coverage tax, not a structural hole.
 
 Full measurement methodology, the offline eval harness, and the frozen eval set live in **[CLAUDE.md](CLAUDE.md)** — that file is the maintained source of truth for retrieval internals; this document should not duplicate it.
 
@@ -121,4 +129,6 @@ Deployment steps, checklist, and production troubleshooting live in **[DEPLOYMEN
 
 ## Open / Staged Work
 
-A synset-keyed gloss index (`GlossEmbedding`, `halfvec(384)`) and a shadow-log cutover gate (`ShadowLookup`) are designed, type-checked, and committed as **dormant** — no migration applied, no rows populated, the route hook gated behind a hardcoded `false`. See `prisma/schema.prisma`'s comments on those two models and `scripts/build-gloss-index.ts` / `scripts/shadow-compare.ts` for what a real cutover would require.
+The synset-keyed gloss index (`GlossEmbedding`, `halfvec(384)`) **shipped on 2026-08-27** and is what `/api/lookup` searches — see the diagram and data flow above. `VocabEmbedding` stays populated and indexed as the rollback path; reverting the single `searchGloss()` call in `app/api/lookup/route.ts` is the entire rollback, with no data migration involved.
+
+`ShadowLookup` still logs, with its roles inverted: the gloss index is now primary, so the sampled shadow query runs against the old lemma index. Its columns keep their original meaning (`old*` = lemma, `new*` = gloss) so pre- and post-cutover rows stay comparable. It was **never used to gate the cutover** — that gate assumed live traffic this app does not have, and was retired at n≈2 rather than satisfied. The decision was made on the offline eval set instead. See `backlog/02-embedding-cutover.html` for the decision record and `backlog/10-real-phrasing-eval-set.html` for the measurement that replaces it.

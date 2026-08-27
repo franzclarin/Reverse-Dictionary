@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { embed } from "@/lib/embedder";
 import { prisma } from "@/lib/prisma";
+import { searchGloss } from "@/lib/glossSearch";
 import { runShadowLookup } from "@/lib/shadowLookup";
 import {
   Subsystem,
@@ -12,11 +13,17 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60; // model cold-start needs up to ~20s; default 10s is too short
 
-// Enabled per RD-02: GlossEmbedding is populated (117,791 rows, RD-01) and
-// this block has been reviewed for the cutover soak. Sampled and
-// fire-and-forget — see the call site below and lib/shadowLookup.ts's header
-// comment for what's logged and why. Flip back to false to stop logging
-// without a redeploy of anything else.
+// Shadow logging survives the RD-02 cutover with its roles INVERTED: the gloss
+// index is now the primary path, so the sampled shadow query runs against the
+// old lemma index (VocabEmbedding) instead. The ShadowLookup columns keep their
+// original meaning — `old*` is always the lemma index and `new*` always the
+// gloss index — so rows logged before and after the cutover stay comparable and
+// scripts/shadow-compare.ts needs no change.
+//
+// Kept on rather than removed because the soak gate was retired for lack of
+// traffic, not because the question was answered: if this app ever does get
+// traffic, the comparison becomes worth running retroactively. Sampled and
+// fire-and-forget; flip to false to stop logging without touching anything else.
 const SHADOW_LOOKUP_ENABLED = true;
 const SHADOW_SAMPLE_RATE = 0.1;
 
@@ -59,18 +66,15 @@ export async function POST(request: NextRequest) {
     const dbStartedAt = Date.now();
     let rows: ResultRow[];
     try {
-      // SET LOCAL ivfflat.probes inside a transaction so it applies only to this query
-      rows = await prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(`SET LOCAL ivfflat.probes = 10`);
-        return tx.$queryRawUnsafe<ResultRow[]>(
-          `SELECT word, 1 - (embedding <=> $1::vector) AS similarity
-           FROM "VocabEmbedding"
-           ORDER BY embedding <=> $1::vector
-           LIMIT $2`,
-          vectorLiteral,
-          k
-        );
-      });
+      // RD-02 cutover: search the synset-keyed gloss index rather than the bare
+      // lemma index. Expansion semantics live in lib/glossSearch.ts and mirror
+      // the eval cell this decision was made on — see that file's header before
+      // changing anything about how synsets become words.
+      //
+      // VocabEmbedding is deliberately left populated and indexed as the
+      // rollback path: reverting this call is the whole rollback, no data
+      // migration involved.
+      rows = await searchGloss(prisma, vectorLiteral, k);
     } catch (error) {
       throw new SubsystemError("database", `pgvector query failed: ${describeError(error).message}`, {
         cause: error,
@@ -78,10 +82,10 @@ export async function POST(request: NextRequest) {
     }
     console.log(`[lookup] db ok ms=${Date.now() - dbStartedAt} rows=${rows.length}`);
 
-    // Fire-and-forget: never awaited, sampled, and never allowed to affect
-    // the response or its latency. See lib/shadowLookup.ts for what's logged
-    // and why. SHADOW_LOOKUP_ENABLED stays false until GlossEmbedding is
-    // actually populated and this has been reviewed — see the flag's comment.
+    // Fire-and-forget: never awaited, sampled, and never allowed to affect the
+    // response or its latency. rows[0] is now the GLOSS index's top-1 (the new
+    // primary); runShadowLookup queries the old lemma index itself. See
+    // lib/shadowLookup.ts for what's logged and why.
     if (SHADOW_LOOKUP_ENABLED && rows.length > 0 && Math.random() < SHADOW_SAMPLE_RATE) {
       runShadowLookup(query, vectorLiteral, rows[0]).catch((error) => {
         console.error(`[lookup] shadow log failed (non-fatal): ${formatErrorShape(describeError(error))}`);

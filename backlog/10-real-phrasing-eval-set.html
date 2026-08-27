@@ -1,0 +1,98 @@
+<title>RD-10 · Build a real-phrasing eval set from public threads</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-10</div>
+
+  <div class="ticket-head">
+    <h1>Build a real-phrasing eval set from public single-word-request threads</h1>
+    <span class="badge badge-p1">P1 · evaluation</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Depends on:</b> RD-02's cutover landing first</span>
+    <span><b>Touches:</b> <code>eval/sets/</code> (new file, never <code>v1</code>), a new harvest script in <code>scripts/</code></span>
+    <span><b>Risk:</b> a biased set cited as if it were representative</span>
+    <span><b>Est:</b> 1–2 days of tooling, plus a manual review pass over a few hundred rows</span>
+  </div>
+
+  <p class="lede">This project has never had a sample of real user queries — first by design (no query text is ever logged), and now by circumstance (there is no traffic to log). RD-02's soak gate assumed traffic that does not exist, which is why it deadlocked. Public single-word-request threads are the closest available substitute, and unlike a shadow log they arrive with the answer attached.</p>
+
+  <div class="callout">
+    <span class="callout-label">Why this ticket exists</span>
+    <p>RD-02 gated the gloss-index cutover on shadow-log agreement over "a few hundred sampled queries across normal daily/weekly traffic patterns." At current traffic that threshold is never reached. The gate has been retired (see RD-02's decision record) and the cutover decided on offline evidence instead — but the <i>question</i> the soak was standing in for is still real and still unanswered: <b>does the hand-authored eval set's phrasing resemble how people actually ask?</b> That question is what this ticket answers, using public data rather than traffic this app does not have.</p>
+  </div>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — M</div>
+      <div class="stat-value">Trivial harvest, manual extraction pass</div>
+      <div class="stat-note">The API call is a few lines and needs no auth. The real cost is human: answers are prose, so every target word has to be pulled out and checked by hand. Comparable in effort to how <code>v1.jsonl</code> was originally built.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — high (measurement)</div>
+      <div class="stat-value">First real-phrasing signal this project has ever had</div>
+      <div class="stat-note">Every recall number in this repo currently rests on 312 rows authored by one person in one session. This does not improve retrieval by a single point — it tells you whether the numbers that claim retrieval improved mean anything outside that one register.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Harvest.</b> Pull from the free Stack Exchange API — <code>api.stackexchange.com/questions?tagged=single-word-requests&amp;site=english</code>. No scraping and no auth needed at low volume (300 requests/day unauthenticated, 10k with a free key). Record the fetch date and the exact query string in the set's provenance, the same way every run in this project records its config.</li>
+      <li><b>Extract targets.</b> The query is the question title plus body; the target is the word given by the accepted or top-voted answer. Answers are prose — "You might want <i>petrichor</i>" — so this is a semi-automated extraction followed by a manual review pass, not a parse. This step is the ticket.</li>
+      <li><b>Mark unreachable rows rather than dropping them.</b> If the answer's word isn't in the index, set <code>meta.reachable: false</code> exactly as <code>v1.jsonl</code> already does for its 25 coverage rows. Silently dropping them would quietly inflate recall by removing the questions the system cannot answer.</li>
+      <li><b>Tag the leakage class.</b> Some posters quote a dictionary definition verbatim in the question. Those rows are the same contamination shape as <code>gloss_tripwire</code> — give them a <code>meta.leakage</code> marker and exclude them from the headline slice, keeping them only as a regression tripwire.</li>
+      <li><b>Write <code>eval/sets/v2-elu.jsonl</code>.</b> New filename, its own recorded sha256, following the existing <code>{ id, query, target, source, meta }</code> row shape. <code>v1.jsonl</code> must be byte-identical afterward — verify it, don't assume it.</li>
+      <li><b>Run the paired comparison</b> (lemma vs. gloss) through the existing harness rather than a one-off script. <b>This number is what stands in for the soak</b> — it's the check on whether the +12.9pp measured on <code>v1</code> survives contact with phrasing nobody in this project wrote.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>What this is, and what it is not</h3>
+    <p>It is <b>labelled</b>, which makes it strictly more informative than the shadow log could ever have been — <code>lib/shadowLookup.ts</code>'s header comment is explicit that shadow data can report <i>agreement rate</i> between two systems but never which one is right, because production traffic carries no ground truth. ELU threads carry the answer.</p>
+    <p>It is also a <b>hard slice</b>. People post to a Q&amp;A site when they are already stuck, so the set over-samples obscure and hard-to-name words. Absolute recall against it will read <i>lower</i> than production would — cite it for the paired lemma-vs-gloss comparison, never as a headline accuracy figure. This is the same discipline CLAUDE.md already applies to the Phase E pool ("absolute recall on a 20k pool is not comparable to production; only the relative comparison across cells is valid").</p>
+
+    <h3>Licensing, before any of this gets committed</h3>
+    <p>Stack Exchange content is CC-BY-SA, so attribution is required and must live in the set's provenance, not just in a commit message. Separately, SE's terms carry restrictions around AI <i>training</i> use. Evaluation is a different use than training — but confirm that rather than assuming it, and keep this data out of any RD-09 training corpus unless it is separately cleared. The distinction matters precisely because RD-09 is the ticket most tempted to reach for it.</p>
+
+    <h3>v1's blindness rule doesn't transfer, and doesn't need to</h3>
+    <p><code>v1.jsonl</code>'s entire value rests on being authored blind to every gloss, because the model was fine-tuned on 181,149 WordNet glosses and any gloss-derived query would be ~100% leaked. That specific precaution is unnecessary here for a stronger reason: ELU queries were written by people who had never seen this model or this vocabulary, years before it existed. The leakage risk isn't the authoring process — it's the minority of posts that quote a dictionary, which step 4 handles explicitly.</p>
+
+    <h3>Why not the alternatives</h3>
+    <ul>
+      <li><b>Reddit <code>r/whatstheword</code></b> — the same shape of data and arguably a broader register, but bulk API access is now restricted/paid and Pushshift is no longer publicly available. Revisit only if the SE harvest comes up short on volume.</li>
+      <li><b>OneLook</b> — does not publish query logs. Scraping it yields <i>dictionary data</i>, which is closer to what <code>v1</code> already is than to real phrasing, so it would not answer the question this ticket exists to answer.</li>
+      <li><b>Synthetic queries from a generative model</b> — would reintroduce a dependency this project deliberately removed on 2026-08-18, and would measure a model's idea of how people talk rather than how people talk.</li>
+    </ul>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>CLAUDE.md</code> §"The eval set" — the row shape, the <code>meta</code> fields, and the frozen-set discipline this new file must follow.</li>
+      <li><code>lib/shadowLookup.ts</code> header comment — why agreement rate is not accuracy, which is the whole reason a labelled set is worth more than the soak was.</li>
+      <li>RD-02's decision record — the retired gate this ticket replaces.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The gate RD-02 was waiting on could not be reached.</b> A soak measured in "a few hundred sampled queries across normal traffic patterns" never completes on an app with no organic traffic, and no amount of patience changes that. "Wait for traffic" was a deadlock wearing the costume of a plan. Worth remembering the next time a gate is written in units of traffic — check that the traffic exists before making a decision depend on it.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>A labelled public set beats an unlabelled private one.</b> The shadow log was the more "authentic" data source and still the weaker instrument, because it had no ground truth — it could only ever say the two systems disagreed, not which was right. Authenticity of source is not the same as usefulness of signal.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Single-register was <code>v1</code>'s stated limitation and this only partly fixes it.</b> ELU is one community with its own house style — more formal, more lexically sophisticated, and more likely to have already tried a thesaurus than a general audience. This trades "one author in one session" for "one community," which is better but is still not a sample of your users. State that wherever the set is cited, the same way <code>v1</code>'s limitation is stated.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li>Harvest script committed; fetch date and exact API query recorded in the set's provenance</li>
+      <li>Targets extracted and manually reviewed; unreachable rows marked <code>reachable: false</code>, not dropped</li>
+      <li>Dictionary-quoting rows tagged as a leakage class and excluded from the headline slice</li>
+      <li>CC-BY-SA attribution recorded in the set's provenance</li>
+      <li><code>eval/sets/v2-elu.jsonl</code> written with a recorded sha256; <code>v1.jsonl</code> verified byte-identical afterward</li>
+      <li>Paired lemma-vs-gloss comparison run and recorded following CLAUDE.md's "Headline results" convention</li>
+      <li>The set's biases restated wherever it is cited: hard slice, single community, not a sample of real users</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-10 · reverse-dictionary</footer>
+</div>

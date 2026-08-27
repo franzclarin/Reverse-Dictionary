@@ -10,8 +10,16 @@
  * Additions over the route (all opt-in, all off by default):
  *   - `exact`      : disable index scans for a true nearest-neighbour ceiling
  *   - `filterJunk` : restrict the candidate pool to plausibly-answerable lemmas
+ *
+ * Since the RD-02 cutover the route searches the synset-keyed gloss index, so
+ * `index: GLOSS_INDEX` is the setting that mirrors production. That path is not
+ * reimplemented here — it DELEGATES to the same `lib/glossSearch.ts` the route
+ * calls, because the whole point of this file is that there is one retrieval
+ * path, not two that resemble each other. The lemma queries below remain for
+ * the rollback path and for lemma-vs-gloss comparisons.
  */
 import type { PrismaClient } from "@prisma/client";
+import { GLOSS_INDEX, searchGloss } from "../../lib/glossSearch";
 
 export type ResultRow = { word: string; similarity: number };
 
@@ -88,7 +96,12 @@ export async function search(
 ): Promise<ResultRow[]> {
   const {
     k = 10,
-    probes = PRODUCTION_PROBES,
+    // Left undefined so each index applies its OWN default: the lemma path
+    // below uses PRODUCTION_PROBES (10), the gloss path uses GLOSS_PROBES (40).
+    // Defaulting here would silently impose the lemma tuning on the gloss
+    // index, which is exactly the mistake that cost 5.5 points before it was
+    // measured. An explicit --probes still overrides both.
+    probes,
     exact = false,
     filterJunk = false,
     index = DEFAULT_INDEX,
@@ -100,6 +113,26 @@ export async function search(
   const vectorLiteral = `[${embedding.join(",")}]`;
   const where = filterJunk ? `WHERE NOT (${junkPredicate()})` : "";
 
+  if (table === GLOSS_INDEX) {
+    // The gloss table is keyed by synset and has no `word` column, so none of
+    // the lemma-shaped options below apply to it. Refuse rather than silently
+    // ignore them: a run tagged `--filter-junk` that quietly did no filtering
+    // would put a false claim in eval/runs/*.json.
+    const unsupported = [
+      exact && "--exact",
+      filterJunk && "--filter-junk",
+      perSense && "--per-sense",
+    ].filter(Boolean);
+    if (unsupported.length > 0) {
+      throw new Error(
+        `${unsupported.join(", ")} cannot apply to ${GLOSS_INDEX}: it is keyed by synset, ` +
+          `not by word. Synset expansion already collapses senses, and the junk predicate ` +
+          `is a lemma-surface test with nothing to match against.`
+      );
+    }
+    return searchGloss(prisma, vectorLiteral, k, probes);
+  }
+
   return prisma.$transaction(async (tx) => {
     if (exact) {
       // A sequential scan over 141,854 x 384 floats is cheap, and it is the
@@ -107,7 +140,9 @@ export async function search(
       await tx.$executeRawUnsafe(`SET LOCAL enable_indexscan = off`);
       await tx.$executeRawUnsafe(`SET LOCAL enable_bitmapscan = off`);
     } else {
-      await tx.$executeRawUnsafe(`SET LOCAL ivfflat.probes = ${Number(probes)}`);
+      await tx.$executeRawUnsafe(
+        `SET LOCAL ivfflat.probes = ${Number(probes ?? PRODUCTION_PROBES)}`
+      );
     }
 
     if (!perSense) {

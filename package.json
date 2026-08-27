@@ -9,6 +9,7 @@
     "lint": "next lint",
     "postinstall": "prisma generate",
     "eval": "tsx scripts/eval.ts --set eval/sets/v1.jsonl --tag baseline",
+    "eval:prod": "tsx scripts/eval.ts --set eval/sets/v1.jsonl --index GlossEmbedding --tag prod_gloss_shipped",
     "eval:exact": "tsx scripts/eval.ts --set eval/sets/v1.jsonl --exact --tag exact",
     "eval:filtered": "tsx scripts/eval.ts --set eval/sets/v1.jsonl --filter-junk --tag filtered",
     "eval:compare": "tsx scripts/eval.ts --compare",

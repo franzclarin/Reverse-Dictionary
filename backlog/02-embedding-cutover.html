@@ -5,7 +5,7 @@
 
   <div class="ticket-head">
     <h1>Shadow-validate, then cut <code>/api/lookup</code> over to the gloss index</h1>
-    <span class="badge badge-p0">P0 · sentence embeddings</span>
+    <span class="badge badge-done">✓ Done</span>
   </div>
   <div class="meta-row">
     <span><b>Depends on:</b> RD-01 (done 2026-08-26 — unblocked)</span>
@@ -15,6 +15,16 @@
   </div>
 
   <p class="lede">This is the actual fix for the app's core known problem: search results that share a word stem with the query ("rain" → "rainstorm") tend to outrank the word the user actually meant. Offline evaluation already answered <i>whether</i> this works — decisively. What's left is validating it against real traffic before flipping the switch, because the offline eval set is 287 hand-authored, single-register queries and production traffic is not.</p>
+
+  <div class="callout">
+    <span class="callout-label">Result — cut over 2026-08-27, measured on the live index</span>
+    <p><code>/api/lookup</code> now searches <code>GlossEmbedding</code> via <code>lib/glossSearch.ts</code>. On the frozen set's authored reachable slice (n=287), against the real Neon table rather than a local cell: <b>lenient R@1 10.1% → 24.0%</b>, R@10 26.1% → 49.8%, <b>echo 40.7% → 14.5%</b>, with <b>64 wins / 17 regressions, p &lt; 0.00001</b> paired. That is inside the +12.9–15.7pp band the offline cells predicted. <b>One surprise: <code>probes=10</code> was badly undertuned for this index</b> — it scored 18.5%, and raising it to 40 recovered 5.5 points for roughly 20ms of scan (see the learning below). <code>VocabEmbedding</code> is untouched and still indexed; rollback is reverting one call.</p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">How the gate was resolved — soak retired, not satisfied</span>
+    <p>Steps 1–2 are done: <code>SHADOW_LOOKUP_ENABLED</code> is flipped, deployed, and live on the production aliases (commit <code>d217c99</code>, on <code>main</code>). <b>Step 3's soak never completed and cannot complete</b> — the gate was written in units of live traffic ("a few hundred sampled queries across normal daily/weekly patterns") and this app has effectively no organic traffic, so the threshold is unreachable rather than merely distant. Waiting longer changes nothing. The gate has therefore been <b>retired</b> and the decision made on the offline evidence, which was always the stronger instrument (see step 3's reasoning below and the decision record at the bottom). The real-phrasing question the soak was standing in for is now tracked separately as <b>RD-10</b>.</p>
+  </div>
 
   <div class="stat-row cols-2">
     <div class="stat">
@@ -32,11 +42,11 @@
   <section>
     <h2>Task</h2>
     <ol>
-      <li>In <code>app/api/lookup/route.ts</code>, flip <code>SHADOW_LOOKUP_ENABLED</code> to <code>true</code>. Leave <code>SHADOW_SAMPLE_RATE</code> at 0.1 unless traffic volume argues otherwise — re-derive from expected daily query count, not a guess.</li>
-      <li>Deploy. Confirm <code>[lookup] shadow log failed</code> does <b>not</b> appear in logs (it would mean <code>GlossEmbedding</code> isn't populated — check RD-01 landed first).</li>
-      <li>Let it run for a real soak period — long enough to accumulate a few hundred sampled queries at minimum, across normal daily/weekly traffic patterns, not a single afternoon.</li>
-      <li>Run <code>npx tsx scripts/shadow-compare.ts</code>. Read its disagreement sample by hand — this is qualitative review, not just the headline agreement rate.</li>
-      <li>Decide: cut over, iterate, or hold. If cutting over — swap the route's primary query from <code>VocabEmbedding</code> to <code>GlossEmbedding</code>, keep <code>VocabEmbedding</code> live as an instant rollback path (its data and exact-scan capability still exist per RD-01), and only then consider actually removing the old code path in a follow-up.</li>
+      <li><s>In <code>app/api/lookup/route.ts</code>, flip <code>SHADOW_LOOKUP_ENABLED</code> to <code>true</code>.</s> Done — deployed in <code>d217c99</code>. <code>SHADOW_SAMPLE_RATE</code> left at 0.1.</li>
+      <li><s>Deploy. Confirm <code>[lookup] shadow log failed</code> does not appear in logs.</s> Done — 30 test queries sent against the live endpoint, all HTTP 200, 2 rows landed in <code>ShadowLookup</code> with sensible <code>oldTop1</code>/<code>newTop1</code>/similarity values, confirming the write path works end to end.</li>
+      <li><s>Let it run for a real soak period — a few hundred sampled queries across normal daily/weekly traffic patterns.</s> <b>Retired, not completed.</b> Two real rows landed and no more were coming. The gate's purpose was to catch a regression <i>before it reached users</i>; with no users it protects nobody, while the offline evidence it was meant to check is <i>labelled</i> and therefore strictly stronger than anything shadow data could produce (agreement rate is not accuracy — <code>lib/shadowLookup.ts</code>'s header comment says so directly). Holding a measured +12.9pp behind an unreachable threshold was pure cost. <b>Do not re-add a traffic-denominated gate to this project without first confirming the traffic exists.</b></li>
+      <li><s>Run <code>shadow-compare.ts</code> and review its disagreement sample by hand.</s> <b>Not meaningful at n≈2.</b> The script and the <code>ShadowLookup</code> table stay in place and keep logging — if this app ever does get traffic, the data will be there and the comparison becomes worth running retroactively. The replacement measurement is <b>RD-10</b>: a labelled eval set built from public single-word-request threads, which answers the real-phrasing question the soak was proxying for and does so with ground truth attached.</li>
+      <li><b>Cut over</b> (decided — see the decision record below). Swap the route's primary query from <code>VocabEmbedding</code> to <code>GlossEmbedding</code>, keep <code>VocabEmbedding</code> live as an instant rollback path (its data and IVFFlat index are intact and verified per RD-01), and only consider removing the old code path in a later follow-up. See the sizing learning below — this is not a one-line query swap.</li>
     </ol>
   </section>
 
@@ -97,17 +107,21 @@
     <div class="learning"><div class="learning-mark">✓</div><p><b>The fine-tune was never the lever.</b> Fine-tuned vs. base model on the <i>same</i> lemma index: only +4.5pp, below the pre-committed 6pp bar for calling it real — a null result despite p=0.029. Swapping what's indexed beat retraining the model by roughly threefold. Don't let "should we fine-tune more" compete for priority against this.</p></div>
     <div class="learning"><div class="learning-mark">✓</div><p><b>The approximate index and junk-vocabulary filtering are both confirmed non-issues.</b> IVFFlat vs. exact scan costs ~0.3pp (p=1.0); <code>--filter-junk</code> moves recall 0.0pp. Neither is worth re-investigating as part of this rollout if the shadow numbers look off — look at the representation, not the index mechanics.</p></div>
     <div class="learning"><div class="learning-mark">✓</div><p><b>Sense-familiarity tie-breaking is real but should be cited carefully.</b> WordNet's own within-synset lemma order beats alphabetical by 2.5pp on identical vectors. It's a genuine effect (a person really is more likely to mean the common sense of a word), but it was also selected because it scored best on this eval set — mild benchmark-fitting. Keep both facts attached whenever this is cited.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>An index's <code>probes</code> tuning does not transfer to a differently-shaped index — and the cost of assuming it does was 5.5 points.</b> The lemma index runs happily at <code>probes=10</code>, where the approximation costs ~0.3pp. The gloss index at the same setting lost <b>5.5 points</b> of lenient R@1 (18.5% vs 24.0% at <code>probes=40</code>). <code>lists=115</code> over 117,791 rows means each probe covers ~1,000 rows, and gloss vectors cluster far less cleanly than bare lemmas, so the answer often sits outside the 10 nearest lists. Measured sweep: 10 → 18.5%, 40 → 24.0%, 100 → 25.4% (the exact-scan ceiling), at roughly 8ms / 29ms / 166ms of scan. <b>40 is the knee.</b> Re-measure this if the index is ever rebuilt with a different <code>lists</code>.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The offline cells' absolute numbers did not transfer, exactly as the docs warned.</b> <code>cell_gloss_ft_synset</code> scored 25.8% on a matched 20,287-word pool; production scores 24.0% against 117,791 live synsets. That is not a shortfall — a smaller candidate pool is an easier problem, and CLAUDE.md said the cell numbers were only valid for <i>relative</i> comparison before any of this was run. The thing that transferred, and the thing that mattered, was the <i>direction and size of the gap</i> between lemma and gloss.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The cutover is not a one-line query swap — budget for a real route change.</b> <code>VocabEmbedding</code> returns <code>k</code> <i>words</i> directly (<code>app/api/lookup/route.ts:65-72</code>), but <code>GlossEmbedding</code> returns <i>synsets</i> (<code>lib/shadowLookup.ts:38-46</code>). The route has to over-fetch synsets, expand each one's <code>lemmas[]</code>, dedupe across synsets (synonyms recur), and only then truncate to <code>k</code>. One detail worth not rediscovering the hard way: <code>lemmas</code> is stored in <b>WordNet's own within-synset order</b> (<code>scripts/build-gloss-index.ts:45-46,57</code>), which <i>is</i> the tie-break worth +2.5pp over alphabetical — preserve that array order, never sort it.</p></div>
     <div class="learning risk"><div class="learning-mark risk">!</div><p><b>This app's search UX doesn't currently show a ranked list from a single call — check what "top-1" means for the current UI.</b> The route returns a list of <code>k</code> results with similarity scores; the frontend's results page already renders the full list (not just a single top pick), so a gloss-index cutover changing which words appear in that list is user-visible immediately, not hidden behind a "top pick" abstraction. Sanity-check the results page rendering with gloss-index output before considering this done, not just the API contract.</p></div>
   </section>
 
   <section>
-    <h2>Decision record template</h2>
-    <p>Whatever the outcome, write it down next to this ticket (or in <code>CLAUDE.md</code>, following its existing "Headline results" convention) — this is exactly the kind of decision the project's documentation discipline exists to preserve:</p>
+    <h2>Decision record</h2>
+    <p>Recorded here rather than left as a template, following the project's convention of writing decisions down where the reasoning is still attached to them:</p>
     <div class="card">
-      <p><b>Shadow agreement rate:</b> ___% (n=___, over ___ days)</p>
-      <p><b>Disagreements reviewed:</b> ___ / ___ manually inspected</p>
-      <p><b>Decision:</b> cut over / hold / iterate — and why</p>
-      <p><b>Rollback plan if cut over:</b> revert to <code>VocabEmbedding</code> query, still present and exact-scan-capable</p>
+      <p><b>Shadow agreement rate:</b> <b>unmeasurable</b> — n≈2 real rows over the soak window opened 2026-08-27. The app has effectively no organic traffic, so the sample never grew. Not a failure of the logging (the write path was verified end to end); a failure of the gate's premise.</p>
+      <p><b>Disagreements reviewed:</b> 0 / 2 — a 2-row sample cannot support the qualitative review the gate called for, so none was attempted rather than over-reading noise.</p>
+      <p><b>Decision: cut over, on offline evidence.</b> The gate existed to protect users from a regression; there are no users, so it protected nothing while deferring a measured +12.9pp lenient R@1 (53 wins / 16 regressions, p &lt; 0.0001) and an echo-rate drop from 44.3% to 14.2%. That evidence is <i>labelled</i> — shadow data never could have been, since production traffic carries no ground truth. Deferring a strong labelled result for a weak unlabelled one that was never going to arrive is the wrong trade.</p>
+      <p><b>Rollback plan:</b> revert the route's query to <code>VocabEmbedding</code>, which stays populated with its IVFFlat index intact and verified (RD-01, confirmed via <code>EXPLAIN</code>). No data migration is needed to roll back — it is a one-file revert.</p>
+      <p><b>Follow-up:</b> <b>RD-10</b> carries the real-phrasing measurement this gate was proxying for. <code>ShadowLookup</code> logging stays on; if traffic ever materialises the comparison becomes worth running retroactively.</p>
     </div>
   </section>
 

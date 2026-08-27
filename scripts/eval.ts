@@ -43,6 +43,7 @@ import { embed } from "@/lib/embedder";
 import { embedWith, PRODUCTION_MODEL } from "./lib/embedModel";
 import { loadEnv } from "./lib/env";
 import { search, DEFAULT_INDEX, PRODUCTION_PROBES, type ResultRow } from "./lib/retrieval";
+import { GLOSS_INDEX, GLOSS_PROBES } from "../lib/glossSearch";
 import {
   loadIndex,
   prepareQuery,
@@ -323,10 +324,14 @@ async function run(): Promise<void> {
   }
 
   const k = numArg("--k", 10);
-  const probes = numArg("--probes", PRODUCTION_PROBES);
   const exact = has("--exact");
   const filterJunk = has("--filter-junk");
   const index = arg("--index") ?? DEFAULT_INDEX;
+  // Undefined unless asked for, so each index contributes its own production
+  // default (lemma 10, gloss 40) rather than having the lemma value imposed on
+  // everything. Recorded below as the value actually used, never as "10".
+  const probes = has("--probes") ? numArg("--probes", PRODUCTION_PROBES) : undefined;
+  const effectiveProbes = probes ?? (index === GLOSS_INDEX ? GLOSS_PROBES : PRODUCTION_PROBES);
   const indexFile = arg("--index-file");
   const perSense = has("--per-sense");
 
@@ -413,7 +418,7 @@ async function run(): Promise<void> {
     set: setFile,
     setSha256: sha256File(setFile),
     k,
-    probes: exact ? null : probes,
+    probes: exact ? null : effectiveProbes,
     exact,
     filterJunk,
     index: indexFile ? `file:${indexFile}` : index,

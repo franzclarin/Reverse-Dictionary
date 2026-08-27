@@ -4,27 +4,27 @@
   <div class="crumbs"><a href="index.html">← Tickets</a> / RD-05</div>
 
   <div class="ticket-head">
-    <h1>Decide the fate of <code>MIGRATION_AUDIT.md</code>; finish the eval set's <code>acceptable[]</code> coverage</h1>
+    <h1>Decide the fate of <code>MIGRATION_AUDIT.md</code>; finish the eval set's <code>acceptable[]</code> coverage; fix stale platform docs</h1>
     <span class="badge badge-p3">P3 · housekeeping</span>
   </div>
   <div class="meta-row">
-    <span><b>Touches:</b> <code>MIGRATION_AUDIT.md</code>, <code>eval/sets/v1.jsonl</code></span>
+    <span><b>Touches:</b> <code>MIGRATION_AUDIT.md</code>, <code>eval/sets/v1.jsonl</code>, <code>CLAUDE.md</code>, <code>scripts/lib/localIndex.ts</code></span>
     <span><b>Risk:</b> none — pure documentation/process</span>
-    <span><b>Est:</b> ~30 min for the audit doc, ~2–3 hrs for acceptable[] if pursued</span>
+    <span><b>Est:</b> ~30 min for the audit doc, ~2–3 hrs for acceptable[] if pursued, ~20 min for the platform-doc fix</span>
   </div>
 
-  <p class="lede">Two small, unrelated loose ends that don't block anything above but shouldn't sit forever either. Bundled here because both are low-stakes enough to defer past every engineering ticket in this folder, not because they're related to each other.</p>
+  <p class="lede">Three small, unrelated loose ends that don't block anything above but shouldn't sit forever either. Bundled here because all three are low-stakes enough to defer past every engineering ticket in this folder, not because they're related to each other.</p>
 
   <div class="stat-row cols-2">
     <div class="stat">
-      <div class="stat-label">Size — S (A) / M (B)</div>
-      <div class="stat-value">1 file decision; ~179 rows to review</div>
-      <div class="stat-note">Part A is a single pick-one-of-three decision, ~30 min. Part B is genuinely bigger than it looks — 179 eval rows need a human synonym-acceptability judgment call each, plus the full re-versioning ceremony (new sha256, regenerated reference runs) the frozen-set discipline requires.</div>
+      <div class="stat-label">Size — S (A) / M (B) / S (C)</div>
+      <div class="stat-value">1 file decision; ~179 rows to review; one doc section</div>
+      <div class="stat-note">Part A is a single pick-one-of-three decision, ~30 min. Part B is genuinely bigger than it looks — 179 eval rows need a human synonym-acceptability judgment call each, plus the full re-versioning ceremony (new sha256, regenerated reference runs) the frozen-set discipline requires. Part C is a small, contained doc correction.</div>
     </div>
     <div class="stat">
       <div class="stat-label">Impact — low</div>
       <div class="stat-value">Process hygiene, not product</div>
-      <div class="stat-note">Part A is pure repo cleanliness. Part B has a real but narrow methodological effect — it tightens lenient-R@1's synonym correction — but CLAUDE.md already calls the current partial coverage "deliberate MVP scope," so treat this as polish, not a gap in what's currently trustworthy.</div>
+      <div class="stat-note">Part A is pure repo cleanliness. Part B has a real but narrow methodological effect — it tightens lenient-R@1's synonym correction — but CLAUDE.md already calls the current partial coverage "deliberate MVP scope," so treat this as polish, not a gap in what's currently trustworthy. Part C is accuracy, not behavior — nothing in the app reads these doc lines, but every future session does.</div>
     </div>
   </div>
 
@@ -42,6 +42,14 @@
       <li>Only 133 of 312 authored eval rows currently carry an <code>acceptable[]</code> synonym list, meaning lenient Recall@1 equals strict Recall@1 on the other 179 — the synonym-tie correction is partial, not applied uniformly.</li>
       <li><code>eval/audit/acceptable-recommendations.tsv</code> already has candidate recommendations sitting unresolved (per <code>CLAUDE.md</code> §"Known limitation of v1") — start there rather than re-deriving from scratch.</li>
       <li><b>The eval set is frozen — this cannot be an in-place edit.</b> Any change produces <code>v2.jsonl</code>, a fresh sha256 recorded the same way <code>v1</code>'s was, and every committed reference run (<code>eval/runs/baseline.json</code> etc.) needs re-generating against the new set before it's trustworthy again.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Task — part C: stale platform docs</h2>
+    <ol>
+      <li>CLAUDE.md's "Repo hygiene" section still says <code>Platform: Windows / PowerShell</code>, describes an OneDrive-specific <code>next dev</code> <code>EINVAL: readlink</code> workaround, and implies a Windows-default <code>EVAL_CELL_DIR</code> (<code>C:/Temp/rd_eval_cells</code>) in <code>scripts/lib/localIndex.ts</code> — all written when the repo lived on a Windows/OneDrive machine.</li>
+      <li>The dev environment has since moved to macOS with no OneDrive in the path (confirmed in <code>MIGRATION_AUDIT.md</code> Phase 0). Confirm current behavior on macOS (does <code>next dev</code> still need the <code>.next</code> workaround at all? does <code>EVAL_CELL_DIR</code> need a platform-appropriate default?), then correct or remove the stale notes so the doc matches the actual environment.</li>
     </ol>
   </section>
 
@@ -64,6 +72,7 @@
     <ul class="check-list">
       <li><code>MIGRATION_AUDIT.md</code> either committed somewhere deliberate, folded into existing docs, or removed — not left untracked</li>
       <li>If part B is pursued: new set is <code>v2.jsonl</code>, never an edit to <code>v1.jsonl</code>; sha256 recorded; reference runs regenerated</li>
+      <li>CLAUDE.md's "Repo hygiene" section matches the actual current dev platform, not a stale one</li>
     </ul>
   </section>
 

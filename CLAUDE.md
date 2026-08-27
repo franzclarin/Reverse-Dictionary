@@ -22,10 +22,15 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 1. `app/page.tsx` `handleSearch()` → POST `/api/lookup` only. **No Claude fallback** — errors surface directly (with the server's `detail`).
 2. `app/api/lookup/route.ts`:
    - `embed(query)` (`lib/embedder.ts`) → 384-dim L2-normalised vector.
-   - pgvector query inside a `$transaction` with `SET LOCAL ivfflat.probes = 10`:
-     `ORDER BY embedding <=> $1::vector LIMIT $2`, similarity = `1 - (embedding <=> …)`.
-   - Returns `{ results: [{ word, similarity }] }`.
+   - `searchGloss()` (`lib/glossSearch.ts`) — pgvector query over **`GlossEmbedding`** inside a `$transaction` with `SET LOCAL ivfflat.probes = 40`:
+     `ORDER BY embedding <=> $1::halfvec LIMIT $2`, similarity = `1 - (embedding <=> …)`.
+   - The rows that come back are **synsets, not words**. `expandSynsets()` unpacks each into its member `lemmas` (WordNet's own within-synset order — never sort it), dedupes by word across synsets, and truncates to `k`. Each word inherits its synset's similarity.
+   - Returns `{ results: [{ word, similarity }] }` — the API contract is unchanged from the lemma era, so the frontend needed no change.
 3. UI navigates to `/word/[top.word]` with runners-up as `?alternatives=`.
+
+**The cutover (RD-02, 2026-08-27).** Search ran over bare lemmas in `VocabEmbedding` until this point; the switch to gloss text per synset is the fix for lexical echo described under "Established facts". `VocabEmbedding` stays populated and indexed as the rollback path — reverting the one `searchGloss()` call in the route is the entire rollback, no data migration. `lib/wordData.ts` (`getRelatedWords`) still reads `VocabEmbedding` and was deliberately not switched: it finds neighbours of a *word*, which is what a lemma index is actually good at.
+
+**`probes = 40`, not 10.** The lemma index's tuning does not transfer — see `GLOSS_PROBES` in `lib/glossSearch.ts` for the measured sweep. Assuming it did cost 5.5 points of lenient R@1.
 
 ## Embedding model — important context
 
@@ -105,11 +110,14 @@ Offline harness measuring the real retrieval path (`embed(query)` → pgvector t
 ### Running it
 
 ```bash
-npm run eval                    # baseline: production settings, probes=10
-npm run eval:exact              # sequential scan — true nearest-neighbour ceiling
-npm run eval:filtered           # with the junk predicate applied
+npm run eval:prod               # PRODUCTION path: gloss index, probes=40
+npm run eval                    # the lemma index (now the ROLLBACK path), probes=10
+npm run eval:exact              # sequential scan over the lemma index — NN ceiling
+npm run eval:filtered           # lemma index with the junk predicate applied
 npx tsx scripts/eval.ts --compare eval/runs/a.json eval/runs/b.json
 ```
+
+**`npm run eval` is no longer the production path.** It still targets `VocabEmbedding`, which the RD-02 cutover demoted to the rollback path — kept under that name because the three committed reference runs are named for it and renaming would orphan them. Use `eval:prod` to measure what users actually get. `--probes` now defaults per-index (lemma 10, gloss 40) rather than forcing 10 on everything; every run records the value it actually used.
 
 Reports Recall@1/@3/@10, MRR@10, strict + lenient recall, **echo rate** (a primary metric — a change that improves recall without moving it needs explaining), and latency p50/p95, sliced by source, style, query length, token count, reachability, `lexical_overlap` and frequency band. Per-query results go to `eval/runs/<tag>.json`. `--compare` is **paired**, using exact two-sided McNemar on rank-1 disagreements, and prints named wins and regressions — comparing two independent Recall@1 figures at n≈300 cannot see a three-point change.
 
@@ -165,6 +173,19 @@ Authored slice, 287 reachable queries. **Lenient R@1 is the metric the decision 
 | `cell_gloss_ft_synset_h256` | 24.0% | 20.6% | 51.9% | 0.294 | 14.4% |
 | `cell_gloss_base_synset` | 22.3% | 18.1% | 43.6% | 0.252 | 16.0% |
 
+**Production, measured on the real index after the RD-02 cutover (2026-08-27).** The rows above are local brute-force scans of a *matched 20k pool*; these are the live Neon `GlossEmbedding` table (117,791 synsets) through the actual route path, so they are the numbers that describe what users get. Cite these for "how good is search", and the cells above only for representation comparisons.
+
+| run | lenient R@1 | strict R@1 | R@10 | echo | notes |
+|---|---|---|---|---|---|
+| `baseline` (lemma, probes=10) | 10.1% | 5.6% | 26.1% | 40.7% | the pre-cutover production path |
+| `prod_gloss` (probes=10) | 18.5% | 15.7% | 39.4% | 14.8% | gloss index, lemma's probes — **undertuned** |
+| **`prod_gloss_shipped`** (probes=40) | **24.0%** | 20.6% | 49.8% | 14.5% | **what ships** |
+| `prod_gloss_p100` (probes=100) | 25.4% | 21.6% | 51.6% | 14.6% | +1.4pp for ~6x the scan cost; not worth it |
+
+- **The cutover is confirmed on real infrastructure**: `baseline → prod_gloss_shipped` is **+13.9 points** lenient R@1 (64 wins / 17 regressions, p < 0.00001), inside the +12.9–15.7pp band the cells predicted, with **echo 40.7% → 14.5%** and R@10 nearly doubled. Recall and echo moved together, as they did offline.
+- **Probes tuning was worth 5.5 points** and nearly free (~20ms of scan). `probes=100` reaches the exact-scan ceiling (~25.8%), confirming the remaining gap to the cells is *index approximation*, not representation — and that 40 sits at the knee.
+- **The cells' absolute numbers did not transfer, and were never meant to.** A 20,287-word matched pool is an easier problem than 117,791 live synsets; CLAUDE.md said so before the cutover and the measurement bore it out. Only the *relative* cell comparisons were ever valid.
+
 - **Gloss indexing wins, and survived the correction.** `lemma_ft → gloss_ft` is **+12.9 points** lenient R@1 (53 wins / 16 regressions, p < 0.0001) and `lemma_base → gloss_base` is **+15.7** (57/12, p < 0.0001) — still roughly twice the pre-committed ~6-point bar. **Echo falls 44.3% → 14.2%**: recall and echo move together, which is what a real representation fix should do.
 - **The fine-tune is worth little.** `lemma_base → lemma_ft` is +4.5 points, *below* the threshold, so it stands as a **null result** despite p = 0.029. Swapping the index beats retraining by roughly threefold.
 - **Synset-keyed collapse is lossless.** With the tie order held constant it is per-query identical to per-sense: 287/287 identical top-10 order, 0 discordant rank-1 pairs. 204,549 gloss rows collapse to 114,662 (43.9%, 0 divergent). The earlier "⚠ cross-surface" caveat was **measured and falsified** — synset mates already occupy one tied block in a per-sense cell, so expansion spends no slots that cell was not already spending.
@@ -191,7 +212,8 @@ npm run build          # prod build
 npm run lint
 npx tsc --noEmit       # type-check (run before committing)
 
-npm run eval           # offline retrieval eval against eval/sets/v1.jsonl
+npm run eval:prod      # offline eval of the PRODUCTION path (gloss index, probes=40)
+npm run eval           # same set against the lemma index — now the rollback path
 npm run eval:exact     # nearest-neighbour ceiling (sequential scan)
 npm run eval:filtered  # with junk-vocabulary filter
 npm run eval:report    # regenerate eval/REPORT.md from eval/runs/*.json
@@ -206,6 +228,6 @@ npx tsx scripts/eval.ts --set eval/sets/v1.jsonl --tag cell_gloss_ft --index-fil
 - **Deploy by pushing to `main`** — the Git integration clones the repo, so `.gitignore` applies and the build is correct. `vercel deploy --prod` **fails**: the CLI uploads the working directory instead, sweeping in `reverse_dict_model.zip` and `_model_tmp/` (~1.5GB) and blowing the 100MB per-file cap. `.gitignore` does not apply to CLI deploys — only `.vercelignore` does, and there isn't one.
 - The repo lives under OneDrive. Its placeholder files make Next's startup cleanup of `.next` fail with `EINVAL: readlink …`, and `next dev` then **exits 0 without serving**. If dev dies instantly, `rm -rf .next` and restart.
 - ESLint config is `.eslintrc.json` (`next/core-web-vitals`). Without it `npm run lint` drops into an interactive setup wizard and hangs non-interactive shells.
-- **Committed eval artifacts:** `eval/data/zipf-en.tsv` (1.7 MB), `eval/sets/*.tsv|jsonl`, and the reference `eval/runs/baseline.json`. Ignored: the rest of `eval/runs/`, `eval/audit/`, `eval/data/pool-manifest.json`. Vector cells (~230 MB) live outside the repo entirely — see `EVAL_CELL_DIR`.
+- **Committed eval artifacts:** `eval/data/zipf-en.tsv` (1.7 MB), `eval/sets/*.tsv|jsonl`, and the reference runs `eval/runs/baseline.json` / `exact.json` / `filtered.json` / **`prod_gloss_shipped.json`**. That last one is the current production path; the other three describe the pre-cutover lemma index, which is now the *rollback* path — compare new runs against `prod_gloss_shipped`, not `baseline`, unless you specifically mean "versus what we replaced". Ignored: the rest of `eval/runs/`, `eval/audit/`, `eval/data/pool-manifest.json`. Vector cells (~230 MB) live outside the repo entirely — see `EVAL_CELL_DIR`.
 - **Don't pipe a loop's command through `tail`/`head` when you care whether it worked.** The pipeline reports the exit status of the *last* stage, so six consecutive failures reported success and wasted a 37-minute run. Check status per iteration, or use `PIPESTATUS`.
 - Other docs: `README.md` (overview, local setup, API reference), `ARCHITECTURE.md` (system design), `DEPLOYMENT.md` (deploying to Vercel). Consolidated from five docs to three on 2026-08-26 — `SETUP.md` and `GETTING_STARTED.md` were near-duplicates of README's own setup section and were folded into it rather than kept as separate files.

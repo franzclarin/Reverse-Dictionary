@@ -53,6 +53,10 @@ eval/runs/*
 !eval/runs/baseline.json
 !eval/runs/exact.json
 !eval/runs/filtered.json
+# The production gloss path's reference run (RD-02 cutover). baseline.json now
+# describes the ROLLBACK path, so without this there is no committed reference
+# for what search actually does today.
+!eval/runs/prod_gloss_shipped.json
 # Working artifacts, not results
 eval/data/pool-manifest.json
 eval/audit/

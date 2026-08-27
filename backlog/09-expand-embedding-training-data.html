@@ -1,0 +1,77 @@
+<title>RD-09 · Expand/improve embedding training data</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-09</div>
+
+  <div class="ticket-head">
+    <h1>Retrain on better training data — a second attempt, with an eval split this time</h1>
+    <span class="badge badge-p2">P2 · sentence embeddings</span>
+  </div>
+  <div class="meta-row">
+    <span><b>Depends on:</b> RD-02's cutover being measured and decided first</span>
+    <span><b>Touches:</b> the training pipeline in <code>reverse_dict_model.zip</code> (gitignored, not in this repo's tracked code), <code>eval/</code></span>
+    <span><b>Risk:</b> large effort for an unproven payoff; easy to repeat the original run's own methodological mistake</span>
+    <span><b>Est:</b> weeks, not days — data sourcing + a full retrain + eval cycle</span>
+  </div>
+
+  <p class="lede">The obvious next lever for "make search better" is more/better training data for the fine-tune. It's a real idea and worth capturing — but the project has already measured what the <i>first</i> attempt at this bought, and the honest number is small. This ticket exists so the idea isn't lost, not because the evidence currently favors it over what's already queued.</p>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — L</div>
+      <div class="stat-value">Data sourcing + full retrain + eval cycle</div>
+      <div class="stat-note">Unlike RD-02 (a flag flip against code that already exists), there is no shortcut here: new training pairs have to be sourced or authored, a training run has to happen outside this repo, and the result has to go through the full eval harness before it means anything.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — uncertain</div>
+      <div class="stat-value">Prior attempt: +4.5pp lenient R@1, a null result</div>
+      <div class="stat-note">Fine-tuned vs. base model, same index, is only +4.5pp — below the project's own pre-committed 6pp bar for calling an effect real (p=0.029 despite that). Swapping what's indexed (RD-02, zero retraining) bought +12.9–15.7pp instead. Retraining is not the proven lever in this codebase; indexing is.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Don't start before RD-02 is decided.</b> RD-02 is the cheaper, already-measured, much larger win. Let it land and get a real production readout before spending weeks competing with it for the same "improve search" goal.</li>
+      <li>Source additional training pairs. Two directions, not mutually exclusive:
+        <ul>
+          <li><i>More sense-level (gloss, lemma) triplets</i> — the existing corpus already has 181,149 of these and only bought +4.5pp, so more of the same shape has a weak prior for moving the needle further.</li>
+          <li><i>Natural-language query-style pairs</i> — a target word paired with several ways a person might actually describe it, closer to how the app is really used than WordNet's terse gloss text. No real user query text has ever been logged (the shadow log stores a hash + top-1 only, by design — see <code>lib/shadowLookup.ts</code>), so these pairs have to be synthesized or authored, not mined from production.</li>
+        </ul>
+      </li>
+      <li>Hold out a genuine evaluation split this time. The original run used <code>eval_on_start: False</code> and <code>prediction_loss_only: True</code> — no held-out split at all, which is exactly why its own training-time recall figure (10.9%) is unusable and must not be cited. A second attempt that repeats this mistake will produce another number nobody can trust.</li>
+      <li>Keep any new eval data strictly disjoint from <code>eval/sets/v1.jsonl</code> and its authoring process. <code>v1</code>'s entire value rests on being blind to every gloss and never regenerated in place — if training data or a held-out split leaks into it, every downstream recall number in this project stops meaning what it currently means.</li>
+      <li>Evaluate the retrained model through the existing harness, not a one-off script — run it against <i>both</i> index shapes (lemma and gloss), the way Phase E's 2×2 design already separates representation from indexing. Assuming a new fine-tune's gain stacks on top of RD-02's gloss-index gain is an assumption, not a result, until measured.</li>
+      <li>Compare against <code>cell_gloss_ft_synset</code> (25.8% lenient R@1, the current best cell) using the harness's paired McNemar comparison, same as every other result in this project. An isolated new recall number is not evidence on its own — see CLAUDE.md's own repeated caveat about n≈300 comparisons.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <ul>
+      <li><b>The fine-tune has already been shown to be the weaker lever, not the stronger one.</b> CLAUDE.md §"Headline results": <code>lemma_base → lemma_ft</code> is +4.5pp (null, below threshold) while <code>lemma_ft → gloss_ft</code> is +12.9pp (real, p &lt; 0.0001). Don't let "we should retrain" quietly outrank "we should finish shipping the index swap" — they are not the same size of bet.</li>
+      <li><b>The original training run's number is not a baseline to beat — it's unusable.</b> No held-out split means 10.9% describes memorization, not retrieval. A new run needs its own honestly-measured baseline via the eval harness, not a comparison against that figure.</li>
+      <li><b>There is no corpus of real user queries anywhere in this system, by design.</b> RD-06 removed the last thing that could have logged them, and the shadow log (RD-01/RD-02) deliberately stores only a hash and top-1 word, never query text — a privacy invariant, not an oversight. Any "natural language query" training data has to be authored or synthesized from scratch, the same way <code>eval/sets/v1.jsonl</code> was.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>This ticket is speculative on purpose.</b> It's here because the idea is legitimate and shouldn't be lost, not because the evidence currently in this repo argues for prioritizing it. If a future session picks this up, re-read CLAUDE.md's "Headline results" table first — the numbers may have shifted once RD-02's live decision and soak data are in.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>"Add more training data" and "add a held-out split" are two different fixes, and the second one is free.</b> The original run's biggest methodological gap wasn't data volume, it was having no way to tell if the model generalized at all. Any retrain that skips a held-out split repeats the same mistake regardless of how much new data goes in.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li>RD-02's cutover decision (cut over / hold / iterate) recorded before this ticket starts</li>
+      <li>New training pairs sourced and documented, distinct in kind from the original 181,149 WordNet triplets</li>
+      <li>Training run includes a genuine held-out split (<code>eval_on_start</code> enabled, not <code>prediction_loss_only</code>-only)</li>
+      <li>Held-out/training data verified disjoint from <code>eval/sets/v1.jsonl</code></li>
+      <li>New model evaluated via <code>scripts/eval.ts</code> against both lemma and gloss index cells, paired McNemar vs. <code>cell_gloss_ft_synset</code></li>
+      <li>Decision recorded (adopt / hold) with headline numbers, following CLAUDE.md's "Headline results" convention</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-09 · reverse-dictionary</footer>
+</div>
