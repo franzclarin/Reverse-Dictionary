@@ -1,0 +1,148 @@
+<meta charset="utf-8">
+<title>RD-12 · Cross-encoder reranker over the gloss shortlist</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-12</div>
+
+  <div class="ticket-head">
+    <h1>Rerank the gloss shortlist with a cross-encoder</h1>
+    <span class="badge badge-done">✓ Done</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Search almost finds the right word, then puts it 8th instead of 1st. We tried a second model to fix the order. It made things worse.</p>
+    <p><b>Was —</b> the right answer is somewhere in the top 100 for about <b>3 searches in 4</b> (77.0%), but shown first for only <b>1 in 4</b> (24.0%).</p>
+    <p><b>Did —</b> added a second, slower model that re-reads the best 10–100 candidates and re-sorts them (<a href="glossary.html">reranking</a>), and measured it offline against the frozen test set.</p>
+    <p><b>Result —</b> done 2026-08-28, and <b>negative</b>. Every configuration scored <i>below</i> doing nothing. Nothing shipped; users saw no change. The gap it was aiming at is still there and still unclaimed.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Outcome:</b> null result under the pre-committed rule — <a href="13-rerank-serving-path.html">RD-13</a> stays blocked by its own gate</span>
+    <span><b>Touched:</b> <code>scripts/eval.ts</code>, <code>scripts/lib/reranker.ts</code> (new), <code>scripts/lib/metrics.ts</code>, <code>scripts/probe-rerank-fusion.ts</code> (new), <code>lib/glossSearch.ts</code></span>
+    <span><b>Cost:</b> one day, no production exposure, no data migration</span>
+    <span><b>Write-up:</b> <code>eval/METHODS.md</code> §13</span>
+  </div>
+
+  <p class="lede">Retrieval finds the right answer far more often than it ranks it first. On the live gloss index the target is somewhere in the top 100 for <b>77.0%</b> of queries but sits at rank 1 for only <b>24.0%</b>. That gap — <b>53 points</b> — is the largest block of addressable headroom this project has measured. This ticket tested whether an off-the-shelf cross-encoder could claim any of it. It cannot.</p>
+
+  <div class="callout">
+    <span class="callout-label">Result — done 2026-08-28</span>
+    <p>Three arms of <code>ms-marco-MiniLM</code> cross-encoders, shortlist depth swept 10/25/50/100, scored against the frozen set through the real retrieval path. <b>Every arm at every depth scored below plain retrieval</b> — best 24.4% against the baseline's 24.0%, with paired deltas of <b>−3.8</b>, <b>−2.4</b> and <b>−2.1</b> points of lenient Recall@1. Recall <i>fell</i> as the shortlist got deeper. The <code>"&lt;lemma&gt;: &lt;definition&gt;"</code> variant clawed back some ground only by driving <a href="glossary.html">echo</a> from <b>14.5% to 21.4%</b> — reintroducing the exact defect <a href="02-embedding-cutover.html">RD-02</a> removed.</p>
+    <p>The two halves of the ticket resolved opposite ways, and are recorded apart: <b>the ceiling is confirmed and real</b>, <b>the available tool does not reach it</b>. Nothing was served; <code>/api/lookup</code> was never touched.</p>
+  </div>
+
+  <section>
+    <h2>What was measured</h2>
+    <p>Lenient Recall@1, authored reachable slice (n=287), gloss index at <code>probes=40</code>. <b>Retrieval alone scores 24.0%</b> — the number to beat.</p>
+
+    <table>
+      <tr><th>arm</th><th class="num">depth 10</th><th class="num">25</th><th class="num">50</th><th class="num">100</th><th class="num">echo</th></tr>
+      <tr class="highlight"><td>no rerank — what ships</td><td class="num">24.0</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">14.5%</td></tr>
+      <tr><td><code>MiniLM-L-6</code>, gloss</td><td class="num">21.6</td><td class="num">19.9</td><td class="num">20.6</td><td class="num">20.2</td><td class="num">15.2%</td></tr>
+      <tr><td><code>MiniLM-L-6</code>, lemma + gloss</td><td class="num">23.3</td><td class="num">22.6</td><td class="num">22.3</td><td class="num">21.6</td><td class="num">21.4%</td></tr>
+      <tr><td><code>MiniLM-L-12</code>, gloss</td><td class="num">24.4</td><td class="num">22.6</td><td class="num">23.0</td><td class="num">22.0</td><td class="num">15.0%</td></tr>
+    </table>
+
+    <p>The depth sweep was free: a depth-D re-sort is a prefix of the depth-100 scores, so every column above comes out of one run's forward passes rather than four runs.</p>
+
+    <div class="stat-row cols-2">
+      <div class="stat">
+        <div class="stat-label">The ceiling — confirmed</div>
+        <div class="stat-value">77.0% reachable, 23.0% not</div>
+        <div class="stat-note">Lenient recall by depth: 24.0 → 51.9 → 72.5 → 77.0% at ranks 1/10/50/100. A perfect reranker over 50 candidates would reach 72.5%. The other 23.0% is never retrieved at any depth and no reranker of any size touches it — that slice belongs to RD-09/RD-14/RD-15.</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">The reranker — rejected</div>
+        <div class="stat-value">every arm negative</div>
+        <div class="stat-note">22 wins / 33 regressions, 23/30, 21/27. It is not inert — it moves ~50 of 287 queries per run and some wins are large and correct. It simply loses more than it gains, which is worse news than indifference: it has learned a real preference and the preference is wrong here.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why it failed</h2>
+    <p>The failure is legible in the scores, not just the aggregate. For the query <i>"something you did wrong without ever meaning to do it"</i> — target <code>mistake</code>, which retrieval already ranked <b>first</b> — the cross-encoder re-sorted it to <b>6th</b>, promoting:</p>
+
+    <table>
+      <tr><th class="num">rank</th><th>gloss it preferred</th><th>word</th></tr>
+      <tr><td class="num">1</td><td><i>something done or paid in expiation of a wrong</i></td><td><code>reparation</code></td></tr>
+      <tr><td class="num">2</td><td><i>a wrongful act that the actor had no right to do</i></td><td><code>malpractice</code></td></tr>
+      <tr class="highlight"><td class="num">6</td><td><i>a wrong action attributable to bad judgment or ignorance</i></td><td><code>mistake</code></td></tr>
+    </table>
+
+    <p>It is scoring <b>lexical relevance</b>, and it is good at it — the gloss it promoted shares <i>something</i>, <i>done</i> and <i>wrong</i> with the query. These models are trained on <a href="glossary.html">MS MARCO</a>, which pairs real search queries with web passages, so passage relevance is what transferred.</p>
+
+    <p><b>That is the wrong relation.</b> A reverse-dictionary query is a <i>description</i> and a gloss is a <i>definition</i>; the two are related by paraphrase, not by shared terms. This is <a href="glossary.html">echo</a> again — the same failure <a href="02-embedding-cutover.html">RD-02</a> removed from the index, relocated one stage later into the reranker. <b>"More accurate" turns out to be a property of the data a model was trained on, not of the architecture</b>, which is the assumption this ticket existed to test.</p>
+  </section>
+
+  <section>
+    <h2>The fusion control — and why it is not a rescue</h2>
+    <p>The obvious objection is that reranking <i>replaced</i> a good signal instead of adding to it. Tested with Reciprocal Rank Fusion, chosen because it has <b>no free parameter to fit</b> and consumes only ranks, so it cannot be flattered by two scores on different scales.</p>
+
+    <table>
+      <tr><th>fused arm</th><th class="num">depth 10</th><th class="num">25</th><th class="num">50</th><th class="num">100</th></tr>
+      <tr><td><code>L-6</code>, gloss</td><td class="num">23.0</td><td class="num">23.3</td><td class="num">22.6</td><td class="num">22.6</td></tr>
+      <tr><td><code>L-6</code>, lemma + gloss</td><td class="num">24.7</td><td class="num">25.4</td><td class="num">25.1</td><td class="num">25.1</td></tr>
+      <tr><td><code>L-12</code>, gloss</td><td class="num">25.8</td><td class="num">25.1</td><td class="num">24.4</td><td class="num">24.7</td></tr>
+    </table>
+
+    <p>Fusion recovers the loss and edges past baseline — best cell <b>25.8%</b>, <b>+1.8 points</b>. The project's <a href="glossary.html">pre-committed rule</a> says a gain under ~6 points is a null result and is not to be acted on, and here that rule is doing real work: 25.8% is the <b>maximum of 24 cells</b> (3 arms × 2 orderings × 4 depths), picked <i>after</i> seeing them, on a 287-query single-register set. The bar exists so a post-hoc maximum cannot be written up as a win.</p>
+
+    <p><b>Recorded, not pursued.</b> If a fine-tuned reranker is ever scoped, fusion is the combination rule to start from — and this table is its prior, not its result.</p>
+  </section>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><s>Score the gloss, not the word.</s> Done — the primary arm scores <code>(query, gloss)</code>. The <code>"&lt;lemma&gt;: &lt;definition&gt;"</code> variant was <i>measured</i> rather than assumed, and it behaved exactly as Phase E predicted: better recall, bought with echo.</li>
+      <li><s>Sweep the shortlist depth and record it in code.</s> Done — 10/25/50/100, recorded in <code>scripts/lib/reranker.ts</code> in the shape <code>GLOSS_PROBES</code> uses. <b>No depth constant was defined</b>, deliberately: a named production depth would imply a shipped stage.</li>
+      <li><s>Raise <code>probes</code> alongside the depth.</s> Not needed, and the reason is the finding itself. Deeper shortlists made results <i>worse</i>, so widening the scan to feed a deeper one had nothing to buy. The k=10 decision was never inherited — it was made irrelevant.</li>
+      <li><s>Extend the harness; do not write a one-off scorer.</s> Done — a stage over the existing <code>ranked</code> array. <code>lib/glossSearch.ts</code> gained <code>searchGlossSynsets()</code> so synsets survive to the harness, and <code>searchGloss()</code> composes over it with byte-identical SQL.</li>
+      <li><s>Persist the shortlist.</s> Done, and it paid for itself within the hour: the fusion control was answered from a file read instead of another 40,500 forward passes.</li>
+      <li><s>Start off-the-shelf.</s> Done — two models, no fine-tuning. Cost a day to find out, exactly as scoped.</li>
+      <li><s>Gate on paired McNemar against <code>prod_gloss_shipped</code>.</s> Done — and a gap was found: <code>--compare</code> only ever tested <i>strict</i> rank-1, while the decision rule resolves on <i>lenient</i>. Fixed; both are now reported.</li>
+      <li><s>Report strict and lenient separately, and echo alongside both.</s> Done — and echo is what caught the lemma-gloss variant.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A diagnostic does not survive the change it motivated.</b> "A reranker has nothing to reorder" was correctly measured, correctly reasoned, and quietly became false the moment RD-02 shipped — because it was a fact about the lemma index wearing the costume of a fact about reranking. It then sat in CLAUDE.md as an argument against the highest-headroom item in the backlog. When a fix lands, re-check the findings that were true <i>because</i> of the thing you fixed.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The number that justifies this ticket was already in the repo, uncomputed.</b> <code>--rank-depth</code> defaults to 100 and deep mode is on by default, so every committed run since the cutover carried its own reranker ceiling in its per-query <code>rank</code> field. No new experiment was needed — only reading the artifact at a depth nobody had asked it about.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>"More accurate model" is a claim about training data, not architecture.</b> A cross-encoder genuinely does read the pair together, and that genuinely is more expressive. It bought nothing here, because MS MARCO taught it <i>web-passage relevance</i> and this task needs <i>description-to-definition paraphrase</i>. The architecture was never the missing piece. Reading the model's actual ranked output on one query explained the whole aggregate — and cost a minute.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>A big measured ceiling is not a plan.</b> 53 points of headroom made this a P0, and the headroom is real — but headroom says what is <i>possible</i>, never what is <i>available</i>. The two got recorded separately here precisely so the next person does not read "rejected" as "the opportunity is gone", or the 77.0% as a promise.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The decision rule earned its keep on a result it was not written for.</b> Rank fusion hit +1.8 points and it was tempting. It was also the maximum of 24 cells chosen after seeing all 24, on 287 queries. The ~6-point bar was pre-committed in 2026-08-19 against a <i>representation</i> change and it disposed of this cleanly a year of context later — which is the entire argument for pre-committing thresholds rather than judging deltas as they arrive.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Splitting build from cut-over is what made a negative result cheap.</b> RD-12 measured, RD-13 would have served, and RD-13 was gated on this number existing. The gate held: a day spent, nothing deployed, no rollback needed, no user affected. Same shape as RD-01/RD-02, and it is worth just as much when the answer is no.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The tooling could not compute the number the decision rule resolves on.</b> METHODS §9a was amended to lenient Recall@1 in August; <code>--compare</code> ran its paired test on <i>strict</i> rank-1 the whole time, and over all 405 rows rather than the 287-row headline slice. Every paired verdict since had been read off the wrong metric on the wrong denominator. Found only because this ticket's acceptance criteria named both explicitly. <b>A pre-registered metric needs a test that it is actually the one being computed.</b></p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Two implementations only protect you if something compares them.</b> <code>scripts/report.ts</code> had computed the paired test correctly all along; <code>eval.ts --compare</code> had not. They disagreed for months. The wrong one is the one a person runs at a terminal and pastes into a commit message — so <b>its</b> numbers reached CLAUDE.md, README, ARCHITECTURE and RD-02's own ticket ("64 wins / 17 regressions"; the truth is 55 / 15) while the generated report sat beside them saying otherwise. The redundancy was real and bought nothing until someone asked why a delta disagreed with a figure already written down.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Persisting the shortlist turned a follow-up question into a file read.</b> "Does fusing the two orders help?" arrived after the runs finished. Because the candidates and their scores were on disk, it cost one script and no GPU — instead of re-running 405 embeddings and 40,500 forward passes. The cheapest time to store an intermediate is while you already have it.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Neon auto-suspends, and the harness had no defence.</b> The first query of a run pays several seconds of compute wake-up: it wrecks the latency p50 exactly as an ONNX cold start would, and it can exceed Prisma's 2-second transaction <code>maxWait</code> and abort a 405-query run before a single row is scored. The embedder had been warmed before timing since the harness was built; the database had not. It is now.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li class="done">Reranker implemented as a stage over the existing harness retrieval path, not a second retrieval implementation — <code>searchGlossSynsets()</code> was extracted from <code>searchGloss()</code>, which now composes over it.</li>
+      <li class="done">Verified behaviour-preserving: a depth-1 rerank (<code>rerank_null</code>) reproduces <code>prod_gloss_shipped</code> with <b>0 discordant pairs</b> and every headline digit identical.</li>
+      <li class="done">Cross-encoder scores <code>(query, gloss)</code>; the lemma-bearing variant measured, not assumed — and it cost <b>+6.9 points of echo</b>.</li>
+      <li class="done">Shortlist depth swept (10/25/50/100) and recorded in code with its measurements, following <code>GLOSS_PROBES</code>.</li>
+      <li class="done"><code>probes</code> re-tuning made moot rather than inherited: deeper shortlists scored <i>worse</i>, so there was no deeper scan worth feeding.</li>
+      <li class="done">Run artifacts persist the full shortlist — compact form in the run JSON, gloss text in a <code>.shortlist.jsonl</code> sidecar.</li>
+      <li class="done">Off-the-shelf cross-encoders measured before any fine-tuning was scoped — two of them, and fine-tuning is now a decision to make against these numbers.</li>
+      <li class="done">Paired McNemar vs. <code>prod_gloss_shipped</code> reporting strict R@1, lenient R@1, R@10, MRR@10 and echo — and <code>--compare</code> gained the lenient test it had been missing, on the headline slice it should always have used.</li>
+      <li class="done">Result recorded following CLAUDE.md's "Headline results" convention, stating the <b>77.0%</b> ceiling and the <b>23.0%</b> it cannot reach. Full write-up in <code>eval/METHODS.md</code> §13.</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-12 · reverse-dictionary · done 2026-08-28 · null result</footer>
+</div>

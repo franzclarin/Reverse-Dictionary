@@ -8,8 +8,8 @@ datasource db {
 }
 
 model Word {
-  id             String      @id @default(cuid())
-  word           String      @unique
+  id             String   @id @default(cuid())
+  word           String   @unique
   partOfSpeech   String
   definition     String
   pronunciation  String
@@ -17,8 +17,8 @@ model Word {
   examples       String[]
   synonyms       String[]
   domain         String
-  obscurityScore Int         @default(50)
-  createdAt      DateTime    @default(now())
+  obscurityScore Int      @default(50)
+  createdAt      DateTime @default(now())
 }
 
 model VocabEmbedding {
@@ -27,17 +27,20 @@ model VocabEmbedding {
   embedding Unsupported("vector(384)")
 }
 
-/// Production synset-keyed gloss index (CLAUDE.md "Next steps"), staged but
-/// NOT YET POPULATED and NOT YET QUERIED by /api/lookup. Building it requires
-/// dropping VocabEmbedding's IVFFlat index to fit Neon's 512MB ceiling — see
-/// the commented-out DROP INDEX in this table's migration file. That step,
-/// and running scripts/build-gloss-index.ts's insert phase against
-/// production, are both deliberately left for explicit user confirmation
-/// rather than run by this migration audit. See MIGRATION_AUDIT.md.
+/// The production search index since the RD-02 cutover (2026-08-27): one row
+/// per WordNet synset, keyed by synset rather than by word, holding the sense's
+/// gloss text rather than its bare lemma. 117,791 rows, populated and queried
+/// by /api/lookup via lib/glossSearch.ts. Indexing definitions instead of words
+/// is what cut lexical echo from ~41% to 14.5% and lifted lenient Recall@1 from
+/// 10.1% to 24.0%; VocabEmbedding stays populated as the rollback path.
+///
+/// halfvec, not vector: at fp32 this index would not fit alongside
+/// VocabEmbedding under Neon's 512MB project ceiling. Measured as free —
+/// 0 discordant pairs against the fp32 cell.
 model GlossEmbedding {
-  id        Int                          @id @default(autoincrement())
+  id        Int                         @id @default(autoincrement())
   /// "<pos>:<wordnet offset>", e.g. "noun:00123456".
-  synsetKey String                       @unique
+  synsetKey String                      @unique
   pos       String
   /// WordNet definition text only (no examples) — the exact string embedded.
   gloss     String
@@ -49,16 +52,23 @@ model GlossEmbedding {
   embedding Unsupported("halfvec(384)")
 }
 
-/// Shadow-log for the gloss-index cutover decision (CLAUDE.md "Next steps":
-/// gated on shadow-log agreement over real production traffic, not the
-/// 287-query hand-authored eval set alone). Staged but NOT YET APPLIED to
-/// production and NOT YET WRITTEN TO by /api/lookup — see
-/// lib/shadowLookup.ts and MIGRATION_AUDIT.md. Logs a query hash, not query
-/// text, preserving the existing "no query text has ever been logged"
-/// property. Logs only each system's top-1 answer — enough to measure
-/// agreement rate between VocabEmbedding and GlossEmbedding, not enough to
-/// reconstruct query text or a full paired accuracy comparison (production
-/// traffic has no labelled target either way).
+/// Sampled agreement log between the two indexes, written by /api/lookup.
+///
+/// Built to gate the RD-02 cutover on real traffic; that gate was RETIRED
+/// unreachable at n=2 rather than satisfied — this app has no traffic — and the
+/// cutover was decided on the offline eval set instead. Kept on because the
+/// question was never answered: if traffic ever arrives, the comparison becomes
+/// worth running retroactively.
+///
+/// Roles inverted at the cutover: the gloss index is primary now, so the shadow
+/// query runs against the old lemma index. The columns keep their original
+/// meaning — old* is ALWAYS the lemma index, new* ALWAYS the gloss index — so
+/// rows from before and after the cutover stay comparable.
+///
+/// Logs a query hash, never query text, preserving the "no query text has ever
+/// been logged" property. Top-1 only: enough for an agreement rate, not enough
+/// to reconstruct a query or a paired accuracy comparison (production traffic
+/// carries no labelled target either way).
 model ShadowLookup {
   id            String   @id @default(cuid())
   queryHash     String

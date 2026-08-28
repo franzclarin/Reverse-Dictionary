@@ -39,6 +39,10 @@ next-env.d.ts
 # Model artifacts (large files, generated)
 _model_tmp/
 reverse_dict_model.zip
+# RD-11: the ONNX model fetched at build time by scripts/fetch-model.mjs and
+# traced into the function bundle. 86MB of regenerable artifact — never committed.
+# Run `npm run fetch-model` once locally; the eval scripts need it too.
+/models/
 .env*
 
 # Agent skill docs auto-installed by `vercel integration add` — regenerable
@@ -57,6 +61,11 @@ eval/runs/*
 # describes the ROLLBACK path, so without this there is no committed reference
 # for what search actually does today.
 !eval/runs/prod_gloss_shipped.json
+# RD-12: full candidate shortlists with gloss text, written beside each rerank
+# run. Reproducibility detail only an audit or a re-scoring reads, and large —
+# the compact form (synsetKey + cosine + cross-encoder score) is inside the run
+# JSON itself, which is what stays committed.
+eval/runs/*.shortlist.jsonl
 # Working artifacts, not results
 eval/data/pool-manifest.json
 eval/audit/

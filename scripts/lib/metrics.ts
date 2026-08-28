@@ -5,6 +5,27 @@
  * touching the database or the model.
  */
 
+/**
+ * One candidate the cross-encoder saw, in RETRIEVAL order (RD-12).
+ *
+ * `sim` is the bi-encoder cosine that put it in the shortlist; `ce` is the
+ * cross-encoder's raw logit for the pair. Persisted because a run whose
+ * shortlist is gone cannot be re-scored at a different depth, or audited at
+ * all — before RD-12 every run stored only its top 10 while computing ranks to
+ * depth 100, so the shortlist the whole ticket is about was thrown away.
+ *
+ * Gloss text is deliberately NOT stored here: it is recoverable from
+ * `synsetKey`, and inlining it would quadruple the size of a committed
+ * reference run. The full detail, gloss included, goes to the sidecar
+ * `eval/runs/<tag>.shortlist.jsonl`.
+ */
+export type ShortlistEntry = {
+  synsetKey: string;
+  sim: number;
+  /** Absent when the entry sat beyond the rerank depth and was never scored. */
+  ce?: number;
+};
+
 export type QueryResult = {
   id: string;
   query: string;
@@ -22,6 +43,13 @@ export type QueryResult = {
   meta: Record<string, unknown>;
   embedMs: number;
   dbMs: number;
+  /** RD-12, rerank runs only: cross-encoder wall time for this query. */
+  rerankMs?: number;
+  /**
+   * RD-12, rerank runs only: the candidates the cross-encoder re-sorted, in
+   * retrieval order. Optional so every run committed before RD-12 still loads.
+   */
+  shortlist?: ShortlistEntry[];
 };
 
 export type Metrics = {

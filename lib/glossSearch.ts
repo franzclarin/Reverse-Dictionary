@@ -26,7 +26,17 @@ import type { PrismaClient } from "@prisma/client";
 
 export type ResultRow = { word: string; similarity: number };
 
-type SynsetHit = { synsetKey: string; lemmas: string[]; similarity: number };
+/**
+ * One retrieved synset, before `expandSynsets()` collapses it into words.
+ *
+ * Exported since RD-12: a cross-encoder scores `(query, gloss)`, so the rerank
+ * stage has to see the synset — its gloss text and its stored `lemmas` order —
+ * before anything truncates the list to k words.
+ */
+export type SynsetHit = { synsetKey: string; lemmas: string[]; similarity: number };
+
+/** A `SynsetHit` fetched with `{ withGloss: true }`. */
+export type GlossSynsetHit = SynsetHit & { gloss: string };
 
 /**
  * IVFFlat probes for the gloss index. **Not 10** — the lemma index's value does
@@ -83,11 +93,55 @@ export function expandSynsets(hits: SynsetHit[], k: number): ResultRow[] {
 }
 
 /**
- * Run the gloss-index search exactly as the eval cell did.
+ * Fetch the top-k *synsets* for a query vector — the raw retrieval result,
+ * before expansion into words.
  *
- * `embedding` must already be the 384-dim L2-normalised vector from `embed()`.
- * This function never embeds — a second encoder would put query vectors in a
- * different space than the stored ones.
+ * `vectorLiteral` must already be the 384-dim L2-normalised vector from
+ * `embed()`, formatted as a `[..]` literal. This function never embeds — a
+ * second encoder would put query vectors in a different space than the stored
+ * ones.
+ *
+ * Split out of `searchGloss()` for RD-12 so the eval harness's rerank stage can
+ * see synsets before they are collapsed, rather than reimplementing this query
+ * under `scripts/`. There is one gloss retrieval path, not two that resemble
+ * each other; `searchGloss()` below is now a thin composition over this.
+ */
+export async function searchGlossSynsets(
+  prisma: PrismaClient,
+  vectorLiteral: string,
+  k: number,
+  /**
+   * Defaults to GLOSS_PROBES. Exposed only so the eval harness can sweep it —
+   * the route must never pass a value here, or the thing being measured stops
+   * being the thing being served.
+   */
+  probes: number = GLOSS_PROBES,
+  /**
+   * Also select the `gloss` column. **Off by default on purpose**: with it off
+   * this emits byte-identical SQL to the pre-RD-12 query, so the serving path
+   * pulls not one extra byte over the wire. Only a caller that actually reads
+   * gloss text — the cross-encoder — should turn it on.
+   */
+  { withGloss = false }: { withGloss?: boolean } = {}
+): Promise<SynsetHit[]> {
+  const glossColumn = withGloss ? `"gloss", ` : "";
+
+  return prisma.$transaction(async (tx) => {
+    // SET LOCAL inside a transaction so it applies only to this query.
+    await tx.$executeRawUnsafe(`SET LOCAL ivfflat.probes = ${Number(probes)}`);
+    return tx.$queryRawUnsafe<SynsetHit[]>(
+      `SELECT "synsetKey", ${glossColumn}"lemmas", 1 - (embedding <=> $1::halfvec) AS similarity
+         FROM "${GLOSS_INDEX}"
+         ORDER BY embedding <=> $1::halfvec
+         LIMIT $2`,
+      vectorLiteral,
+      k
+    );
+  });
+}
+
+/**
+ * Run the gloss-index search exactly as the eval cell did.
  *
  * Fetches k synsets, not k rows: every synset yields at least one word, so k
  * synsets normally yield at least k words. Where several top synsets share
@@ -99,25 +153,7 @@ export async function searchGloss(
   prisma: PrismaClient,
   vectorLiteral: string,
   k: number,
-  /**
-   * Defaults to GLOSS_PROBES. Exposed only so the eval harness can sweep it —
-   * the route must never pass a value here, or the thing being measured stops
-   * being the thing being served.
-   */
   probes: number = GLOSS_PROBES
 ): Promise<ResultRow[]> {
-  const hits = await prisma.$transaction(async (tx) => {
-    // SET LOCAL inside a transaction so it applies only to this query.
-    await tx.$executeRawUnsafe(`SET LOCAL ivfflat.probes = ${Number(probes)}`);
-    return tx.$queryRawUnsafe<SynsetHit[]>(
-      `SELECT "synsetKey", "lemmas", 1 - (embedding <=> $1::halfvec) AS similarity
-         FROM "${GLOSS_INDEX}"
-         ORDER BY embedding <=> $1::halfvec
-         LIMIT $2`,
-      vectorLiteral,
-      k
-    );
-  });
-
-  return expandSynsets(hits, k);
+  return expandSynsets(await searchGlossSynsets(prisma, vectorLiteral, k, probes), k);
 }

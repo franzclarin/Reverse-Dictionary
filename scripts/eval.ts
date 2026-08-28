@@ -31,6 +31,16 @@
  *   --model <id>       embedding model override (for the base-model control)
  *   --rank-depth <n>   how deep to look for the target (default 100)
  *   --no-deep          skip the deep scan (headline metrics only)
+ *   --rerank           RD-12: re-sort the retrieved shortlist with a cross-encoder
+ *                      before scoring. Gloss index only.
+ *   --rerank-depth <n> how many synsets the cross-encoder re-sorts (default 50)
+ *   --rerank-model <id>  cross-encoder to score with
+ *   --rerank-quantized   load the int8 ONNX weights instead of fp32
+ *   --rerank-input <gloss|lemma-gloss>
+ *                      what text the cross-encoder sees per candidate
+ *   --rerank-sweep <a,b,c>
+ *                      also report the metrics at these shallower rerank depths.
+ *                      Free: a depth-D re-sort is a prefix of the depth-100 scores.
  *   --bands <n>        5 = fixed Zipf bands, 3 = data-driven terciles
  *   --freq <file>      Zipf table (default eval/data/zipf-en.tsv)
  *   --limit <n>        only score the first n rows (smoke testing)
@@ -43,7 +53,22 @@ import { embed } from "@/lib/embedder";
 import { embedWith, PRODUCTION_MODEL } from "./lib/embedModel";
 import { loadEnv } from "./lib/env";
 import { search, DEFAULT_INDEX, PRODUCTION_PROBES, type ResultRow } from "./lib/retrieval";
-import { GLOSS_INDEX, GLOSS_PROBES } from "../lib/glossSearch";
+import {
+  GLOSS_INDEX,
+  GLOSS_PROBES,
+  expandSynsets,
+  searchGlossSynsets,
+  type GlossSynsetHit,
+  type SynsetHit,
+} from "../lib/glossSearch";
+import {
+  DEFAULT_RERANK_MODEL,
+  RERANK_FINDING,
+  rerankText,
+  scorePairs,
+  warmReranker,
+  type RerankInput,
+} from "./lib/reranker";
 import {
   loadIndex,
   prepareQuery,
@@ -56,7 +81,14 @@ import {
 import { contentTokens, echoesQuery } from "./lib/probes";
 import { bandOf, loadZipf } from "./lib/freq";
 import { POS_LIST, readSenses } from "./lib/wordnet";
-import { score, percentile, mcnemar, type QueryResult, type Metrics } from "./lib/metrics";
+import {
+  score,
+  percentile,
+  mcnemar,
+  type QueryResult,
+  type Metrics,
+  type ShortlistEntry,
+} from "./lib/metrics";
 import type { EvalRow } from "./build-eval-set";
 
 loadEnv();
@@ -139,6 +171,30 @@ const METRICS_HEADER =
   `  ${"slice".padEnd(22)} ${"n".padStart(4)}  ${"R@1".padStart(6)} ${"R@3".padStart(6)} ${"R@10".padStart(6)}  ` +
   `${"MRR".padStart(5)}  ${"lenR@1".padStart(6)}  ${"echo".padStart(6)}`;
 
+/**
+ * Lenient/strict recall at increasing depth — the reranker budget, stated.
+ *
+ * Read as: recall at depth D is the ceiling for a PERFECT reranker over a
+ * D-deep shortlist, and `1 - R@maxDepth` is the share no reranker of any depth
+ * can reach, because the target was never retrieved. Keeping the two apart is
+ * the point; RD-12's ceiling is 77.0%, not 100%, and citing the wrong one
+ * repeats the mistake of quoting a number measured under conditions that do
+ * not hold.
+ */
+const LADDER_DEPTHS = [1, 3, 10, 50, 100];
+
+function recallLadder(results: QueryResult[], maxDepth: number): string[] {
+  const depths = LADDER_DEPTHS.filter((d) => d <= maxDepth);
+  const at = (pick: (r: QueryResult) => number | null, d: number) =>
+    fmtPct(results.filter((r) => pick(r) !== null && pick(r)! <= d).length / results.length);
+
+  return [
+    `    depth      ${depths.map((d) => String(d).padStart(6)).join(" ")}`,
+    `    lenient R@ ${depths.map((d) => at((r) => r.lenientRank, d).padStart(6)).join(" ")}`,
+    `    strict  R@ ${depths.map((d) => at((r) => r.rank, d).padStart(6)).join(" ")}`,
+  ];
+}
+
 function reportSlices(
   title: string,
   results: QueryResult[],
@@ -218,19 +274,103 @@ function compare(fileA: string, fileB: string): void {
   console.log(metricsLine(a.tag, score(paired.map((p) => p.ra))));
   console.log(metricsLine(b.tag, score(paired.map((p) => p.rb))));
 
-  const top1 = (r: QueryResult) => r.rank === 1;
-  const regressions = paired.filter((p) => top1(p.ra) && !top1(p.rb));
-  const wins = paired.filter((p) => !top1(p.ra) && top1(p.rb));
-  const { p, n } = mcnemar(regressions.length, wins.length);
+  // The reranker budget for each run, side by side: how much of the gap between
+  // R@1 and the deepest column is reordering work, and how much is never
+  // retrieved and so out of a reranker's reach entirely.
+  const depthOf = (r: { config: Record<string, unknown> }) => Number(r.config.rankDepth ?? 10);
+  const ladderDepth = Math.min(depthOf(a), depthOf(b));
+  if (ladderDepth > 10) {
+    const scopeOf = (rows: QueryResult[]) => {
+      const reach = rows.filter((r) => r.meta.reachable !== false);
+      const auth = reach.filter((r) => r.source === "authored");
+      return auth.length ? auth : reach;
+    };
+    console.log(`\n  recall by depth — ${a.tag}`);
+    for (const line of recallLadder(scopeOf(paired.map((q) => q.ra)), ladderDepth)) console.log(line);
+    console.log(`\n  recall by depth — ${b.tag}`);
+    for (const line of recallLadder(scopeOf(paired.map((q) => q.rb)), ladderDepth)) console.log(line);
+  }
 
-  console.log(`\n  McNemar on rank-1 disagreements (exact, two-sided)`);
-  console.log(`    ${a.tag} right / ${b.tag} wrong : ${regressions.length}`);
-  console.log(`    ${a.tag} wrong / ${b.tag} right : ${wins.length}`);
-  console.log(`    discordant pairs n = ${n}   p = ${p.toFixed(5)}`);
-  console.log(
-    `    ${p < 0.05 ? "SIGNIFICANT at 0.05" : "not significant at 0.05"}` +
-      ` — the ${paired.length - n} queries both runs agree on carry no information here.`
+  /**
+   * Both metrics get their own paired test.
+   *
+   * METHODS §9a fixed the decision rule to resolve on LENIENT R@1 — rank 1
+   * against the hand-authored `acceptable[]` list — because strict R@1 is
+   * tie-deflated on a gloss index, where synset mates hold identical vectors.
+   * Until RD-12 this function tested strict rank-1 only, so the one number the
+   * rule actually resolves on was the one number it could not see.
+   *
+   * They are reported side by side, never merged: a reranker that reorders
+   * across synonyms moves strict R@1 without moving lenient R@1 on the 133 rows
+   * that carry `acceptable[]`, and moves both on the other 179 (METHODS §8.6).
+   * One figure alone would misattribute that.
+   */
+  // §9a resolves on the HEADLINE SLICE — authored and reachable — not on every
+  // row in the file. Scoring the paired test over all 405 would dilute it with
+  // the 93 quarantined tripwire rows (leakage=paraphrase, explicitly never a
+  // headline number) and the 25 unreachable coverage rows, and would divide the
+  // delta by the wrong denominator: a 3-point move on 287 queries reads as 2.1
+  // over 405. Every other number this project records is the 287-row slice, and
+  // a verdict line has to be on the same footing as the table beside it.
+  const scoped = paired.filter(
+    (q) => q.ra.source === "authored" && q.ra.meta.reachable !== false
   );
+
+  const testRank1 = (
+    label: string,
+    pick: (r: QueryResult) => number | null,
+    decisive: boolean
+  ) => {
+    const hit = (r: QueryResult) => pick(r) === 1;
+    const regressed = scoped.filter((q) => hit(q.ra) && !hit(q.rb));
+    const won = scoped.filter((q) => !hit(q.ra) && hit(q.rb));
+    const { p, n } = mcnemar(regressed.length, won.length);
+    // Difference of the two runs' recall on this slice — which, for a binary
+    // rank-1 outcome, is exactly (wins - regressions) / n.
+    const delta = (won.length - regressed.length) / (scoped.length || 1);
+
+    console.log(
+      `\n  McNemar on ${label} rank-1 disagreements (exact, two-sided), ` +
+        `authored reachable n=${scoped.length}` +
+        `${decisive ? "   <- the metric METHODS 9a resolves on" : ""}`
+    );
+    console.log(`    ${a.tag} right / ${b.tag} wrong : ${regressed.length}`);
+    console.log(`    ${a.tag} wrong / ${b.tag} right : ${won.length}`);
+    console.log(
+      `    delta = ${(delta * 100 >= 0 ? "+" : "")}${(delta * 100).toFixed(1)} points   ` +
+        `discordant pairs n = ${n}   p = ${p.toFixed(5)}`
+    );
+    console.log(
+      `    ${p < 0.05 ? "SIGNIFICANT at 0.05" : "not significant at 0.05"}` +
+        ` — the ${scoped.length - n} queries both runs agree on carry no information here.`
+    );
+    if (decisive) {
+      // Rendered from the delta rather than left to a reader's optimism: a
+      // positive result below the pre-committed ~6-point bar is a NULL RESULT
+      // and is not to be acted on, significance notwithstanding.
+      const verdict =
+        delta >= 0.06 && p < 0.05
+          ? "WIN under 9a"
+          : delta >= 0.06
+            ? "above the 6-point bar but not significant"
+            : delta > 0
+              ? "NULL RESULT — positive but below the ~6-point bar, not to be acted on"
+              : p < 0.05
+                ? "SIGNIFICANT REGRESSION"
+                : "no difference";
+      console.log(`    METHODS 9a verdict: ${verdict}`);
+    }
+    return { wins: won, regressions: regressed };
+  };
+
+  testRank1("lenient", (r) => r.lenientRank, true);
+  const { wins, regressions } = testRank1("strict", (r) => r.rank, false);
+  if (scoped.length !== paired.length) {
+    console.log(
+      `\n  (the metrics table above is all ${paired.length} paired rows; the tests above are the ` +
+        `${scoped.length}-row\n   authored reachable slice, which is what every headline number here means)`
+    );
+  }
 
   const show = (label: string, rows: { ra: QueryResult; rb: QueryResult }[]) => {
     if (!rows.length) return;
@@ -310,6 +450,91 @@ function expansionOrderFn(kind: ExpansionOrder): ExpandOrder {
         (positions.get(b.toLowerCase()) ?? Number.MAX_SAFE_INTEGER)
     );
   };
+}
+
+// ------------------------------------------------------------ scoring a row
+
+/**
+ * Score one query's result lists into a `QueryResult`.
+ *
+ * Extracted so the rerank depth sweep scores its alternate orderings through
+ * the SAME code as the headline. Two scoring implementations would let a sweep
+ * table disagree with the run it is printed beside for reasons nobody could
+ * find.
+ *
+ * `top` (k results) drives what is reported and the echo rate; `ranked` (the
+ * deep list) drives the target's true rank.
+ */
+function measure(
+  row: EvalRow,
+  top: ResultRow[],
+  ranked: ResultRow[],
+  embedMs: number,
+  dbMs: number
+): QueryResult {
+  const lowered = ranked.map((r) => norm(r.word));
+  const targetIdx = lowered.indexOf(norm(row.target));
+
+  const acceptable = [row.target, ...(row.meta.acceptable ?? [])].map(norm);
+  let lenientIdx = -1;
+  for (let i = 0; i < lowered.length; i++) {
+    if (acceptable.includes(lowered[i])) {
+      lenientIdx = i;
+      break;
+    }
+  }
+
+  const tokens = contentTokens(row.query);
+  const topTen = top.slice(0, 10).map((r) => r.word);
+  const echo = topTen.length
+    ? topTen.filter((w) => echoesQuery(w, tokens)).length / topTen.length
+    : 0;
+
+  return {
+    id: row.id,
+    query: row.query,
+    target: row.target,
+    source: row.source,
+    results: top.map((r) => r.word),
+    similarities: top.map((r) => r.similarity),
+    rank: targetIdx === -1 ? null : targetIdx + 1,
+    lenientRank: lenientIdx === -1 ? null : lenientIdx + 1,
+    echo,
+    meta: row.meta as unknown as Record<string, unknown>,
+    embedMs,
+    dbMs,
+  };
+}
+
+// ------------------------------------------------------------ rerank stage
+
+/**
+ * Re-sort the first `depth` retrieved synsets by cross-encoder score, leaving
+ * the tail exactly as retrieval ordered it.
+ *
+ * The tail matters: `rank` is measured to `--rank-depth` (100), so appending
+ * the un-reordered remainder keeps the deep-rank statistic comparable against
+ * a non-rerank run instead of silently truncating the measurement to the
+ * shortlist. It is also what a serving reranker actually does.
+ *
+ * The tie-break is written out rather than left to sort stability. Equal
+ * cross-encoder scores fall back to retrieval order, which is the only
+ * answer-key-independent order available — METHODS §12 is an entire section
+ * about a tie-break that quietly encoded the answer key, and the lesson there
+ * is that a tie policy has to be a decision on the page, not an emergent
+ * property of whichever sort the runtime happens to use.
+ */
+function rerankOrder(
+  hits: GlossSynsetHit[],
+  scores: number[],
+  depth: number
+): SynsetHit[] {
+  const head = hits
+    .slice(0, depth)
+    .map((hit, at) => ({ hit, score: scores[at], at }))
+    .sort((a, b) => b.score - a.score || a.at - b.at);
+
+  return [...head.map((h) => h.hit), ...hits.slice(depth)];
 }
 
 // ----------------------------------------------------------------- the run
@@ -397,6 +622,61 @@ async function run(): Promise<void> {
   }
   const rankDepth = numArg("--rank-depth", 100);
   const deep = !has("--no-deep") && rankDepth > k;
+
+  // ------------------------------------------------------------- RD-12 rerank
+  const rerank = has("--rerank");
+  const rerankModel = arg("--rerank-model") ?? DEFAULT_RERANK_MODEL;
+  const rerankQuantized = has("--rerank-quantized");
+  const rerankInput = (arg("--rerank-input") ?? "gloss") as RerankInput;
+  const rerankDepth = numArg("--rerank-depth", 50);
+  const rerankSweep = (arg("--rerank-sweep") ?? "")
+    .split(",")
+    .map((d) => Number(d.trim()))
+    .filter((d) => Number.isFinite(d) && d > 0)
+    .sort((a, b) => a - b);
+
+  if (rerank) {
+    // Refuse rather than silently ignore, exactly as the gloss path in
+    // scripts/lib/retrieval.ts refuses --exact/--filter-junk/--per-sense: a run
+    // tagged `--rerank` that quietly reranked nothing would put a false claim
+    // in eval/runs/*.json, and nobody would ever catch it.
+    if (indexFile) {
+      console.error("--rerank cannot apply to a local cell: the cells store vectors, not gloss text.");
+      process.exitCode = 1;
+      return;
+    }
+    if (index !== GLOSS_INDEX) {
+      console.error(
+        `--rerank requires --index ${GLOSS_INDEX}: the cross-encoder scores (query, gloss) pairs, ` +
+          `and the lemma index has no gloss to show it. Scoring (query, bare lemma) would recreate ` +
+          `the representation mismatch RD-02 exists to have fixed.`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (!["gloss", "lemma-gloss"].includes(rerankInput)) {
+      console.error(`--rerank-input must be gloss|lemma-gloss, got "${rerankInput}"`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!deep) {
+      console.error(
+        "--rerank needs the deep scan: the shortlist IS the deep scan, and without it " +
+          "there is nothing to reorder and no rank to measure the reorder against."
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const tooDeep = [rerankDepth, ...rerankSweep].filter((d) => d > rankDepth);
+    if (tooDeep.length) {
+      console.error(
+        `rerank depth ${tooDeep.join(", ")} exceeds --rank-depth ${rankDepth}; ` +
+          `raise --rank-depth so the shortlist actually exists.`
+      );
+      process.exitCode = 1;
+      return;
+    }
+  }
   const bands = numArg("--bands", 5);
   const limit = numArg("--limit", Infinity);
 
@@ -439,6 +719,17 @@ async function run(): Promise<void> {
       : model,
     cellModel: local?.meta.model,
     rankDepth: deep ? rankDepth : k,
+    rerank: rerank || undefined,
+    rerankModel: rerank ? rerankModel : undefined,
+    rerankQuantized: rerank ? rerankQuantized : undefined,
+    rerankInput: rerank ? rerankInput : undefined,
+    rerankDepth: rerank ? rerankDepth : undefined,
+    // `dbMs` means something DIFFERENT in a rerank run and the difference is
+    // recorded rather than left to be discovered. A non-rerank Postgres run
+    // times a `LIMIT k` query and issues the deep scan separately and untimed;
+    // a rerank run issues ONE `LIMIT rankDepth` query and slices it, so its
+    // `dbMs` is the deep query. Latency is not comparable across the two.
+    dbTiming: rerank ? `single LIMIT ${rankDepth} query` : undefined,
     rows: rows.length,
     ranAt: new Date().toISOString(),
   };
@@ -457,9 +748,51 @@ async function run(): Promise<void> {
   const encode = usesProductionEmbedder ? embed : (t: string) => embedWith(model!, t);
   const warmStart = Date.now();
   await encode("warm up the model before any timing starts");
-  console.log(`${Date.now() - warmStart}ms\n`);
+  console.log(`${Date.now() - warmStart}ms`);
+
+  if (rerank) {
+    // Same reason the embedder is warmed: ONNX session init is seconds, and
+    // letting it land on query #1 destroys the latency percentiles.
+    process.stdout.write(
+      `  warming reranker ${rerankModel}${rerankQuantized ? " (int8)" : ""}... `
+    );
+    const rerankWarmStart = Date.now();
+    await warmReranker(rerankModel, rerankQuantized);
+    console.log(`${Date.now() - rerankWarmStart}ms`);
+  }
+
+  if (!local) {
+    // Warm the DATABASE for the same reason, and one more besides. Neon
+    // auto-suspends its compute, so the first query of a run pays several
+    // seconds of wake-up: it lands on query #1 and wrecks the p50 exactly as an
+    // ONNX cold start would (`prod_gloss_shipped.json` records dbMs=6606 on its
+    // first row against a p50 of ~479). Worse, that wake-up can exceed Prisma's
+    // default 2s interactive-transaction `maxWait` and abort the run outright
+    // with "Transaction not found" before a single row is scored.
+    //
+    // Warmed through the SAME `search()` the run uses, not a bespoke `SELECT 1`
+    // — connecting is only half of it; the IVFFlat probe pages want to be in
+    // cache too, and a second retrieval path here would be the very thing this
+    // harness refuses to have.
+    process.stdout.write("  warming database... ");
+    const dbWarmStart = Date.now();
+    const warmVector = await encode("warm up the database before any timing starts");
+    await search(prisma, warmVector, { k, probes, exact, filterJunk, index, perSense });
+    console.log(`${Date.now() - dbWarmStart}ms`);
+  }
+  console.log("");
 
   const results: QueryResult[] = [];
+  // The rerank depth sweep: a depth-D re-sort is a prefix of the depth-100
+  // cross-encoder scores, so every shallower depth is scored from the SAME
+  // forward passes rather than from another run. That is what makes RD-12's
+  // "sweep the shortlist depth the way GLOSS_PROBES was swept" cost one run.
+  const sweepResults = new Map<number, QueryResult[]>(
+    rerankSweep.map((depth) => [depth, [] as QueryResult[]])
+  );
+  // Full shortlists including gloss text, written beside the run. Kept out of
+  // the run JSON itself so a committed reference run stays a reviewable size.
+  const shortlistRows: unknown[] = [];
   let done = 0;
 
   for (const row of rows) {
@@ -483,6 +816,9 @@ async function run(): Promise<void> {
     let top: ResultRow[];
     let ranked: ResultRow[];
     let dbMs: number;
+    let rerankMs: number | undefined;
+    let shortlist: ShortlistEntry[] | undefined;
+    const sweepRanked = new Map<number, ResultRow[]>();
 
     if (local) {
       // ONE exhaustive scan serves both depths. The scan is exact and
@@ -498,6 +834,66 @@ async function run(): Promise<void> {
         : searchLocal(local, vector, { k: depth, perSense });
       dbMs = Date.now() - t1;
       top = ranked.slice(0, k);
+    } else if (rerank) {
+      // ONE deep query, then slice — not the two-query shape below. The
+      // cross-encoder needs the shortlist AND its gloss text, and a separate
+      // shallow query for `top` would rerank a list the deep query had already
+      // ordered differently. Consequence, recorded in the run config: `dbMs`
+      // here is the depth-`rankDepth` query, so it is not comparable to a
+      // non-rerank run's `dbMs`.
+      const t1 = Date.now();
+      const hits = (await searchGlossSynsets(
+        prisma,
+        `[${vector.join(",")}]`,
+        rankDepth,
+        probes,
+        { withGloss: true }
+      )) as GlossSynsetHit[];
+      dbMs = Date.now() - t1;
+
+      const t2 = Date.now();
+      const scores = await scorePairs(
+        rerankModel,
+        row.query,
+        hits.slice(0, rerankDepth).map((hit) => rerankText(rerankInput, hit)),
+        { quantized: rerankQuantized }
+      );
+      rerankMs = Date.now() - t2;
+
+      // Rerank the SYNSETS, then expand. Doing it the other way round would let
+      // expandSynsets() dedupe and truncate first, so the cross-encoder would
+      // reorder a list that had already thrown away its tail.
+      //
+      // NOTE: each word still inherits its synset's COSINE, so the run's
+      // `similarities` are no longer descending — order now carries the
+      // cross-encoder's judgement while the number carries retrieval's. Fine
+      // offline, where only order is scored. It is not fine in the serving
+      // path, which renders that number to users as a percentage; RD-13 has to
+      // decide what the field means before any of this reaches a page.
+      ranked = expandSynsets(rerankOrder(hits, scores, rerankDepth), rankDepth);
+      top = ranked.slice(0, k);
+
+      shortlist = hits.map((hit, i) => ({
+        synsetKey: hit.synsetKey,
+        sim: hit.similarity,
+        ce: i < scores.length ? scores[i] : undefined,
+      }));
+      shortlistRows.push({
+        id: row.id,
+        query: row.query,
+        target: row.target,
+        candidates: hits.map((hit, i) => ({
+          synsetKey: hit.synsetKey,
+          gloss: hit.gloss,
+          lemmas: hit.lemmas,
+          sim: hit.similarity,
+          ce: i < scores.length ? scores[i] : undefined,
+        })),
+      });
+
+      for (const depth of rerankSweep) {
+        sweepRanked.set(depth, expandSynsets(rerankOrder(hits, scores, depth), rankDepth));
+      }
     } else {
       // Against Postgres the two are genuinely different queries (LIMIT k vs
       // LIMIT depth), so the deep scan stays separate and untimed — it must not
@@ -508,39 +904,11 @@ async function run(): Promise<void> {
       ranked = deep ? await runSearch(rankDepth) : top;
     }
 
-    const words = ranked.map((r) => r.word);
-    const lowered = words.map(norm);
-    const targetIdx = lowered.indexOf(norm(row.target));
+    results.push({ ...measure(row, top, ranked, embedMs, dbMs), rerankMs, shortlist });
 
-    const acceptable = [row.target, ...(row.meta.acceptable ?? [])].map(norm);
-    let lenientIdx = -1;
-    for (let i = 0; i < lowered.length; i++) {
-      if (acceptable.includes(lowered[i])) {
-        lenientIdx = i;
-        break;
-      }
+    for (const [depth, alt] of sweepRanked) {
+      sweepResults.get(depth)!.push(measure(row, alt.slice(0, k), alt, embedMs, dbMs));
     }
-
-    const tokens = contentTokens(row.query);
-    const topTen = top.slice(0, 10).map((r) => r.word);
-    const echo = topTen.length
-      ? topTen.filter((w) => echoesQuery(w, tokens)).length / topTen.length
-      : 0;
-
-    results.push({
-      id: row.id,
-      query: row.query,
-      target: row.target,
-      source: row.source,
-      results: top.map((r) => r.word),
-      similarities: top.map((r) => r.similarity),
-      rank: targetIdx === -1 ? null : targetIdx + 1,
-      lenientRank: lenientIdx === -1 ? null : lenientIdx + 1,
-      echo,
-      meta: row.meta as unknown as Record<string, unknown>,
-      embedMs,
-      dbMs,
-    });
 
     if (++done % 25 === 0) process.stdout.write(`\r  scored ${done}/${rows.length}`);
   }
@@ -623,6 +991,43 @@ async function run(): Promise<void> {
     );
   }
 
+  if (deep && head.n > 0) {
+    console.log(`\n  recall by depth (${authored.length ? "authored reachable" : "reachable"}, n=${head.n})`);
+    for (const line of recallLadder(authored.length ? authored : reachable, rankDepth)) {
+      console.log(line);
+    }
+    console.log(
+      `    ^ a perfect reranker over a D-deep shortlist lands lenient R@1 at the depth-D\n` +
+        `      figure. The complement of the deepest column is never retrieved at all and is\n` +
+        `      unreachable by reordering at any depth — that slice needs a better representation.`
+    );
+  }
+
+  // ------------------------------------------------------- rerank depth sweep
+  if (rerank && sweepResults.size > 0) {
+    console.log(`\n  rerank depth sweep (${rerankModel}${rerankQuantized ? ", int8" : ""}, input=${rerankInput})`);
+    console.log(METRICS_HEADER);
+    const scopeOf = (rs: QueryResult[]) => {
+      const reach = rs.filter((r) => r.meta.reachable !== false);
+      const auth = reach.filter((r) => r.source === "authored");
+      return auth.length ? auth : reach;
+    };
+    for (const depth of [...sweepResults.keys()].sort((a, b) => a - b)) {
+      console.log(metricsLine(`depth ${depth}`, score(scopeOf(sweepResults.get(depth)!))));
+    }
+    console.log(metricsLine(`depth ${rerankDepth} (headline)`, head));
+    console.log(
+      `    Every row above is scored from the SAME cross-encoder forward passes — a\n` +
+        `    depth-D re-sort is a prefix of the depth-${rerankDepth} scores, so the sweep is free.`
+    );
+  }
+
+  if (rerank) {
+    // Carried the way PREREGISTERED_NOTE is: attached to the numbers rather
+    // than filed somewhere a future run would have to go looking for.
+    console.log(`\n  ${RERANK_FINDING}`);
+  }
+
   console.log(`\n  ${PREREGISTERED_NOTE}`);
 
   // ----------------------------------------------------------------- save
@@ -630,10 +1035,34 @@ async function run(): Promise<void> {
   const outPath = path.join(RUNS_DIR, `${tag}.json`);
   fs.writeFileSync(
     outPath,
-    JSON.stringify({ tag, config, preregistered: PREREGISTERED_NOTE, results }, null, 2),
+    JSON.stringify(
+      {
+        tag,
+        config,
+        preregistered: PREREGISTERED_NOTE,
+        ...(rerank ? { rerankFinding: RERANK_FINDING } : {}),
+        results,
+      },
+      null,
+      2
+    ),
     "utf8"
   );
-  console.log(`\n  wrote ${path.relative(process.cwd(), outPath)}\n`);
+  console.log(`\n  wrote ${path.relative(process.cwd(), outPath)}`);
+
+  if (shortlistRows.length) {
+    // Sidecar, not inlined: gloss text for 100 candidates x 405 rows would
+    // quadruple a committed reference run for detail only a re-scoring or an
+    // audit ever reads. Gitignored; the run JSON keeps the compact form.
+    const shortlistPath = path.join(RUNS_DIR, `${tag}.shortlist.jsonl`);
+    fs.writeFileSync(
+      shortlistPath,
+      shortlistRows.map((r) => JSON.stringify(r)).join("\n") + "\n",
+      "utf8"
+    );
+    console.log(`  wrote ${path.relative(process.cwd(), shortlistPath)}`);
+  }
+  console.log("");
 }
 
 async function main(): Promise<void> {

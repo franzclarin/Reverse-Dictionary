@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Reverse Dictionary · Tickets</title>
 <link rel="stylesheet" href="style.css">
 <style>
@@ -23,9 +24,51 @@
   .row-tags span { background: var(--mono-bg); padding: 3px 8px; border-radius: 6px; }
 </style>
 <div class="wrap">
-  <div class="crumbs">reverse-dictionary</div>
+  <div class="crumbs">reverse-dictionary · <a href="glossary.html">Glossary</a></div>
   <h1>Tickets</h1>
-  <p class="lede">Ordered by priority — RD-01 and RD-02 are the two halves of the same fix (build the index, then decide to use it) and should be read together even though they're separate tickets. RD-10 is the third piece: RD-02's shadow-log soak gate was retired unreachable for lack of traffic, and RD-10 is the measurement that replaces it.</p>
+  <p class="lede">Fifteen tickets covering everything this app has changed or still needs to. If you are new to it, read <b>Start here</b> below first — and keep the <a href="glossary.html">glossary</a> open, since these tickets use a lot of vocabulary they never stop to define.</p>
+
+
+  <section>
+    <h2>Start here</h2>
+
+    <div class="card">
+      <p><b>What this app is.</b> You type a description — <i>"the smell of rain on dry earth"</i> — and it gives you the word: <i>petrichor</i>. A reverse dictionary. There is no keyword matching anywhere in it; it compares the <i>meaning</i> of your description against the meaning of every word it knows.</p>
+
+      <p><b>The problem it had.</b> It handed your own words back to you. Describing rain returned <code>raininess</code>, <code>rainstorm</code>, <code>raindrop</code> — never <code>petrichor</code>. The tickets call this <a href="glossary.html">echo</a>, and most of this backlog is either a step toward fixing it or a way of checking whether the fix worked.</p>
+
+      <p><b>The fix that worked.</b> Search the <i>definitions</i> rather than the words. Instead of comparing your description to the bare word <code>petrichor</code>, compare it to <i>"the pleasant smell of rain falling on dry ground"</i> — which is a far fairer comparison, since both are sentences. Built in RD-01, switched on in RD-02 on 2026-08-27: the right word came first for about <b>1 search in 4</b>, up from <b>1 in 10</b>.</p>
+
+      <p><b>What was tried next, and did not work.</b> RD-12. Search <i>finds</i> the right answer for about 3 searches in 4 — it just ranks it too low to see, and re-sorting results already found is a much smaller job than finding more of them. So we added a second, slower model to re-sort them. It made results worse, at every setting. The opportunity is still there and still measured; the off-the-shelf tool for it turned out to be trained for a different problem.</p>
+
+      <p><b>What is next.</b> RD-10 — a second, independently written test set. Every number on this page comes from 287 queries written blind by one person in one sitting. That was enough to decide RD-02 and enough to reject RD-12, but the remaining candidates are all expensive retraining bets with weak priors, and betting on them means trusting the ruler more than it has earned.</p>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <p><b>Reading order</b>, if you want the story rather than the list:</p>
+        <ol>
+          <li><a href="02-embedding-cutover.html">RD-02</a> — the central fix, and the clearest statement of what was wrong</li>
+          <li><a href="01-gloss-index-data-migration.html">RD-01</a> — the groundwork RD-02 needed</li>
+          <li><a href="12-cross-encoder-reranker.html">RD-12</a> — the obvious next move, and why it failed</li>
+          <li><a href="13-rerank-serving-path.html">RD-13</a> — how RD-12 would have reached users, and why it never did</li>
+          <li><a href="10-real-phrasing-eval-set.html">RD-10</a> — whether any of these numbers can be trusted</li>
+        </ol>
+        <p>The rest are infrastructure, cleanup and polish, and can be read in any order or not at all.</p>
+      </div>
+
+      <div class="card">
+        <p><b>How to read a ticket.</b> Every one opens with an <i>In plain terms</i> box — that alone tells you what it is for. Below it, the body assumes you know the vocabulary; the <a href="glossary.html">glossary</a> covers all of it.</p>
+        <p><b>The labels:</b></p>
+        <ul>
+          <li><span class="badge badge-p0">P0</span> do this next · <span class="badge badge-p1">P1</span> soon</li>
+          <li><span class="badge badge-p2">P2</span> worth doing · <span class="badge badge-p3">P3</span> someday</li>
+          <li><span class="badge badge-done">✓ Done</span> already shipped — kept for the record of what was tried and measured</li>
+          <li><code>size:</code> XS to L, how much work · <code>impact:</code> what it would buy</li>
+        </ul>
+      </div>
+    </div>
+  </section>
 
   <section>
     <h2>Size vs. impact</h2>
@@ -60,11 +103,15 @@
 
           <!-- measure-first arrow RD-02 -> RD-09 -->
           <path d="M165 55 C 320 120, 480 220, 585 280" stroke="var(--ink-soft)" stroke-width="1.3" fill="none" stroke-dasharray="4,3" marker-end="url(#am)"/>
-          <text x="420" y="185" font-size="10" fill="var(--ink-soft)">measure first</text>
+          <text x="505" y="212" font-size="10" fill="var(--ink-soft)">measure first</text>
 
-          <!-- replaces-the-gate arrow RD-02 -> RD-10 -->
-          <path d="M152 46 C 250 55, 350 75, 436 98" stroke="var(--ink-soft)" stroke-width="1.3" fill="none" stroke-dasharray="4,3" marker-end="url(#am)"/>
-          <text x="262" y="52" font-size="10" fill="var(--ink-soft)">replaces the soak gate</text>
+          <!-- replaces-the-gate arrow RD-02 -> RD-10, arced high to clear RD-12 -->
+          <path d="M155 34 C 250 20, 355 38, 442 92" stroke="var(--ink-soft)" stroke-width="1.3" fill="none" stroke-dasharray="4,3" marker-end="url(#am)"/>
+          <text x="250" y="16" font-size="10" fill="var(--ink-soft)">replaces the soak gate</text>
+
+          <!-- unlock arrow RD-12 -> RD-13 -->
+          <path d="M326 60 C 362 72, 392 108, 408 138" stroke="var(--ink-soft)" stroke-width="1.3" fill="none" stroke-dasharray="4,3" marker-end="url(#am)"/>
+          <text x="330" y="116" font-size="10" fill="var(--ink-soft)">unlocks</text>
 
           <!-- points -->
           <circle cx="140" cy="40" r="9" fill="var(--p0)" opacity="0.55"/>
@@ -87,13 +134,31 @@
           <text x="600" y="310" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p2)">RD-09</text>
           <text x="600" y="324" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(prior attempt at this: +4.5pp, null result)</text>
 
-          <circle cx="450" cy="105" r="9" fill="var(--p1)"/>
+          <circle cx="252" cy="126" r="9" fill="var(--p0)" opacity="0.55"/>
+          <text x="252" y="150" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p0)">RD-11 ✓</text>
+          <text x="252" y="164" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(39s cold start → 64ms)</text>
+
+          <circle cx="450" cy="105" r="10" fill="var(--p1)"/>
           <text x="450" y="85" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-10</text>
           <text x="450" y="127" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(measures, doesn't improve)</text>
+
+          <circle cx="315" cy="62" r="9" fill="var(--p0)" opacity="0.55"/>
+          <text x="315" y="82" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p0)">RD-12 ✓</text>
+          <text x="315" y="95" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(53pp headroom — measured, not reached)</text>
+
+          <circle cx="420" cy="155" r="9" fill="var(--p1)"/>
+          <text x="420" y="175" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-13</text>
+          <text x="420" y="189" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(blocked — RD-12 came back negative)</text>
+
+          <circle cx="640" cy="235" r="9" fill="var(--p2)"/>
+          <text x="640" y="218" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p2)">RD-14</text>
+
+          <circle cx="335" cy="300" r="9" fill="var(--p3)"/>
+          <text x="335" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p3)">RD-15</text>
         </g>
         <defs><marker id="am" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--ink-soft)"/></marker></defs>
       </svg>
-      <div class="viz-caption">RD-02 is the only true "do first" — small and decisively high-impact. RD-01 sits lower only because its impact is entirely borrowed from unlocking RD-02, not direct.</div>
+      <div class="viz-caption">RD-12 was the clearest "do first" and it came back negative: the 53-point headroom is real, but no off-the-shelf reranker reached it, so the plot now records a measured miss rather than a promise. That leaves nothing with a measured payoff — which is precisely what makes <b>RD-10</b> the next move: every remaining candidate (RD-09, RD-14, RD-15) competes for the 23% of queries no reordering can reach, against a +4.5pp prior, and would be judged on a 287-query single-register set. Fix the ruler before betting on the next measurement. RD-01 sits low only because its impact was entirely borrowed from unlocking RD-02, not direct.</div>
     </div>
   </section>
 
@@ -199,8 +264,58 @@
           <div class="row-tags"><span>evaluation</span><span>size: M</span><span>impact: high (measurement)</span></div>
         </a>
       </li>
+      <li>
+        <a class="row" href="11-bundle-embedding-model.html">
+          <div class="row-top">
+            <span class="row-title">RD-11 · Ship the embedding model in the function bundle</span>
+            <span class="badge badge-done">✓ Done</span>
+          </div>
+          <p class="row-sub">Done 2026-08-27 — <code>/api/lookup</code> downloaded the 86MB ONNX model from the HF CDN on every cold start; measured, that wait was <b>99.8% network and 0.2% compute</b>. Now fetched at build time and traced into the function: <b>43,050ms → 64ms</b> to load, query vectors bit-identical. Found en route: tracing pulled in 43.7MB of ONNX binaries for platforms Vercel never runs.</p>
+          <div class="row-tags"><span>infrastructure</span><span>size: S</span><span>impact: high (latency)</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="12-cross-encoder-reranker.html">
+          <div class="row-top">
+            <span class="row-title">RD-12 · Rerank the gloss shortlist with a cross-encoder</span>
+            <span class="badge badge-done">✓ Done</span>
+          </div>
+          <p class="row-sub">Done 2026-08-28 — and <b>negative</b>. The headroom is confirmed real (target inside the top 100 for <b>77.0%</b> of queries, first for only <b>24.0%</b>), but three arms of off-the-shelf <code>ms-marco</code> cross-encoders all scored <i>below</i> plain retrieval: <b>−3.8</b>, <b>−2.4</b>, <b>−2.1</b> points. Nothing shipped, so RD-13 stays blocked by its own gate. Found en route: the models rank by term overlap because MS MARCO taught them web-passage relevance — echo, relocated into the reranker.</p>
+          <div class="row-tags"><span>retrieval</span><span>size: M</span><span>impact: null result (53pp still unclaimed)</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="13-rerank-serving-path.html">
+          <div class="row-top">
+            <span class="row-title">RD-13 · Wire the reranker into <code>/api/lookup</code></span>
+            <span class="badge badge-p3">P3</span>
+          </div>
+          <p class="row-sub"><b>Blocked 2026-08-28</b> — the serving half of RD-12, split out the same way RD-01/RD-02 were so a null result would cost no production exposure. It did exactly that: RD-12 came back negative and this never started. Kept unstruck, because the serving problem it describes — bundling a second model without undoing RD-11, deciding what <code>similarity</code> means post-rerank, a third error tag — is what <i>any</i> future reranker faces.</p>
+          <div class="row-tags"><span>infrastructure</span><span>size: S/M</span><span>impact: blocked on RD-12</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="14-synthetic-query-training-pairs.html">
+          <div class="row-top">
+            <span class="row-title">RD-14 · Generate query-style training pairs from glosses</span>
+            <span class="badge badge-p2">P2</span>
+          </div>
+          <p class="row-sub">The concrete specification of RD-09's step 2, which names this and leaves it undefined. Dev-only generator in <code>scripts/</code> — no runtime generative dependency. Pairs key to <b>synsets, not words</b>: word-keyed pairs would retrain the exact lemma-target defect RD-02 removed.</p>
+          <div class="row-tags"><span>training data</span><span>size: L</span><span>impact: uncertain (23pp addressable)</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="15-hard-negative-mining.html">
+          <div class="row-top">
+            <span class="row-title">RD-15 · Mine hard negatives from observed retrieval failures</span>
+            <span class="badge badge-p3">P3</span>
+          </div>
+          <p class="row-sub">Filed with its usual motivation corrected: "synonym collapse" is worth at most <b>3.4pp</b> here (strict R@1 20.6% vs lenient 24.0%), and this project scores synonyms as <i>acceptable</i> — so separating them optimises against its own decision metric. Mine from measured failures in <code>eval/runs/</code>, not from a synonym list.</p>
+          <div class="row-tags"><span>training data</span><span>size: S</span><span>impact: low (3.4pp, and it cuts both ways)</span></div>
+        </a>
+      </li>
     </ul>
   </section>
 
-  <footer class="done">10 tickets · generated from a live repo audit, 2026-08-26</footer>
+  <footer class="done">15 tickets · generated from a live repo audit, 2026-08-26 · RD-12…RD-15 added 2026-08-27 · RD-12 closed as a null result 2026-08-28</footer>
 </div>

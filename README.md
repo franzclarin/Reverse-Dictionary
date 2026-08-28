@@ -33,7 +33,7 @@ For how the app is put together — system diagram, data flow, project structure
 
 **Search finds the intended word first about a quarter of the time, and somewhere in the top ten about half the time.** Measured on a hand-authored 287-query eval set: lenient Recall@1 **24.0%**, strict 20.6%, Recall@10 **49.8%**. If a query doesn't return the word you expected, that's the current, known state of retrieval quality, not a bug in your setup — and the results page shows the full ranked list precisely because the top pick is often not the right one.
 
-That is a large improvement on where this app started. Until 2026-08-27 search compared queries against the embedding of each *bare word*, which produced a pronounced "lexical echo" effect — a query about rain returned `raininess`, `rainstorm`, `raindrop` ahead of the actual answer, with ~41% of results sharing a stem with the query. Indexing WordNet's *sense definitions* instead cut echo to 14.5%, roughly doubled Recall@10, and lifted lenient Recall@1 from 10.1% to 24.0% (64 wins / 17 regressions, p < 0.00001).
+That is a large improvement on where this app started. Until 2026-08-27 search compared queries against the embedding of each *bare word*, which produced a pronounced "lexical echo" effect — a query about rain returned `raininess`, `rainstorm`, `raindrop` ahead of the actual answer, with ~41% of results sharing a stem with the query. Indexing WordNet's *sense definitions* instead cut echo to 14.5%, roughly doubled Recall@10, and lifted lenient Recall@1 from 10.1% to 24.0% (55 wins / 15 regressions, p < 0.00001).
 
 Two honest caveats. The eval set was written blind by a single author in a single session, so it is single-register and is **not** a sample of real user queries — no query text has ever been logged. And roughly 5% of the vocabulary isn't reachable at all. See CLAUDE.md's "Established facts" and "Headline results" for the full numbers and methodology.
 
@@ -115,7 +115,10 @@ npm run lint             # Run ESLint
 npx tsc --noEmit         # Type-check
 npx prisma studio        # Browse the database
 
-npm run eval              # Offline retrieval eval — see CLAUDE.md "Evaluation"
+npm run eval:prod         # Offline eval of the production path — see CLAUDE.md "Evaluation"
+npm run eval              # Same set against the lemma index (the rollback path)
+npm run eval:rerank       # Cross-encoder rerank stage — measured and rejected, not served
+npm run eval:report       # Regenerate eval/REPORT.md
 ```
 
 ### Customization

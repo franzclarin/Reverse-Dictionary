@@ -103,6 +103,14 @@ type RunConfig = {
   cellDim?: number;
   model: string;
   rankDepth: number;
+  /** RD-12: a cross-encoder re-sorted the shortlist before scoring. */
+  rerank?: boolean;
+  rerankModel?: string;
+  rerankQuantized?: boolean;
+  rerankInput?: string;
+  rerankDepth?: number;
+  /** What `dbMs` measured — a rerank run times one deep query, not a LIMIT k one. */
+  dbTiming?: string;
   rows: number;
   ranAt: string;
 };
@@ -464,33 +472,47 @@ function headroomSection(runs: Run[]): string {
     "The decision this table drives: **reorder what is retrieved, or change what is",
     "indexed.**",
     "",
-    "- `R@10 − R@1` is the ceiling on what a perfect reranker over the top 10 could add.",
-    "- `rank 11..depth` is the additional headroom a *wider* reranker would have. If it is",
-    "  near zero, no reranking depth helps and the representation is the only lever.",
+    "Each depth column is the ceiling for a **perfect** reranker over a shortlist that",
+    "deep. The gap between `R@1` and a deeper column is reordering work — the answer is",
+    "already retrieved and merely mis-ranked. `never retrieved` is what no reranker",
+    "reaches at any depth, and it is the only slice that needs a better representation.",
+    "",
+    "This table is what overturned METHODS §7's *\"the margins make reranking",
+    "impossible\"* — a claim measured on the lemma index, which named this very number",
+    "as the thing that would falsify it (RD-12).",
     ""
   );
+
+  const lenientAt = (scope: QueryResult[], d: number) =>
+    scope.length
+      ? scope.filter((r) => r.lenientRank !== null && r.lenientRank <= d).length / scope.length
+      : NaN;
 
   const rows = runs.map((r) => {
     const scope = sliceScope(r);
     const m = scoreFull(scope);
     const deep = r.config.rankDepth > r.config.k;
+    const depth = r.config.rankDepth;
     return [
       `\`${r.tag}\``,
       authoredOf(r).length ? "authored" : "tripwire",
       String(m.n),
-      pct(m.recall1),
-      pct(m.recall10),
-      pct(m.recall10 - m.recall1),
-      deep ? pct(m.beyond10) : DASH,
-      deep ? String(r.config.rankDepth) : "no deep scan",
+      pct(m.lenientRecall1),
+      pct(lenientAt(scope, 10)),
+      deep && depth >= 50 ? pct(lenientAt(scope, 50)) : DASH,
+      deep && depth >= 100 ? pct(lenientAt(scope, 100)) : DASH,
+      deep ? pct(1 - lenientAt(scope, depth)) : DASH,
+      deep ? String(depth) : "no deep scan",
     ];
   });
 
   out.push(
     table(
-      ["run", "slice", "n", "R@1", "R@10", "R@10 − R@1", "rank 11..depth", "depth"],
+      ["run", "slice", "n", "R@1", "R@10", "R@50", "R@100", "never retrieved", "depth"],
       rows
     ),
+    "",
+    "All figures are **lenient** recall — the metric §9a resolves on.",
     ""
   );
   return out.join("\n");

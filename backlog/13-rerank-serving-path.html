@@ -1,0 +1,89 @@
+<meta charset="utf-8">
+<title>RD-13 · Wire the reranker into the serving path</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-13</div>
+
+  <div class="ticket-head">
+    <h1>Wire the reranker into <code>/api/lookup</code></h1>
+    <span class="badge badge-p3">P3 · infrastructure · blocked</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>RD-12 built the re-sorting model. This was to be what put it in front of users. It did not happen, and that is the system working.</p>
+    <p><b>Today —</b> <b>blocked, and correctly so.</b> RD-12 reported on 2026-08-28: every off-the-shelf reranker it measured made results <i>worse</i>. There is nothing here worth shipping.</p>
+    <p><b>Would do —</b> wire a reranker into the live search: the fast search picks 50 candidates, a slower model re-sorts just those, and the page shows the result.</p>
+    <p><b>Why it matters —</b> this ticket was deliberately kept separate so RD-12 could come back with a disappointing number and cost nothing. It did, and it did. No deploy, no rollback, no user affected — the gate is the whole value here.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Depends on:</b> <a href="12-cross-encoder-reranker.html">RD-12</a> producing a measured win offline — <b>it did not</b> (2026-08-28, null result)</span>
+    <span><b>Touches:</b> <code>app/api/lookup/route.ts</code>, <code>lib/glossSearch.ts</code>, a new <code>lib/reranker.ts</code>, <code>scripts/fetch-model.mjs</code>, <code>next.config.js</code></span>
+    <span><b>Risk:</b> reintroducing the cold-start regression RD-11 just eliminated; per-request latency from 50–100 forward passes</span>
+    <span><b>Est:</b> S–M, gated entirely on RD-12's result</span>
+  </div>
+
+  <p class="lede">The serving half of the reranker, split out deliberately. This is the same build-then-cut-over shape as RD-01/RD-02: measure offline against a frozen set, <i>then</i> take serving risk, so a null result costs no production exposure. Retrieval stays ANN and fast; the cross-encoder only ever sees the shortlist.</p>
+
+  <div class="callout">
+    <span class="callout-label">RD-12 reported — this stays shut</span>
+    <p>The gate written here read: <i>"a cross-encoder recovers some fraction of a ceiling, not the ceiling. If that fraction is small, the right outcome is to ship nothing and pay no latency — which is only knowable offline."</i></p>
+    <p>The fraction was <b>negative</b>. Three arms of <code>ms-marco-MiniLM</code> cross-encoders scored <b>−3.8</b>, <b>−2.4</b> and <b>−2.1</b> points of lenient Recall@1 against plain retrieval; even parameter-free rank fusion reached only <b>+1.8</b>, well under the pre-committed ~6-point bar and itself the maximum of 24 cells picked after the fact. See <a href="12-cross-encoder-reranker.html">RD-12</a> and <code>eval/METHODS.md</code> §13.</p>
+    <p><b>The task list below is preserved as-written, unstruck.</b> None of it was executed. It stays because the serving problem it describes — bundling a second model without undoing RD-11, the <code>similarity</code> contract, the third error tag — is exactly the problem <i>any</i> future reranker faces, including a fine-tuned one. Re-open this only when something has cleared RD-12's bar offline.</p>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Keep the API contract byte-identical.</b> <code>/api/lookup</code> returns <code>{ results: [{ word, similarity }] }</code>, and that shape survived the RD-02 cutover with no frontend change at all. Decide explicitly what <code>similarity</code> means post-rerank — cross-encoder score or retained cosine — and say so in the route. <code>app/page.tsx</code> and the <code>?alternatives=</code> query string both consume this, and a score on a different scale is a silent semantic change, not a breaking one.</li>
+      <li><b>Retrieve deep, return shallow.</b> <code>route.ts:81</code> currently calls <code>searchGloss(prisma, vectorLiteral, k)</code> with the caller's <code>k</code> (default 10). It becomes: retrieve the RD-12 shortlist depth, rerank, truncate to <code>k</code>. Note that <code>expandSynsets()</code> already truncates to <code>k</code> after dedup — the reranker has to run on synsets <i>before</i> that truncation, or it reorders a list that has already thrown away its tail.</li>
+      <li><b>Bundle the cross-encoder the way RD-11 bundled the embedder.</b> Add its files to <code>scripts/fetch-model.mjs</code> and its directory to <code>outputFileTracingIncludes</code> in <code>next.config.js</code>. RD-11 measured this exact path as <b>43,050ms → 64ms</b>, and found the wait was 99.8% network. A second model fetched at request time reintroduces that regression wholesale — and <code>lib/embedder.ts</code> runs with <code>allowRemoteModels = false</code>, so the failure mode is a hard error, not a slow request.</li>
+      <li><b>Re-check the bundle budget.</b> The <code>/api/lookup</code> function traced at 195.3MB before <code>outputFileTracingExcludes</code> dropped 43.7MB of darwin/win32 ONNX binaries, landing at 151.6MB. CLAUDE.md cites a 250MB legacy ceiling; Vercel's Fluid Compute now allows 5GB. <b>Confirm which limit this project is actually deployed under</b> before treating headroom as either blocking or unlimited — a cross-encoder is small next to the 86MB embedder, but the margin under 250MB is not large.</li>
+      <li><b>Measure real latency in <code>iad1</code>, not locally.</b> 50–100 cross-encoder forward passes is real compute against <code>maxDuration = 60</code>. CLAUDE.md is explicit that the harness's <code>db p50 ≈ 466ms</code> is a local-machine-to-Neon round trip and invalid for describing user experience — so the offline numbers from RD-12 say nothing about what this costs a user. Batch the pairs in one forward pass where the runtime allows it.</li>
+      <li><b>Give the reranker its own subsystem tag.</b> The route wraps each outbound dependency and throws <code>SubsystemError(subsystem, …)</code> so the log line names the culprit. Today that is <code>model</code> and <code>database</code>. Without a third tag, a reranker fault reads as an embedder fault and sends the next debugging session to the wrong place — exactly the problem the tagging convention exists to prevent.</li>
+      <li><b>Reuse the singleton discipline.</b> <code>globalThis._embedderPromise</code> memoises the embedder and <b>clears the slot on rejection</b>, because a cached rejected promise fails every later request on the same warm instance forever. The reranker needs the same treatment, not a fresh implementation of it.</li>
+      <li><b>Verify the production path with <code>eval:prod</code> after deploy</b>, the way RD-02 confirmed its offline prediction against the live index. Add the run to <code>eval/runs/</code> as a committed reference if it becomes the production path.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>Rollback is one call, and should stay that way</h3>
+    <p>RD-02's rollback story was "reverting the one <code>searchGloss()</code> call in the route is the entire rollback, no data migration." Preserve that property: the rerank stage should be skippable without touching retrieval, so backing it out is one edit rather than an unwind. The gloss index and <code>GLOSS_PROBES</code> are unaffected either way — this ticket adds a stage, it does not change what is stored.</p>
+
+    <h3>Two models in one function is a new shape for this codebase</h3>
+    <p>Everything CLAUDE.md records about <code>env</code> being a process-wide singleton applies twice over here. <code>env.allowLocalModels</code> / <code>allowRemoteModels</code> / <code>localModelPath</code> must be set <b>immediately before each <code>pipeline()</code> call</b>, never at module scope — two modules setting it at module scope is precisely the bug that broke <code>eval:prod</code> with "both local and remote models are disabled", and adding a third consumer makes that failure more likely, not less.</p>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><a href="11-bundle-embedding-model.html">RD-11</a> — the bundling mechanism this ticket copies, and the measurement that justifies copying it.</li>
+      <li><a href="02-embedding-cutover.html">RD-02</a> — the build-then-cut-over precedent, including how its gate was retired.</li>
+      <li><code>CLAUDE.md</code> §"Conventions &amp; gotchas" — subsystem tagging, the rejected-promise rule, and why <code>fetch failed</code> is never the real error.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Splitting build from cut-over is what let RD-02 be decided on evidence.</b> RD-01 produced the index, RD-02 decided whether to use it, and when RD-02's soak gate turned out to be unreachable the offline numbers were already sitting there to decide on instead. Same structure here: RD-12 can return a null result and cost nothing but its own time.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The cold-start win is fragile and was expensive to find.</b> RD-11 took 43 seconds off the first request, and the diagnosis — 99.8% network, 0.2% compute — is what ruled out both a smaller model and a keep-warm cron. A second model added without the same build-time fetch quietly restores the original problem while looking like a pure feature addition.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li><b>NOT MET — RD-12 recorded a negative result on 2026-08-28.</b> Every criterion below is unevaluated because the work correctly never started.</li>
+      <li><code>{ results: [{ word, similarity }] }</code> unchanged; the meaning of <code>similarity</code> documented in the route</li>
+      <li>Rerank runs on synsets before <code>expandSynsets()</code> truncates to <code>k</code></li>
+      <li>Cross-encoder fetched by <code>scripts/fetch-model.mjs</code> and traced via <code>outputFileTracingIncludes</code>; no request-time download</li>
+      <li>Traced bundle size re-measured and recorded against the limit that actually applies</li>
+      <li>Cold-start and warm p50/p95 measured in <code>iad1</code>, not locally</li>
+      <li>Third <code>SubsystemError</code> tag added and surfaced in the client <code>detail</code></li>
+      <li>Reranker load memoised with the same clear-on-rejection guard as <code>getEmbedder()</code></li>
+      <li>Rollback verified as a single-call revert with no data migration</li>
+      <li><code>npm run eval:prod</code> re-run against the live path post-deploy and compared paired to <code>prod_gloss_shipped</code></li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-13 · reverse-dictionary · blocked 2026-08-28 by RD-12's null result</footer>
+</div>

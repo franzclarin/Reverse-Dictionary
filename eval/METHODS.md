@@ -259,6 +259,28 @@ matching where meaning was wanted.
 
 ### The margins make reranking impossible
 
+> **SUPERSEDED for the gloss index — 2026-08-28, RD-12. Kept, not deleted.**
+>
+> Everything below was measured on the **lemma** index, which the RD-02 cutover
+> demoted to the rollback path. It remains true of that index and false of the one
+> production actually searches: on the live `GlossEmbedding` index the target is
+> inside the top 100 for **77.0%** of authored reachable queries, and inside the
+> top 50 for 72.5%, against 24.0% at rank 1. A reranker over that shortlist has
+> 53 points to reorder, not nothing.
+>
+> The clause is superseded on its own terms. The last paragraph of this section
+> pre-registered the number that would overturn it — *"large headroom means a
+> wider reranker has something to work with"* — and that number came in large.
+> Note what did **not** happen: it was not re-argued, and no new experiment was
+> needed to overturn it. `--rank-depth` has defaulted to 100 since the harness
+> was built, so every run committed since the cutover carried its own refutation
+> in a field nobody had read.
+>
+> Whether an *available* reranker recovers any of those 53 points is a separate
+> question, answered separately and negatively for the off-the-shelf case in §13.
+> This section's error was never about cross-encoders; it was a fact about one
+> index wearing the costume of a fact about reranking.
+
 The decisive measurement. Against the true target's score:
 
 - echo results outscore it by **+0.134** mean cosine
@@ -801,3 +823,179 @@ synsets — so their vectors are bit-identical and rank 1 among them is arbitrar
 At n = 60 probes about 0.65 collisions are expected. The old 60/60 was itself
 partly row-order tie-breaking, the very artifact removed here. **The criterion is
 now 59–60/60 by synset**, and a lemma cell must still be exactly 60/60.
+
+---
+
+## 13. RD-12 — the cross-encoder reranker, measured and rejected (2026-08-28)
+
+Two separate claims are settled here and they point opposite ways. **The headroom
+is real.** **The available tool does not reach it.** Conflating the two would
+either bury a genuine opportunity or licence shipping a regression, so they are
+recorded apart.
+
+### 13a. The ceiling, confirmed
+
+Computed from `eval/runs/prod_gloss_shipped.json` — the live `GlossEmbedding`
+index at `probes=40`, authored reachable slice, n=287. **No new experiment was
+required**: `--rank-depth` has defaulted to 100 since the harness was built, so
+every run committed since the RD-02 cutover already carried this in its per-query
+`rank` field.
+
+| depth | 1 | 3 | 10 | 50 | 100 |
+|---|---|---|---|---|---|
+| lenient R@ | **24.0%** | 37.3% | 51.9% | 72.5% | **77.0%** |
+| strict R@ | 20.6% | 34.5% | 49.8% | 71.1% | 75.6% |
+
+Where the target actually lands: rank 1 for 24.0%, ranks 2–10 for 27.9%, ranks
+11–50 for 20.6%, ranks 51–100 for 4.5%, and **never retrieved for 23.0%**.
+
+Two budgets, and they must not be merged:
+
+- **53 points are a ranking problem** — already retrieved, merely mis-ranked.
+  A perfect reranker over a 50-deep shortlist would land lenient R@1 at 72.5%.
+- **23.0% is a representation problem** — absent at any depth, unreachable by
+  reordering at any shortlist size. That belongs to RD-09/RD-14/RD-15.
+
+This falsifies §7's "the margins make reranking impossible" for the gloss index,
+on the exact terms §7 itself pre-registered. §7 is marked superseded in place,
+not deleted: it remains true of the lemma index, which is now the rollback path.
+
+### 13b. The reranker, rejected
+
+Lenient R@1, same slice, gloss index at `probes=40`. **Retrieval alone scores
+24.0%** — the number to beat. Shortlist depth swept per RD-12's second task item;
+the sweep is free because a depth-D re-sort is a prefix of the depth-100 scores,
+so every row below comes from one run's forward passes.
+
+| arm | d=10 | d=25 | d=50 | d=100 | echo @100 |
+|---|---|---|---|---|---|
+| **no rerank (`prod_gloss_shipped`)** | **24.0** | — | — | — | **14.5%** |
+| `ms-marco-MiniLM-L-6-v2`, gloss | 21.6 | 19.9 | 20.6 | 20.2 | 15.2% |
+| `ms-marco-MiniLM-L-6-v2`, lemma-gloss | 23.3 | 22.6 | 22.3 | 21.6 | 21.4% |
+| `ms-marco-MiniLM-L-12-v2`, gloss | 24.4 | 22.6 | 23.0 | 22.0 | 15.0% |
+
+Paired, against `prod_gloss_shipped`, at the depth each arm was persisted at:
+
+| comparison | lenient delta | discordant | §9a |
+|---|---|---|---|
+| `L-6 gloss` | **−3.8 pts** (22 wins / 33 regressions) | 55, p = 0.177 | **null result** |
+| `L-6 lemma-gloss` | **−2.4 pts** (23 / 30) | 53, p = 0.410 | **null result** |
+| `L-12 gloss` | **−2.1 pts** (21 / 27) | 48, p = 0.471 | **null result** |
+
+**No arm at any depth beats retrieval by the ~6 points §9a requires; every arm
+loses outright.** RD-13 stays blocked, which is what it was gated for.
+
+### 13c. Three findings, not one number
+
+1. **The cross-encoder is not indifferent — it is differently wrong.** It moves
+   ~50 queries of 287 per run, roughly evenly in both directions, and some of its wins
+   are large and correct (`"the passage dug straight through a hill or under a
+   river"` → `tunnel`, rank 15 → 1). It simply loses more than it gains. A
+   scorer this active that nets negative is worse news than an inert one: it has
+   learned a real preference, and the preference is wrong here.
+
+2. **Recall falls as depth rises, monotonically.** Handing it *more* to reorder
+   makes it *worse*. That is the signature of a near-uninformative ranking on
+   this distribution — every additional candidate is another chance to promote
+   something wrong over an answer retrieval had already placed well.
+
+3. **The lemma-gloss variant buys its recovery with echo**, precisely as Phase E
+   predicted and RD-12 required be checked rather than assumed. Echo climbs
+   monotonically with depth — 16.1 / 18.6 / 20.6 / 21.4% — against the gloss
+   variant's flat ~15% and the baseline's 14.5%. Showing the model the answer
+   word lets it match the query's surface again: the exact defect RD-02 removed,
+   reintroduced one stage later. Echo earned its status as a primary metric here.
+
+### 13d. Why it fails, in one example
+
+For `"something you did wrong without ever meaning to do it"` (target `mistake`,
+which retrieval already ranked **1st**), the cross-encoder ranks:
+
+> 1. *"something done or paid in expiation of a wrong"* — `reparation`, `amends`
+> 2. *"a wrongful act that the actor had no right to do"* — `malpractice`
+> ...
+> 6. *"a wrong action attributable to bad judgment or ignorance"* — **`mistake`**
+
+It is scoring **lexical relevance**, and it is good at it: the promoted gloss
+shares *something*, *done*, *wrong* with the query. MS MARCO is a web-passage
+relevance task, and passage relevance is what transferred.
+
+That is the wrong relation. A reverse-dictionary query is a **description** and a
+gloss is a **definition**; they are related by paraphrase, not by term overlap.
+The bi-encoder was fine-tuned on gloss→lemma pairs and has at least seen this
+relation; the cross-encoder has never seen it. **"More accurate" is a property of
+the data a model was trained on, not of the architecture** — which is the
+assumption RD-12 existed to test, and the answer is no.
+
+### 13e. The fusion control, and why it does not rescue this
+
+The obvious objection is that reranking *replaced* a good signal instead of
+adding to it. Tested with Reciprocal Rank Fusion —
+`1/(60+retrievalRank) + 1/(60+crossEncoderRank)` — chosen because it has **no
+free parameter to fit**: 60 is the constant from the original paper, and RRF
+consumes only ranks, so it cannot be flattered by two scores on different scales.
+A weighted cosine/logit blend would need a weight, and fitting a weight on 287
+queries is the benchmark-fitting this project already flags itself for elsewhere.
+
+Reproducible from a persisted shortlist with no model and no database:
+`npx tsx scripts/probe-rerank-fusion.ts eval/runs/<tag>.shortlist.jsonl`.
+
+| fused arm | d=10 | d=25 | d=50 | d=100 |
+|---|---|---|---|---|
+| `L-6 gloss` + RRF | 23.0 | 23.3 | 22.6 | 22.6 |
+| `L-6 lemma-gloss` + RRF | 24.7 | **25.4** | 25.1 | 25.1 |
+| `L-12 gloss` + RRF | **25.8** | 25.1 | 24.4 | 24.7 |
+
+Fusion recovers the loss and edges past baseline: the best cell is **25.8%**,
+**+1.8 points**. Under §9a that is **a null result and is not to be acted on** —
+and here the rule is doing real work, because the temptation is precise and
+nameable. That 25.8% is the **maximum of 24 cells** (3 arms × 2 orderings × 4
+depths) selected *after* seeing them, on a 287-query single-register set whose
+`acceptable[]` is only half filled (§8.6). The pre-committed bar exists so that a
++1.8pp maximum-of-24 cannot be written up as a win, and it should not be.
+
+**Recorded, not pursued.** If a *fine-tuned* reranker is ever scoped (RD-12's own
+"fine-tuning is a second decision, made against this number"), fusion is the
+combination rule to start from, and this table is its prior — not its result.
+
+### 13f. What this cost, and what it bought
+
+One day, no production exposure, no data migration — which is the entire point of
+the RD-01/RD-02 build-then-cut-over shape that RD-12/RD-13 copied. RD-12 could
+come back negative and cost nothing but its own time, and it did.
+
+What the repo keeps regardless of the verdict:
+
+- `searchGlossSynsets()` — synset-level retrieval with optional gloss text,
+  verified behaviour-preserving (`rerank_null` vs `prod_gloss_shipped`:
+  **0 discordant pairs**, every headline digit identical).
+- `--compare` now runs the paired test on **lenient** rank-1, the metric §9a
+  actually resolves on, and on the **287-row authored-reachable slice** rather
+  than all 405 paired rows. Both were wrong before, and in the same direction:
+  the tool tested strict rank-1 — a number §9a stopped resolving on when it was
+  amended — and diluted it with the 93 quarantined tripwire rows and 25
+  unreachable ones, then divided the delta by 405. The proof the fix is right is
+  that the corrected tool now reproduces a number the docs already carried: the
+  RD-02 cutover computes as **+13.9 points**, exactly the recorded headline,
+  where the old scope gave +10.9. No recorded verdict changes — the cutover was a
+  landslide either way — but the *counts* published beside it do: "64 wins / 17
+  regressions" was strict-over-405; lenient on the headline slice is **55 / 15**.
+  §12's Phase E counts come from the old scope and their cells no longer exist to
+  re-derive; treat them as all-rows-strict and re-derive if they ever matter.
+
+  **How it was caught is the point.** `scripts/report.ts` has always computed this
+  correctly — authored-reachable, lenient — and `eval.ts --compare` did not. The
+  repo held two implementations of one measurement that had silently disagreed for
+  months, and the *wrong* one is the one a person runs at a terminal and pastes
+  into a commit message, so its numbers are what reached CLAUDE.md, README.md,
+  ARCHITECTURE.md and RD-02's ticket while the generated report sat beside them
+  saying something else. §11 argues that two implementations of one measurement is
+  what makes the numbers trustworthy. That holds — but only if something actually
+  compares them. Nothing did. The disagreement surfaced from asking why a delta
+  did not match a figure already written down, which is the cheapest audit
+  available and was never once run.
+- Run artifacts persist the shortlist, which is what let 13e be answered from a
+  file read instead of another 40,500 forward passes.
+- A database warm-up before timing, for the same reason the embedder has one:
+  Neon auto-suspends, and the wake-up both wrecked the p50 and could abort a run
+  outright on Prisma's 2s transaction `maxWait`.

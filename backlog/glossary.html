@@ -1,0 +1,414 @@
+<meta charset="utf-8">
+<title>Reverse Dictionary · Glossary</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .terms { margin: 0 0 6px; }
+  .term {
+    display: grid;
+    grid-template-columns: 190px 1fr;
+    gap: 4px 22px;
+    padding: 15px 0;
+    border-top: 1px solid var(--line);
+  }
+  .term:last-child { border-bottom: 1px solid var(--line); }
+  .term-name {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    padding-top: 2px;
+    word-break: break-word;
+  }
+  .term-def { margin: 0; }
+  .term-def p { margin: 0 0 8px; }
+  .term-def p:last-child { margin-bottom: 0; }
+  .eg {
+    display: block;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 6px;
+  }
+  .eg b { color: var(--ink); font-weight: 600; }
+  .sec-intro { color: var(--ink-soft); margin-bottom: 4px; }
+  @media (max-width: 640px) {
+    .term { grid-template-columns: 1fr; gap: 6px; }
+    .term-name { padding-top: 0; }
+  }
+</style>
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> / Glossary</div>
+
+  <h1>Glossary</h1>
+  <p class="lede">Every word the tickets use without stopping to explain it. This is a reference — look things up as you hit them, rather than reading it straight through. Terms are grouped so that related ones explain each other, and most carry a real example from this app.</p>
+
+  <div class="callout">
+    <span class="callout-label">If you read only one entry</span>
+    <p>Read <b>echo</b>, in "How we measure it". The app's central problem was that a search for <i>"the smell of rain on dry earth"</i> returned <code>raininess</code>, <code>rainstorm</code>, <code>raindrop</code> — words that echo your own words back — instead of <code>petrichor</code>. Almost every ticket here is either a step toward fixing that or a way of checking whether it got fixed.</p>
+  </div>
+
+  <section>
+    <h2>1 · The words themselves</h2>
+    <p class="sec-intro">The app's vocabulary comes from WordNet, an academic dictionary with a specific structure. Three of its terms do most of the work in these tickets.</p>
+    <div class="terms">
+
+      <div class="term">
+        <div class="term-name">lemma</div>
+        <div class="term-def">
+          <p>One dictionary word, on its own, with no definition attached.</p>
+          <span class="eg">e.g. <b>petrichor</b> — just the word, nothing else</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">synset</div>
+        <div class="term-def">
+          <p>A group of words that all mean the same thing, sharing one definition. Short for "synonym set". A word with several meanings belongs to several synsets.</p>
+          <span class="eg">e.g. <b>{ car, auto, automobile, motorcar }</b> is one synset — four words, one meaning</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">gloss</div>
+        <div class="term-def">
+          <p>The definition text belonging to a synset. When these tickets say "the gloss index", they mean a search index built from definitions rather than from the words themselves.</p>
+          <span class="eg">e.g. the gloss of that synset is <b>"a motor vehicle with four wheels"</b></span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">WordNet</div>
+        <div class="term-def">
+          <p>The free Princeton lexical database this app's whole vocabulary comes from. It supplies the lemmas, the synsets, and the glosses. Version 3.0 here.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">vocabulary</div>
+        <div class="term-def">
+          <p>The full set of words the app can possibly return — 141,854 of them. If a word is not in the vocabulary, no amount of improvement will make search find it.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">POS</div>
+        <div class="term-def">
+          <p>Part of speech — noun, verb, adjective, adverb. Used to check that a change helps all kinds of word equally rather than only nouns.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>2 · How search actually works</h2>
+    <p class="sec-intro">There is no keyword matching anywhere in this app. Everything is done by turning text into lists of numbers and finding the closest ones.</p>
+    <div class="terms">
+
+      <div class="term">
+        <div class="term-name">embedding<br>(a "vector")</div>
+        <div class="term-def">
+          <p>A list of numbers representing a piece of text's <i>meaning</i>. This app uses 384 numbers per text. Texts that mean similar things get similar lists — which is the whole trick, because it lets a computer compare meaning without understanding language.</p>
+          <span class="eg">"a small dog" and "a tiny hound" land close together; "a small dog" and "tax law" land far apart</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">cosine similarity</div>
+        <div class="term-def">
+          <p>The measure of how close two embeddings are. Runs from 1.0 (identical meaning) down to 0 and below (unrelated). Every "similarity" number in these tickets is this.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">semantic search</div>
+        <div class="term-def">
+          <p>The whole approach: embed the user's description, then find the stored embeddings closest to it. Because it compares meaning rather than spelling, it can match a description to a word that shares none of its letters.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">index</div>
+        <div class="term-def">
+          <p>The stored table of embeddings that search looks through, plus the structure that makes looking fast. This project has two: <b>the lemma index</b> (one entry per bare word) and <b>the gloss index</b> (one entry per definition). Switching from the first to the second was the biggest win the project has had.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">exact vs.<br>approximate (ANN)</div>
+        <div class="term-def">
+          <p>An <b>exact</b> search compares your query against all 117,791 entries — always right, but slow. An <b>approximate</b> search (ANN, "approximate nearest neighbour") checks only some of them and is occasionally wrong, but is fast enough to use live. Production uses approximate; the tickets measure how much that costs.</p>
+          <span class="eg">measured here: about <b>0.3 of a percentage point</b> — approximation is nearly free</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">IVFFlat</div>
+        <div class="term-def">
+          <p>The particular approximate method in use. It sorts all the entries into clusters up front, then at search time only looks inside the clusters nearest your query.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">probes</div>
+        <div class="term-def">
+          <p>How many of those clusters a search bothers to open. More probes means slower but more accurate. Tuning this from 10 to 40 was worth <b>5.5 percentage points</b> of accuracy for about 20 milliseconds — one of the cheapest wins in the project.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">pgvector</div>
+        <div class="term-def">
+          <p>The Postgres extension that lets the database store embeddings and sort by similarity directly, so no separate search service is needed.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">halfvec</div>
+        <div class="term-def">
+          <p>Storing each of the 384 numbers at half the usual precision, halving the space the index takes. Measured here as <b>free</b> — results were identical. Cutting the <i>count</i> of numbers from 384 to 256, by contrast, cost real accuracy.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>3 · How we measure whether it works</h2>
+    <p class="sec-intro">This is the densest vocabulary in the backlog, and the most worth learning — nearly every claim in every ticket is stated in these units.</p>
+    <div class="terms">
+
+      <div class="term">
+        <div class="term-name">eval set</div>
+        <div class="term-def">
+          <p>A fixed list of test questions with known right answers — 405 rows in <code>eval/sets/v1.jsonl</code>. Every change is scored against the same list so improvements can be compared honestly rather than by impression.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">recall<br>(R@1, R@10, R@100)</div>
+        <div class="term-def">
+          <p>How often the right answer shows up in the top N results. <b>R@1</b> is "was it the very first result" — what a user actually experiences. <b>R@10</b> is "was it anywhere on the first page". The gap between them is how much better things could get by re-ordering alone.</p>
+          <span class="eg">today: R@1 is <b>24%</b> and R@100 is <b>77%</b> — so 53% of searches find the answer but bury it</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">strict vs. lenient</div>
+        <div class="term-def">
+          <p>Two ways of scoring the same result. <b>Strict</b> counts only the one exact target word as correct. <b>Lenient</b> also accepts pre-approved synonyms.</p>
+          <p><b>Lenient is the number this project decides on</b>, deliberately: if someone describes a car and gets <code>automobile</code>, that is a correct answer, not a miss. This matters — it is the reason RD-15 argues against training the model to tell synonyms apart.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">acceptable[]</div>
+        <div class="term-def">
+          <p>The list of synonyms recorded on a test question that count as correct answers. 133 of the 312 real test questions have one. Where a question has none, lenient scoring falls back to strict.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">MRR</div>
+        <div class="term-def">
+          <p>Mean Reciprocal Rank — one number summarising <i>how high up</i> the right answer landed, rather than just whether it made the top N. Rewards moving an answer from 5th to 2nd, which plain recall ignores.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">echo</div>
+        <div class="term-def">
+          <p>A result that just hands you back a word you already typed, in a different form. <b>This was the app's central defect</b> and the reason the whole gloss-index project happened.</p>
+          <span class="eg">searching <b>"the smell of rain on dry earth"</b> returned <b>raininess, rainstorm, raindrop</b> — never <b>petrichor</b></span>
+          <span class="eg">echo rate fell from <b>40.7% to 14.5%</b> when search moved to definitions. It is tracked on every run: a change that improves accuracy without moving echo is treated as suspicious.</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">reachable</div>
+        <div class="term-def">
+          <p>Whether the right answer even exists in the app's vocabulary. Unreachable questions are kept in the test set but excluded from headline scores — dropping them entirely would flatter the numbers by deleting the questions the app cannot possibly answer.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">held-out split</div>
+        <div class="term-def">
+          <p>Data deliberately kept away from training so it can be used to test afterwards. Without one, a model can score well purely by having memorised its training data.</p>
+          <p>The original fine-tune here had <b>no held-out split at all</b>, which is why its reported 10.9% figure is treated as unusable throughout these tickets.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">leakage /<br>tripwire</div>
+        <div class="term-def">
+          <p><b>Leakage</b> is when test questions overlap material the model already trained on, making scores look better than reality. <b>Tripwire</b> rows are knowingly-leaked test rows kept aside purely to catch catastrophic breakage — never quoted as a headline score.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">McNemar<br>(paired comparison)</div>
+        <div class="term-def">
+          <p>A statistical test for "is this change real, or just noise?" It compares two systems <i>question by question</i>, counting where one wins and the other loses. With only ~300 test questions, comparing two overall percentages cannot detect a change of a few points — this can.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">frozen set /<br>sha256</div>
+        <div class="term-def">
+          <p>The test set is never edited once built; a new version means a new filename. Every run records a <b>sha256</b> — a fingerprint of the file's exact contents — so that a silent edit is detected instead of quietly invalidating every past number.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>4 · The models</h2>
+    <p class="sec-intro">The app runs one small language model today. Several tickets are about training it better, or adding a second one.</p>
+    <div class="terms">
+
+      <div class="term">
+        <div class="term-name">bi-encoder</div>
+        <div class="term-def">
+          <p>What the app uses now. It reads your query and each candidate <i>separately</i>, turning each into an embedding, then compares the numbers. Fast, because every candidate's embedding is computed once in advance and reused forever.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">cross-encoder</div>
+        <div class="term-def">
+          <p>A slower, <i>usually</i> more accurate model that reads your query and one candidate <i>together</i>, as a pair, and scores how well they match. It can weigh the two texts against each other directly, which a bi-encoder never gets the chance to do.</p>
+          <p>Too slow to run against 117,791 candidates — but perfectly affordable against 50. That was the idea behind RD-12, and when measured here an off-the-shelf one made results <b>worse</b>, not better. "More accurate" is a property of the data a model was trained on, not of the architecture.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">reranking</div>
+        <div class="term-def">
+          <p>The two-stage pattern that combination enables: a fast model picks the best 50 candidates, then a slower model re-sorts just those 50 before showing them. You get most of the slow model's quality at close to the fast model's cost.</p>
+          <span class="eg">the ceiling here is real — the right answer is already in the top 100 for <b>77%</b> of searches — but RD-12 found no off-the-shelf model that could reach it</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">shortlist</div>
+        <div class="term-def">
+          <p>The handful of candidates the fast first stage hands to the slow second stage. Its depth is a budget: too shallow and the right answer was already thrown away before reranking starts, too deep and you pay for scoring candidates nothing could rescue.</p>
+          <span class="eg">a 50-deep shortlist contains the right answer <b>72.5%</b> of the time; a 10-deep one, only <b>51.9%</b></span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">MS MARCO</div>
+        <div class="term-def">
+          <p>A large public collection of real Bing search queries paired with web passages, and the standard training set for off-the-shelf rerankers. A model trained on it has learned what makes a <i>web page</i> relevant to a <i>search query</i>.</p>
+          <p>That is not this problem. A reverse-dictionary query is a description of a meaning, and the candidates are dictionary definitions — and RD-12 measured the mismatch rather than assuming the transfer.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">logit</div>
+        <div class="term-def">
+          <p>The raw, unbounded number a model emits before it is squashed into anything human-readable. Bigger means "better match"; the absolute value means nothing on its own and cannot be compared across models.</p>
+          <span class="eg">useful for <i>sorting</i>, useless as a percentage — which is why a reranked score cannot simply be dropped into a field that used to hold a <b>0–100%</b> similarity</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">fine-tuning</div>
+        <div class="term-def">
+          <p>Taking a general-purpose model and training it further on your own data. This app's model is a fine-tune of a public one. Measured here, the fine-tuning bought <b>+4.5 points</b> — less than swapping what gets indexed bought for free.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">contrastive<br>training</div>
+        <div class="term-def">
+          <p>How these models learn: show them a correct pair and some incorrect ones, and push the correct pair's embeddings together while pushing the wrong ones apart. Repeat a few hundred thousand times.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">hard negatives</div>
+        <div class="term-def">
+          <p>Deliberately chosen wrong answers that are <i>nearly</i> right, used during training. Learning to reject a plausible wrong answer teaches more than rejecting an obviously unrelated one — that is the theory RD-15 examines and partly pushes back on.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">ONNX</div>
+        <div class="term-def">
+          <p>A portable file format for trained models, letting one trained in Python run in a JavaScript server. The app's model is an 86MB ONNX file.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">quantization</div>
+        <div class="term-def">
+          <p>Shrinking a model by storing its numbers less precisely. Faster and smaller, slightly less accurate. Noted in these tickets mainly because <b>no quantized version of this model exists</b> — a fact that has been mistaken for a tuning choice.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>5 · Running it in production</h2>
+    <p class="sec-intro">Terms from the deployment side, which several tickets turn on.</p>
+    <div class="terms">
+
+      <div class="term">
+        <div class="term-name">cold start</div>
+        <div class="term-def">
+          <p>The server code that answers a search shuts down when nobody is using it, and must start up again for the next visitor. That first request is the cold start.</p>
+          <span class="eg">it used to take <b>43 seconds</b> here, because the 86MB model was re-downloaded each time. Now <b>64 milliseconds</b>.</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">function bundle</div>
+        <div class="term-def">
+          <p>The package of code and files shipped to the server for one API route. Anything not in the bundle has to be fetched over the network at run time — which is exactly what made cold starts slow until the model was put inside it.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">file tracing</div>
+        <div class="term-def">
+          <p>The build step that decides which files go into that bundle. It over-includes by default: here it was packing model runtimes for Mac and Windows into a bundle that only ever runs on Linux, wasting 43.7MB.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">migration</div>
+        <div class="term-def">
+          <p>A recorded, repeatable change to the database's structure — adding a table, dropping a column. Kept as files so the same change can be applied to every copy of the database in the same order.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">Neon</div>
+        <div class="term-def">
+          <p>The hosted Postgres provider holding the words and their embeddings. Its storage limit is a recurring constraint in these tickets — the embeddings are large, and there was for a while no room for a second index.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">region (iad1)</div>
+        <div class="term-def">
+          <p>Where the server code physically runs — here, northern Virginia, the same place as the database, so they can talk to each other quickly. Worth knowing because timings measured on a laptop include a long round trip that real users never pay.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">shadow logging</div>
+        <div class="term-def">
+          <p>Running a proposed new system alongside the live one and recording where they disagree, without showing anyone the new results. Tried here, and abandoned — it can tell you two systems disagree but never which one was right, and the app had too little traffic to gather enough of it.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer class="done">Glossary · reverse-dictionary · <a href="index.html">back to tickets</a></footer>
+</div>

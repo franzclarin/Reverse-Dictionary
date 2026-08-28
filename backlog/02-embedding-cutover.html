@@ -1,12 +1,21 @@
+<meta charset="utf-8">
 <title>RD-02 · Cut search over to the gloss index</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-02</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-02</div>
 
   <div class="ticket-head">
     <h1>Shadow-validate, then cut <code>/api/lookup</code> over to the gloss index</h1>
     <span class="badge badge-done">✓ Done</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>The fix for the app's central problem. Search now matches your description against definitions instead of against bare words.</p>
+    <p><b>Was —</b> searching <i>"the smell of rain on dry earth"</i> returned <code>raininess</code>, <code>rainstorm</code>, <code>raindrop</code> — words that <a href="glossary.html">echo</a> your own words back at you — and never <code>petrichor</code>.</p>
+    <p><b>Did —</b> pointed the live search at the definitions table RD-01 built.</p>
+    <p><b>Result —</b> done 2026-08-27. The right word came first for about <b>1 search in 4</b> instead of <b>1 in 10</b> (10.1% → 24.0%), and echoed results fell from <b>2 in 5</b> to about <b>1 in 7</b> (40.7% → 14.5%). Found along the way: a setting controlling how hard search looks was left at the old table's value and was costing 5.5 points on its own.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Depends on:</b> RD-01 (done 2026-08-26 — unblocked)</span>
     <span><b>Touches:</b> <code>app/api/lookup/route.ts</code>, <code>ShadowLookup</code></span>
@@ -18,7 +27,7 @@
 
   <div class="callout">
     <span class="callout-label">Result — cut over 2026-08-27, measured on the live index</span>
-    <p><code>/api/lookup</code> now searches <code>GlossEmbedding</code> via <code>lib/glossSearch.ts</code>. On the frozen set's authored reachable slice (n=287), against the real Neon table rather than a local cell: <b>lenient R@1 10.1% → 24.0%</b>, R@10 26.1% → 49.8%, <b>echo 40.7% → 14.5%</b>, with <b>64 wins / 17 regressions, p &lt; 0.00001</b> paired. That is inside the +12.9–15.7pp band the offline cells predicted. <b>One surprise: <code>probes=10</code> was badly undertuned for this index</b> — it scored 18.5%, and raising it to 40 recovered 5.5 points for roughly 20ms of scan (see the learning below). <code>VocabEmbedding</code> is untouched and still indexed; rollback is reverting one call.</p>
+    <p><code>/api/lookup</code> now searches <code>GlossEmbedding</code> via <code>lib/glossSearch.ts</code>. On the frozen set's authored reachable slice (n=287), against the real Neon table rather than a local cell: <b>lenient R@1 10.1% → 24.0%</b>, R@10 26.1% → 49.8%, <b>echo 40.7% → 14.5%</b>, with <b>55 wins / 15 regressions, p &lt; 0.00001</b> paired. That is inside the +12.9–15.7pp band the offline cells predicted. <b>One surprise: <code>probes=10</code> was badly undertuned for this index</b> — it scored 18.5%, and raising it to 40 recovered 5.5 points for roughly 20ms of scan (see the learning below). <code>VocabEmbedding</code> is untouched and still indexed; rollback is reverting one call.</p>
   </div>
 
   <div class="callout">

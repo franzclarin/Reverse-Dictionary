@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "fetch-model": "node scripts/fetch-model.mjs",
+    "build": "npm run fetch-model && next build",
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
@@ -12,6 +13,7 @@
     "eval:prod": "tsx scripts/eval.ts --set eval/sets/v1.jsonl --index GlossEmbedding --tag prod_gloss_shipped",
     "eval:exact": "tsx scripts/eval.ts --set eval/sets/v1.jsonl --exact --tag exact",
     "eval:filtered": "tsx scripts/eval.ts --set eval/sets/v1.jsonl --filter-junk --tag filtered",
+    "eval:rerank": "tsx scripts/eval.ts --set eval/sets/v1.jsonl --index GlossEmbedding --rerank --rerank-depth 100 --rerank-sweep 10,25,50 --tag rerank_ce6",
     "eval:compare": "tsx scripts/eval.ts --compare",
     "eval:report": "tsx scripts/report.ts"
   },
