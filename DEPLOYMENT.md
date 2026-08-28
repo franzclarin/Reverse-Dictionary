@@ -33,13 +33,27 @@ npx prisma db execute --file prisma/migrations/<migration-folder>/migration.sql
 
 The vector tables are data seeds, not something any migration or `npm install` step generates: `GlossEmbedding` (117,791 synset rows — the table search actually reads) and `VocabEmbedding` (141,854 bare-lemma rows — word pages plus the search rollback path). See CLAUDE.md if you're standing this app up against a fresh database.
 
-### Step 4 — Deploy
+### Step 4 — The build fetches the embedding model
+
+Nothing to configure, but worth knowing before you read a build log: `npm run build` runs
+`scripts/fetch-model.mjs` first, which downloads the 86MB ONNX model from the Hugging Face CDN
+into `models/` so `next.config.js` can trace it into the `/api/lookup` function (RD-11).
+
+- **A failed fetch fails the build, by design.** `lib/embedder.ts` loads the model with remote
+  fetching disabled, so a deploy without it would 500 on every search. Failing at build time is
+  the intended outcome — if HF is down, retry the deploy.
+- The step verifies exact byte sizes, so a truncated download or an HTML error page served with
+  a 200 fails loudly rather than shipping a corrupt model.
+- Locally, run `npm run fetch-model` once. It's idempotent (a second run skips in ~50ms), and
+  the eval scripts need it too.
+
+### Step 5 — Deploy
 
 **Push to `main`.** Vercel's Git integration clones the repo, so `.gitignore` applies and the build only includes what's actually tracked.
 
 **Do not run `vercel deploy --prod` from the CLI.** It uploads the working directory as-is, and `.gitignore` does not apply to CLI deploys (there's no `.vercelignore` in this repo either) — it will sweep in the gitignored `reverse_dict_model.zip` / `_model_tmp/` (~1.5GB) and blow Vercel's 100MB per-file cap. This has been hit before; always deploy by pushing.
 
-### Step 5 — Verify
+### Step 6 — Verify
 
 1. Open the deployment URL.
 2. Run a search and confirm results return (don't expect the top result to always be the "intended" word — see README's note on search quality).
@@ -72,7 +86,8 @@ Vercel deploys automatically on push to `main`.
 
 ### Search returns a 500
 - Check the function log's `subsystem` tag (`model` or `database`) and `code` — see CLAUDE.md's "Observed cause codes" for what `ENOTFOUND`/`ECONNREFUSED`/`EAI_AGAIN` typically mean in this app.
-- A cold-start model download can legitimately take up to ~20s; `maxDuration = 60` accounts for this, so a genuine timeout points at a network problem reaching the Hugging Face CDN, not a slow-but-working load.
+- **A `model` subsystem error no longer means a CDN problem.** Since RD-11 the model is read from the function bundle, not downloaded, so this means the file isn't there — check the build log for the `[fetch-model]` step, and the function log for `[embedder] model loaded … root=…`, which prints the directory it looked in. The usual cause is `outputFileTracingIncludes` in `next.config.js` no longer matching `models/**`.
+- Cold start should now be well under a second. If a search takes tens of seconds, something has reverted the embedder to remote loading — that is a regression, not expected behaviour.
 
 ### Search is slow
 - Confirm you're comparing against production latency (both embed and DB round-trips happen inside `iad1`), not a local-machine-to-Neon round trip during dev, which is much slower and not representative — see CLAUDE.md's eval-harness latency note.

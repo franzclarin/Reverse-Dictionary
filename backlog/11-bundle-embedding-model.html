@@ -1,0 +1,221 @@
+<meta charset="utf-8">
+<title>RD-11 · Ship the embedding model in the function bundle</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-11</div>
+
+  <div class="ticket-head">
+    <h1>Ship the embedding model in the function bundle instead of downloading it per cold start</h1>
+    <span class="badge badge-done">✓ Done</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>The first search after a quiet spell took 43 seconds. It now takes a fifteenth of a second.</p>
+    <p><b>Was —</b> the server code that answers a search shuts down when unused (a <a href="glossary.html">cold start</a>). On waking, it re-downloaded the 86MB model from a public CDN before it could answer anything.</p>
+    <p><b>Did —</b> shipped the model inside the deployed code, so waking up reads it off local disk instead.</p>
+    <p><b>Result —</b> done 2026-08-27. <b>43,050ms → 64ms</b>, with the model's output unchanged bit for bit. The measurement is what mattered: the wait turned out to be <b>99.8% network and 0.2% computing</b>, which ruled out both a smaller model and a keep-warm timer.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Touches:</b> <code>lib/embedder.ts</code>, <code>next.config.js</code>, <code>scripts/fetch-model.mjs</code></span>
+    <span><b>Risk:</b> deploy-time — function bundle size, build-step network</span>
+    <span><b>Est:</b> S — one build step + one env block</span>
+    <span><b>Orthogonal to:</b> RD-03 (no dependency or pipeline change)</span>
+  </div>
+
+  <p class="lede">Every cold start of <code>/api/lookup</code> downloaded the 86MB ONNX model from the Hugging Face CDN before it could answer anything. The fix is not to make the model smaller or the load faster — it is to stop doing the download at request time at all.</p>
+
+  <div class="callout">
+    <span class="callout-label">Result — done 2026-08-27</span>
+    <p>The model is fetched during the build and traced into the function bundle; <code>lib/embedder.ts</code> loads it from local disk with remote fetching disabled. Measured through <code>lib/embedder.ts</code> on the same machine, same probe strings: <b>43,050ms → 64ms</b> to load. Query vectors are <b>bit-identical</b> across all probes (3 × 384 dims), and <code>eval:prod</code> reproduces the committed reference run with <b>0 of 405 queries differing in rank or top-k</b> — retrieval is provably untouched. Traced function bundle came in at <b>151.6MB</b> after also dropping the non-linux ONNX binaries.</p>
+  </div>
+
+  <section>
+    <h2>The measurement this ticket rests on</h2>
+    <p>Cold start was timed directly, splitting the CDN download from the ONNX session init, because the two have wildly different fixes and it was never obvious which dominated:</p>
+
+    <table>
+      <tr><th>phase</th><th class="num">time</th><th>what it is</th></tr>
+      <tr class="highlight"><td>Cold: download + init</td><td class="num">38,848 ms</td><td>fetching 90,374,450 bytes from the HF CDN, then initialising</td></tr>
+      <tr><td>Warm cache: init only</td><td class="num">69 ms</td><td>the same model, already on disk</td></tr>
+      <tr><td>First embed after load</td><td class="num">3–6 ms</td><td>the actual inference</td></tr>
+    </table>
+
+    <p><b>The cold start was 99.8% network and 0.2% compute.</b> That single ratio decides the whole ticket: nothing about the model, the runtime, or the inference was worth optimising, because none of them were the cost.</p>
+
+    <div class="viz">
+      <svg viewBox="0 0 760 250" width="100%" role="img" aria-labelledby="ratiotitle">
+        <title id="ratiotitle">Cold start time, before and after, drawn to a shared scale</title>
+        <g font-family="ui-monospace,monospace" font-size="11">
+          <text x="20" y="30" font-size="10.5" font-weight="700" fill="var(--ink-soft)">DRAWN TO SCALE — 620px = 38,848ms</text>
+
+          <text x="20" y="70" fill="var(--ink)" font-weight="700">BEFORE</text>
+          <rect x="20" y="80" width="619" height="34" fill="var(--bad)" opacity="0.8"/>
+          <rect x="639" y="80" width="1" height="34" fill="var(--good)"/>
+          <text x="30" y="102" fill="var(--paper)" font-weight="700">HF CDN download · 86.2MB · 38,779ms</text>
+          <text x="20" y="132" fill="var(--ink-soft)" font-size="10">99.8% of the wait was bytes moving over a network</text>
+          <text x="744" y="132" text-anchor="end" fill="var(--good)" font-size="10">↑ the 1px sliver at the end is ONNX init, 69ms</text>
+
+          <text x="20" y="180" fill="var(--ink)" font-weight="700">AFTER</text>
+          <rect x="20" y="190" width="2" height="34" fill="var(--good)"/>
+          <text x="34" y="212" fill="var(--good)" font-weight="700">69ms — ONNX init only. Read from local disk; nothing downloaded.</text>
+          <text x="20" y="242" fill="var(--ink-soft)" font-size="10">The bar really is 2px wide at this scale. That is the finding, not a rendering bug.</text>
+        </g>
+      </svg>
+      <div class="viz-caption">Same model, same vectors — only the source of the bytes changed</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works — current implementation vs. goal</h2>
+
+    <div class="viz">
+      <svg viewBox="0 0 760 330" width="100%" role="img" aria-labelledby="pathtitle">
+        <title id="pathtitle">Request path before and after, showing the download moving into the build</title>
+        <g font-family="ui-monospace,monospace" font-size="10.5">
+          <!-- BEFORE lane -->
+          <text x="16" y="26" font-weight="700" fill="var(--bad)">BEFORE — the download sits on the request path</text>
+          <rect x="16" y="40" width="120" height="46" rx="7" fill="var(--mono-bg)" stroke="var(--line)"/>
+          <text x="76" y="60" text-anchor="middle" fill="var(--ink)">cold request</text>
+          <text x="76" y="75" text-anchor="middle" fill="var(--ink-soft)" font-size="9">/api/lookup</text>
+
+          <path d="M140 63 L186 63" stroke="var(--bad)" stroke-width="1.6" marker-end="url(#a11)"/>
+
+          <rect x="190" y="40" width="180" height="46" rx="7" fill="var(--bad-bg)" stroke="var(--bad)"/>
+          <text x="280" y="60" text-anchor="middle" fill="var(--bad)" font-weight="700">HF CDN</text>
+          <text x="280" y="75" text-anchor="middle" fill="var(--bad)" font-size="9">86.2MB · ~38.8s · every instance</text>
+
+          <path d="M374 63 L420 63" stroke="var(--bad)" stroke-width="1.6" marker-end="url(#a11)"/>
+
+          <rect x="424" y="40" width="150" height="46" rx="7" fill="var(--mono-bg)" stroke="var(--line)"/>
+          <text x="499" y="60" text-anchor="middle" fill="var(--ink)">/tmp cache</text>
+          <text x="499" y="75" text-anchor="middle" fill="var(--ink-soft)" font-size="9">per-instance only</text>
+
+          <path d="M578 63 L624 63" stroke="var(--ink-soft)" stroke-width="1.6" marker-end="url(#a11)"/>
+          <rect x="628" y="40" width="116" height="46" rx="7" fill="var(--mono-bg)" stroke="var(--line)"/>
+          <text x="686" y="66" text-anchor="middle" fill="var(--ink)">ONNX · 69ms</text>
+
+          <text x="16" y="110" fill="var(--ink-soft)" font-size="9.5">The cache helps only AFTER some request already paid 38.8s — and Vercel scales instances, so each new one pays again.</text>
+
+          <line x1="16" y1="132" x2="744" y2="132" stroke="var(--line)" stroke-dasharray="4,3"/>
+
+          <!-- AFTER lane -->
+          <text x="16" y="164" font-weight="700" fill="var(--good)">AFTER — the download moved into the build</text>
+
+          <rect x="16" y="180" width="180" height="46" rx="7" fill="var(--p2-bg)" stroke="var(--p2)"/>
+          <text x="106" y="200" text-anchor="middle" fill="var(--p2)" font-weight="700">build step</text>
+          <text x="106" y="215" text-anchor="middle" fill="var(--p2)" font-size="9">scripts/fetch-model.mjs</text>
+
+          <path d="M200 203 L246 203" stroke="var(--p2)" stroke-width="1.6" marker-end="url(#a11b)"/>
+
+          <rect x="250" y="180" width="190" height="46" rx="7" fill="var(--good-bg)" stroke="var(--good)"/>
+          <text x="345" y="200" text-anchor="middle" fill="var(--good)" font-weight="700">models/ in the bundle</text>
+          <text x="345" y="215" text-anchor="middle" fill="var(--good)" font-size="9">outputFileTracingIncludes</text>
+
+          <rect x="16" y="252" width="120" height="42" rx="7" fill="var(--mono-bg)" stroke="var(--line)"/>
+          <text x="76" y="278" text-anchor="middle" fill="var(--ink)">cold request</text>
+
+          <path d="M140 273 L246 273" stroke="var(--good)" stroke-width="1.6" marker-end="url(#a11c)"/>
+          <text x="193" y="266" text-anchor="middle" fill="var(--good)" font-size="9">local disk</text>
+
+          <rect x="250" y="252" width="190" height="42" rx="7" fill="var(--mono-bg)" stroke="var(--line)"/>
+          <text x="345" y="278" text-anchor="middle" fill="var(--ink)">ONNX · 64ms</text>
+
+          <path d="M345 230 L345 250" stroke="var(--good)" stroke-width="1.4" stroke-dasharray="3,2" marker-end="url(#a11c)"/>
+
+          <text x="470" y="270" fill="var(--ink)" font-size="10.5" font-weight="700">No network on the request path.</text>
+          <text x="470" y="286" fill="var(--ink-soft)" font-size="9.5">allowRemoteModels = false makes that structural,</text>
+          <text x="470" y="299" fill="var(--ink-soft)" font-size="9.5">not merely usual.</text>
+        </g>
+        <defs>
+          <marker id="a11" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--bad)"/></marker>
+          <marker id="a11b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--p2)"/></marker>
+          <marker id="a11c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--good)"/></marker>
+        </defs>
+      </svg>
+      <div class="viz-caption">The work didn't get faster — it moved from per-request to per-deploy</div>
+    </div>
+
+    <div class="stat-row cols-2">
+      <div class="stat">
+        <div class="stat-label">Before</div>
+        <div class="stat-value">Fetch per cold start</div>
+        <div class="stat-note"><code>allowLocalModels = false</code>, <code>cacheDir = "/tmp/transformers_cache"</code>. Every new instance re-downloaded 86.2MB. <code>maxDuration = 60</code> existed to survive it.</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">After</div>
+        <div class="stat-value">Fetch per deploy</div>
+        <div class="stat-note"><code>allowLocalModels = true</code>, <code>allowRemoteModels = false</code>, <code>localModelPath = &lt;cwd&gt;/models</code>. The build downloads it once; the function only ever reads local disk.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><s>Add <code>scripts/fetch-model.mjs</code> — idempotent, byte-size-verified download of the 4 required files.</s> Done. Plain <code>.mjs</code> because it runs ahead of <code>next build</code> and must not depend on <code>tsx</code> resolving.</li>
+      <li><s>Wire it into <code>build</code>, not <code>postinstall</code>.</s> Done — <code>"build": "npm run fetch-model &amp;&amp; next build"</code>. Vercel caches <code>node_modules</code> and may skip <code>postinstall</code> on a cache hit, and a network call in <code>postinstall</code> would break <code>npm install</code> whenever HF is down.</li>
+      <li><s>Point <code>lib/embedder.ts</code> at the local directory and disable remote loading.</s> Done.</li>
+      <li><s>Trace <code>models/**</code> into the function via <code>outputFileTracingIncludes</code>.</s> Done — verified in <code>route.js.nft.json</code>, 4/4 files present.</li>
+      <li><s>Gitignore <code>/models/</code>.</s> Done — the 86MB artifact is regenerable and never enters git.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>There is no quantized model — don't go looking for one</h3>
+    <p>The obvious first instinct is to shrink the download with an int8 model. <code>onnx/model_quantized.onnx</code> <b>does not exist</b> in <code>franzclarin/ReverseDictionary</code> — HF returns a 15-byte <code>Entry not found</code> body. <code>quantized: false</code> in <code>lib/embedder.ts</code> is not a tuning choice, it is the only artifact there is. Producing one is a real option but a separate ticket: it changes the query vectors that all 117,791 <code>GlossEmbedding</code> rows are matched against, so it cannot ship without a full <code>eval:prod</code> run behind it.</p>
+
+    <h3>Cron warming does not work for this shape of problem</h3>
+    <p>The other obvious instinct — ping the endpoint every few minutes to keep it warm. The Transformers.js cache is written to <code>/tmp</code>, which is <b>per instance</b>. A warm ping keeps exactly one instance warm while every instance Vercel scales up still pays the full 38.8s. It converts a reliable problem into an intermittent one, which is worse to diagnose and no better to experience.</p>
+
+    <h3>The four files, and only those four</h3>
+    <p>The HF repo has 14 files. The <code>feature-extraction</code> pipeline requests exactly four: <code>config.json</code>, <code>tokenizer.json</code>, <code>tokenizer_config.json</code>, <code>onnx/model.onnx</code>. The rest — including <code>model.safetensors</code>, which is the same weights in a format this path never reads — would be pure bundle weight. The sizes are pinned in <code>FILES</code> in the fetch script and double as the integrity check: a truncated download, an LFS pointer, or an HTML error page served with a 200 all fail the size assertion instead of shipping a corrupt model.</p>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>node_modules/@xenova/transformers/src/env.js:52-53</code> — where <code>localModelPath</code>'s default comes from, and why it cannot be relied on.</li>
+      <li><code>node_modules/@xenova/transformers/src/utils/hub.js:392,456-459</code> — the local-path join and the <code>allowRemoteModels=false</code> throw that this ticket depends on.</li>
+      <li><code>CLAUDE.md</code> §"Embedding model" — why <code>{ quantized: false }</code> and <code>{ pooling: "mean", normalize: true }</code> are load-bearing for vector compatibility with the seeded DB.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Measure the split before optimising the whole.</b> "Cold start is slow" has at least three plausible fixes — smaller model, faster runtime, keep-warm — and the 99.8/0.2 split invalidated two of them instantly. Timing the download separately from the ONNX init took one script and decided the entire design. <code>ARCHITECTURE.md</code> had estimated "~20s"; the real number was ~39s and, more importantly, its <i>composition</i> was the actionable part.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b><code>env.localModelPath</code> defaults relative to the Transformers.js module directory, NOT <code>process.cwd()</code></b> (<code>@xenova/transformers/src/env.js:52-53</code>). It resolves to somewhere inside <code>node_modules</code>, so a <code>models/</code> directory at the repo root is invisible unless the path is set explicitly. This is the single most likely thing to get silently wrong, and with <code>allowRemoteModels</code> left at its default the symptom would not be an error — it would be a silent 39s download, i.e. no visible symptom at all.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The on-disk layout must mirror the HF repo id.</b> Files go to <code>&lt;localModelPath&gt;/franzclarin/ReverseDictionary/…</code>, because the library joins <code>localModelPath</code> with the model id it was given. Flattening the org/name nesting produces a not-found that reads like a missing file rather than a misplaced one.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Adding 86MB to the bundle nearly doubled it — and most of the rest was dead weight for platforms Vercel never runs.</b> The traced <code>/api/lookup</code> bundle measured <b>195.3MB</b>, close enough to the legacy 250MB function limit to matter (on Fluid Compute's 5GB it is a non-issue, but that is a dashboard setting, not a guarantee in the repo). File tracing pulls in <code>onnxruntime-node</code>'s binaries for <i>every</i> platform: 74.1MB traced, of which the macOS and Windows copies are 43.7MB that a linux function can never execute. Excluding them via <code>outputFileTracingExcludes</code> brought the bundle to <b>151.6MB</b>. Excludes affect only the traced output, so local dev on macOS is unaffected.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>This changes the eval toolchain, not just the route.</b> Eight files import <code>lib/embedder</code> — <code>scripts/eval.ts</code>, <code>scripts/lib/retrieval.ts</code>, <code>scripts/lib/embedModel.ts</code>, <code>scripts/build-gloss-index.ts</code>, <code>scripts/probe-margins.ts</code>, <code>scripts/probe-representation.ts</code>, <code>scripts/audit-vocab.ts</code>, plus the route. With remote loading disabled they all need <code>models/</code> on disk, so <b><code>npm run eval</code> fails on a fresh clone until <code>npm run fetch-model</code> has been run once.</b> That is a deliberate trade for the production guarantee, and the thrown error names the command.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Fail loudly was the right call, and it is only safe because the build verifies.</b> <code>allowRemoteModels = false</code> means a file-tracing miss is a hard <code>model</code> <code>SubsystemError</code> rather than a silent regression to the slow path. That is only a responsible default because <code>fetch-model.mjs</code> asserts exact byte sizes and exits non-zero, so a deploy cannot ship without the model. Fail-loud without a build-time guarantee would just be a new outage mode.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>An error message that hardcodes its retry constant will lie to you.</b> The thrown error read "after 3 attempt(s)" because it interpolated <code>MAX_LOAD_ATTEMPTS</code> rather than the real count — while the loop had correctly broken out after <b>one</b> attempt via <code>isNetworkError()</code>. It cost a few minutes of chasing a retry storm that never happened. Now reports <code>attemptsMade</code>. Worth remembering wherever a retry loop can exit early.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b><code>npm run eval:prod</code> overwrites a committed reference run.</b> The tag <code>prod_gloss_shipped</code> writes straight to <code>eval/runs/prod_gloss_shipped.json</code>, which is one of the four baselines deliberately un-ignored in <code>.gitignore</code>. Running the gate therefore dirties the very file it is being compared against. Here the retrieval results were per-query identical and only <code>dbMs</code>/<code>embedMs</code> changed, so the file was restored with <code>git checkout</code> rather than committing timing churn into a frozen baseline. <b>Diff it before you commit it</b>, and if the results genuinely changed, that is a finding to reckon with rather than a file to update.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b><code>maxDuration = 60</code> was deliberately left alone.</b> Its stated reason ("model cold-start needs up to ~20s") is now obsolete and the comment was corrected, but the value stays: it is a safety ceiling, not a target, and lowering it would only create a new failure mode — a slow Neon query turning into a 504 — in exchange for nothing. Vercel bills actual duration, not the limit.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li class="done"><code>npm run fetch-model</code> lands 4 files, <code>onnx/model.onnx</code> at exactly 90,374,450 bytes; a second run skips everything in ~50ms.</li>
+      <li class="done">Model load through <code>lib/embedder.ts</code> drops from seconds to double-digit ms — measured <b>43,050ms → 64ms</b>.</li>
+      <li class="done">Query vectors are unchanged: 3 probe strings × 384 dims, <b>bit-identical</b> before and after.</li>
+      <li class="done">With <code>models/</code> removed, <code>/api/lookup</code> throws a <code>model</code> <code>SubsystemError</code> in ~10ms naming <code>npm run fetch-model</code> — <i>not</i> a slow success.</li>
+      <li class="done"><code>npx tsc --noEmit</code>, <code>npm run lint</code>, and <code>npm run build</code> all pass, with the fetch step running as part of the build.</li>
+      <li class="done">All 4 model files appear in <code>.next/server/app/api/lookup/route.js.nft.json</code>.</li>
+      <li class="done">Traced function bundle stays well under the legacy 250MB limit — <b>151.6MB</b>.</li>
+      <li class="done"><code>npm run eval:prod</code> reproduces the committed reference <code>eval/runs/prod_gloss_shipped.json</code> <b>per query</b>, not merely in aggregate: <b>0 of 405 queries differ in top-k order or rank</b>, and the only fields that changed anywhere in the file are <code>dbMs</code>/<code>embedMs</code> timing noise. Headline unchanged to the digit — authored reachable (n=287) lenient R@1 <b>24.0%</b>, strict 20.6%, R@10 49.8%, echo <b>14.5%</b>.</li>
+      <li>On deploy: build log shows the fetch step, and a cold request on a fresh deployment returns in well under a second.</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-11 · reverse-dictionary · done 2026-08-27</footer>
+</div>

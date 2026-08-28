@@ -1,13 +1,22 @@
+<meta charset="utf-8">
 <title>RD-07 · Add a favicon</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-07</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-07</div>
 
   <div class="ticket-head">
     <h1>Add a favicon — the site currently ships with none at all</h1>
     <span class="badge badge-p3">P3 · polish</span>
     <span class="badge badge-done">✓ Done · 2026-08-26</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>The browser tab showed a blank default page icon.</p>
+    <p><b>Was —</b> no icon file existed anywhere in the project, and nothing referenced one.</p>
+    <p><b>Did —</b> added a single icon file using the site's own pilcrow mark.</p>
+    <p><b>Result —</b> done 2026-08-26. The framework picks up an icon at that filename automatically, so no other wiring was needed.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Touches:</b> <code>app/icon.svg</code> (new, App Router auto-detected)</span>
     <span><b>Risk:</b> none</span>

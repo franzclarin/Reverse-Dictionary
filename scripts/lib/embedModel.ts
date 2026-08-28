@@ -17,7 +17,25 @@
  */
 import { pipeline, env } from "@xenova/transformers";
 
-env.allowLocalModels = false;
+/**
+ * Point Transformers.js at the HF CDN for this module's models.
+ *
+ * `env` is a PROCESS-WIDE SINGLETON shared with `lib/embedder.ts`, which since
+ * RD-11 pins the opposite settings (local-only, remote disabled) so the
+ * production model is read from the bundle. Both used to set this at module
+ * scope, and whichever module body evaluated last silently won — that broke
+ * `npm run eval:prod` with "both local and remote models are disabled", because
+ * this file's `allowLocalModels = false` landed on top of the production
+ * module's `allowRemoteModels = false`.
+ *
+ * Configure immediately before use instead. Safe because the harness embeds
+ * sequentially — one model at a time, awaited — so no two loads interleave.
+ * If that ever changes, this needs a lock rather than a call-site assignment.
+ */
+function configureRemoteModelEnv(): void {
+  env.allowLocalModels = false;
+  env.allowRemoteModels = true;
+}
 
 /** The base model the fine-tune started from, per the model card. */
 export const BASE_MODEL = "Xenova/all-MiniLM-L6-v2";
@@ -35,6 +53,7 @@ const cache = new Map<string, Promise<Embedder>>();
 function getPipeline(modelId: string): Promise<Embedder> {
   let existing = cache.get(modelId);
   if (!existing) {
+    configureRemoteModelEnv();
     existing = pipeline("feature-extraction", modelId, {
       quantized: false,
     }) as unknown as Promise<Embedder>;

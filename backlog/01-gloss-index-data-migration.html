@@ -1,13 +1,22 @@
+<meta charset="utf-8">
 <title>RD-01 · Build the production gloss index</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-01</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-01</div>
 
   <div class="ticket-head">
     <h1>Build the production gloss index under Neon's 512MB ceiling</h1>
     <span class="badge badge-p0">P0 · data engineering</span>
     <span class="badge badge-done">✓ Done · 2026-08-26</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Before search could match your description against <i>definitions</i>, the definitions had to be stored as searchable data. This built that table.</p>
+    <p><b>Was —</b> search compared your description against bare words — just <code>petrichor</code>, with no definition attached. The better approach was designed and written but had nowhere to live: the database was nearly full.</p>
+    <p><b>Did —</b> built a second <a href="glossary.html">index</a> holding one entry per <i>meaning</i> — 117,791 of them, each carrying its definition text.</p>
+    <p><b>Result —</b> done 2026-08-26. The plan changed mid-flight: the database plan was upgraded, so the old word-based index did not have to be deleted to make room. Both now exist, which is what made rolling back safe.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Blocks:</b> RD-02</span>
     <span><b>Touches:</b> Neon Postgres, <code>GlossEmbedding</code>, <code>VocabEmbedding</code></span>

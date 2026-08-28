@@ -1,12 +1,21 @@
+<meta charset="utf-8">
 <title>RD-04 · Remove orphaned games/credit code</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-04</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-04</div>
 
   <div class="ticket-head">
     <h1>Remove orphaned games code left behind by the games-UI removal</h1>
     <span class="badge badge-p2">P2 · cleanup</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Dead code left behind by a feature that was deleted. Kept as a record — RD-06 has since done this and more.</p>
+    <p><b>Today —</b> five casino-style word games were removed from the app, but the backend plumbing built for them stayed, with no remaining callers.</p>
+    <p><b>Do —</b> delete it. Superseded by RD-06, which removed the whole accounts system this was part of.</p>
+    <p><b>Why it matters —</b> nothing user-facing and nothing to do with search quality. Its value now is as a record of how the dead code was verified dead — by checking every call site rather than trusting the commit message.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Touches:</b> <code>lib/gameTokens.ts</code>, <code>lib/gameUtils.ts</code>, <code>lib/credits.ts</code></span>
     <span><b>Risk:</b> low — verified zero live callers</span>

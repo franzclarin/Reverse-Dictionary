@@ -1,14 +1,25 @@
+<meta charset="utf-8">
 <title>RD-09 · Expand/improve embedding training data</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-09</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-09</div>
 
   <div class="ticket-head">
     <h1>Retrain on better training data — a second attempt, with an eval split this time</h1>
     <span class="badge badge-p2">P2 · sentence embeddings</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Teach the model better, rather than changing what it searches.</p>
+    <p><b>Today —</b> the model learned from 181,149 terse dictionary definitions. Real users type sentences like <i>"when you can't remember a word"</i>, which look nothing like that.</p>
+    <p><b>Do —</b> retrain it on better material — with a proper <a href="glossary.html">held-out split</a> this time, so the result can actually be trusted.</p>
+    <p><b>Why it matters —</b> this competes for the <b>23%</b> of searches where the right answer is never found at all. The other 53% — found but ranked too low — belongs to RD-12, which needs no retraining. The last attempt at this bought only +4.5 points, so the ordering matters.</p>
+  </div>
+
   <div class="meta-row">
-    <span><b>Depends on:</b> RD-02's cutover being measured and decided first</span>
+    <span><b>Depends on:</b> RD-02's cutover being measured and decided first — <b>done 2026-08-27</b></span>
+    <span><b>Sourcing steps:</b> <a href="14-synthetic-query-training-pairs.html">RD-14</a> (query-style pairs), <a href="15-hard-negative-mining.html">RD-15</a> (hard negatives)</span>
+    <span><b>Compare against:</b> <a href="12-cross-encoder-reranker.html">RD-12</a>, which addresses a slice more than twice this one's size without retraining</span>
     <span><b>Touches:</b> the training pipeline in <code>reverse_dict_model.zip</code> (gitignored, not in this repo's tracked code), <code>eval/</code></span>
     <span><b>Risk:</b> large effort for an unproven payoff; easy to repeat the original run's own methodological mistake</span>
     <span><b>Est:</b> weeks, not days — data sourcing + a full retrain + eval cycle</span>
@@ -29,20 +40,26 @@
     </div>
   </div>
 
+  <div class="callout">
+    <span class="callout-label">How much is left for retraining to win — measured 2026-08-27</span>
+    <p>Recomputed from <code>eval/runs/prod_gloss_shipped.json</code> at depth 100, the live gloss index splits its failures cleanly. The target is at rank 1 for <b>24.0%</b> of authored reachable queries, sits at ranks 2–100 for a further <b>53.0%</b>, and is <b>never retrieved at all for 23.0%</b>. Only that last slice is a retrieval problem — the middle one is a ranking problem, which <a href="12-cross-encoder-reranker.html">RD-12</a> addresses with no new data and no training run.</p>
+    <p><b>This bounds the ticket.</b> Retraining competes for 23 points with a prior of +4.5pp from the last attempt; reranking competes for 53 with none of the sourcing cost. That does not make this ticket wrong — a better representation is the only thing that reaches the 23% — but it settles the ordering, and it is evidence that did not exist when this ticket was written.</p>
+  </div>
+
   <section>
     <h2>Task</h2>
     <ol>
-      <li><b>Don't start before RD-02 is decided.</b> RD-02 is the cheaper, already-measured, much larger win. Let it land and get a real production readout before spending weeks competing with it for the same "improve search" goal.</li>
+      <li><b>RD-02 has landed</b> (2026-08-27: lenient R@1 10.1% → 24.0%, echo 40.7% → 14.5%), so this ticket's original blocker is cleared. It is replaced by a new one: <b>let RD-12 report first.</b> Same reasoning, larger margin — RD-12 is cheaper, needs no data sourcing, and addresses 53 points against this ticket's 23.</li>
       <li>Source additional training pairs. Two directions, not mutually exclusive:
         <ul>
           <li><i>More sense-level (gloss, lemma) triplets</i> — the existing corpus already has 181,149 of these and only bought +4.5pp, so more of the same shape has a weak prior for moving the needle further.</li>
-          <li><i>Natural-language query-style pairs</i> — a target word paired with several ways a person might actually describe it, closer to how the app is really used than WordNet's terse gloss text. No real user query text has ever been logged (the shadow log stores a hash + top-1 only, by design — see <code>lib/shadowLookup.ts</code>), so these pairs have to be synthesized or authored, not mined from production.</li>
+          <li><i>Natural-language query-style pairs</i> — a target word paired with several ways a person might actually describe it, closer to how the app is really used than WordNet's terse gloss text. No real user query text has ever been logged (the shadow log stores a hash + top-1 only, by design — see <code>lib/shadowLookup.ts</code>), so these pairs have to be synthesized or authored, not mined from production. <b><a href="14-synthetic-query-training-pairs.html">RD-14</a> is the specification of this step</b>, including the correction that the pairs must be keyed to <i>synsets</i> rather than bare lemmas — word-keyed pairs would retrain the exact defect RD-02 removed. <b><a href="15-hard-negative-mining.html">RD-15</a> covers the negatives</b>, with its own correction about which metric they actually move.</li>
         </ul>
       </li>
-      <li>Hold out a genuine evaluation split this time. The original run used <code>eval_on_start: False</code> and <code>prediction_loss_only: True</code> — no held-out split at all, which is exactly why its own training-time recall figure (10.9%) is unusable and must not be cited. A second attempt that repeats this mistake will produce another number nobody can trust.</li>
+      <li>Hold out a genuine evaluation split this time. The original run used <code>eval_on_start: False</code> and <code>prediction_loss_only: True</code> — no held-out split at all, which is exactly why its own training-time recall figure (10.9%) is unusable and must not be cited. A second attempt that repeats this mistake will produce another number nobody can trust. <b>Note also that "hold out real user query logs" is not available</b> — none exist, by design; <a href="10-real-phrasing-eval-set.html">RD-10</a>'s harvested set is the substitute, and it is the honest check on a model trained on RD-14's synthetic register precisely because nobody in this project wrote it.</li>
       <li>Keep any new eval data strictly disjoint from <code>eval/sets/v1.jsonl</code> and its authoring process. <code>v1</code>'s entire value rests on being blind to every gloss and never regenerated in place — if training data or a held-out split leaks into it, every downstream recall number in this project stops meaning what it currently means.</li>
       <li>Evaluate the retrained model through the existing harness, not a one-off script — run it against <i>both</i> index shapes (lemma and gloss), the way Phase E's 2×2 design already separates representation from indexing. Assuming a new fine-tune's gain stacks on top of RD-02's gloss-index gain is an assumption, not a result, until measured.</li>
-      <li>Compare against <code>cell_gloss_ft_synset</code> (25.8% lenient R@1, the current best cell) using the harness's paired McNemar comparison, same as every other result in this project. An isolated new recall number is not evidence on its own — see CLAUDE.md's own repeated caveat about n≈300 comparisons.</li>
+      <li>Compare against <code>cell_gloss_ft_synset</code> (25.8% lenient R@1, the current best cell) using the harness's paired McNemar comparison, same as every other result in this project. An isolated new recall number is not evidence on its own — see CLAUDE.md's own repeated caveat about n≈300 comparisons. If RD-12/RD-13 have shipped by then, the production baseline to beat is the reranked path, not <code>prod_gloss_shipped</code>.</li>
     </ol>
   </section>
 
@@ -64,8 +81,10 @@
   <section>
     <h2>Acceptance criteria</h2>
     <ul class="check-list">
-      <li>RD-02's cutover decision (cut over / hold / iterate) recorded before this ticket starts</li>
-      <li>New training pairs sourced and documented, distinct in kind from the original 181,149 WordNet triplets</li>
+      <li>RD-02's cutover decision recorded before this ticket starts — <b>done: cut over, 2026-08-27</b></li>
+      <li>RD-12's reranker result recorded before this ticket starts, so the two are prioritised against measured numbers</li>
+      <li>New training pairs sourced and documented, distinct in kind from the original 181,149 WordNet triplets (RD-14), keyed to synsets rather than bare lemmas</li>
+      <li>Hard negatives, if used, mined per RD-15 and evaluated on lenient R@1 as well as strict</li>
       <li>Training run includes a genuine held-out split (<code>eval_on_start</code> enabled, not <code>prediction_loss_only</code>-only)</li>
       <li>Held-out/training data verified disjoint from <code>eval/sets/v1.jsonl</code></li>
       <li>New model evaluated via <code>scripts/eval.ts</code> against both lemma and gloss index cells, paired McNemar vs. <code>cell_gloss_ft_synset</code></li>

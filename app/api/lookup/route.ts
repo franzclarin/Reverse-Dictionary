@@ -11,7 +11,11 @@ import {
 } from "@/lib/errors";
 
 export const runtime = "nodejs";
-export const maxDuration = 60; // model cold-start needs up to ~20s; default 10s is too short
+// Kept at 60 as a safety ceiling, NOT because loading is slow: since RD-11 the
+// model ships in the function bundle and loads in ~64ms. Lowering this would
+// only turn a slow Neon query into a 504, and Vercel bills actual duration
+// rather than the limit — so there is nothing to win by tightening it.
+export const maxDuration = 60;
 
 // Shadow logging survives the RD-02 cutover with its roles INVERTED: the gloss
 // index is now the primary path, so the sampled shadow query runs against the

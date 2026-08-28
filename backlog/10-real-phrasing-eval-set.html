@@ -1,12 +1,21 @@
+<meta charset="utf-8">
 <title>RD-10 · Build a real-phrasing eval set from public threads</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-10</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-10</div>
 
   <div class="ticket-head">
     <h1>Build a real-phrasing eval set from public single-word-request threads</h1>
     <span class="badge badge-p1">P1 · evaluation</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Every score in this project rests on 312 questions one person wrote in one sitting. This checks them against how people actually ask.</p>
+    <p><b>Today —</b> no real user query has ever been recorded — first by deliberate choice, and now because the app has too little traffic to record any.</p>
+    <p><b>Do —</b> harvest real questions from a public Q&A site where people ask <i>"what's the word for..."</i> and get answered, so each one arrives with its correct answer attached.</p>
+    <p><b>Why it matters —</b> this improves search by exactly zero. What it does is tell you whether the numbers claiming search improved mean anything outside the one voice that wrote the test set. Expect lower scores against it — people only post there when already stuck.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Depends on:</b> RD-02's cutover landing first</span>
     <span><b>Touches:</b> <code>eval/sets/</code> (new file, never <code>v1</code>), a new harvest script in <code>scripts/</code></span>

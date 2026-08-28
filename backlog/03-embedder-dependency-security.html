@@ -1,12 +1,21 @@
+<meta charset="utf-8">
 <title>RD-03 · Resolve embedder dependency vulnerabilities</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-03</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-03</div>
 
   <div class="ticket-head">
     <h1>Resolve critical/high vulnerabilities without breaking the pinned embedder</h1>
     <span class="badge badge-p1">P1 · dependency security</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>A security warning in a library the app cannot casually upgrade.</p>
+    <p><b>Today —</b> the automated security scanner reports 3 critical and 17 high-severity problems. All of them are inside the dependency chain of the one package that loads the search model.</p>
+    <p><b>Do —</b> fix the warnings without changing what the model does.</p>
+    <p><b>Why it matters —</b> the obvious fix — upgrade everything — risks silently changing the numbers the model produces, which would change search results with no visible sign that anything happened. No known way to exploit these in this app; this is about not carrying known-broken code.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Touches:</b> <code>package.json</code>, <code>@xenova/transformers</code></span>
     <span><b>Risk:</b> a naive fix breaks production search</span>

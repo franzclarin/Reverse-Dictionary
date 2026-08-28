@@ -1,13 +1,22 @@
+<meta charset="utf-8">
 <title>RD-06 · Remove the userbase and rate limiting entirely</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-06</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-06</div>
 
   <div class="ticket-head">
     <h1>Remove the userbase (Clerk auth, credits, saved words, leaderboard) and rate limiting entirely</h1>
     <span class="badge badge-p1">P1 · product simplification</span>
     <span class="badge badge-done">✓ Done · 2026-08-26</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>The app had user accounts that nobody used. They are gone.</p>
+    <p><b>Was —</b> sign-in and sign-up, saved word collections, a credits and streak system, an unused leaderboard, and per-user request throttling — none of it serving any purpose.</p>
+    <p><b>Did —</b> removed all of it: 3 routes, 5 components, 4 database tables and 3 outside services.</p>
+    <p><b>Result —</b> done 2026-08-26. Search is now anonymous and unthrottled, and about 15 files got simpler. Every call site was checked by hand before deleting rather than assumed — the lesson RD-04 had already recorded.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Supersedes:</b> RD-04 (its full scope, not just the already-dead games code)</span>
     <span><b>Touches:</b> Clerk, Upstash, <code>User</code>/<code>SavedWord</code>/<code>Lookup</code>/<code>GameRound</code>, <code>/api/lookup</code></span>

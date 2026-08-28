@@ -1,0 +1,82 @@
+<meta charset="utf-8">
+<title>RD-15 · Hard negative mining</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-15</div>
+
+  <div class="ticket-head">
+    <h1>Mine hard negatives from observed retrieval failures</h1>
+    <span class="badge badge-p3">P3 · training data</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Show the model harder wrong answers during training — but not the ones it is usually told to use.</p>
+    <p><b>Today —</b> training mostly shows the model obviously-unrelated wrong answers, which are too easy to reject and so teach it little.</p>
+    <p><b>Do —</b> feed it genuine near-misses instead: the words the live system actually returns when it gets a question wrong.</p>
+    <p><b>Why it matters —</b> filed at low priority on purpose. The problem this technique is usually aimed at — confusing close synonyms — is worth at most <b>3.4 points</b> here, and this project deliberately scores a synonym as a <i>correct</i> answer. Training the model to pull synonyms apart would push against its own scoring rule.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Depends on:</b> <a href="14-synthetic-query-training-pairs.html">RD-14</a> — negatives are mined <i>against queries</i>, and there are none yet</span>
+    <span><b>Feeds:</b> <a href="09-expand-embedding-training-data.html">RD-09</a></span>
+    <span><b>Touches:</b> a dev-only mining script in <code>scripts/</code>, reusing <code>scripts/lib/retrieval.ts</code></span>
+    <span><b>Risk:</b> optimising strict R@1 at the cost of lenient R@1 — the metric the decision rule actually resolves on</span>
+    <span><b>Est:</b> S once RD-14's queries exist; the mining itself is a top-k scan the harness already performs</span>
+  </div>
+
+  <p class="lede">Contrastive training with in-batch negatives learns to separate a target from whatever happened to share its batch, which is usually easy. Mining <i>confusable</i> negatives is a real and standard improvement. Filed here at low priority with its stated motivation corrected, because the specific problem it is usually proposed to fix is measured at 3.4 points on this system, and the obvious way to mine them can cost more than that.</p>
+
+  <div class="callout">
+    <span class="callout-label">The synonym-collapse framing does not survive contact with the metrics</span>
+    <p>"Synonym collapse" is worth at most <b>3.4 points</b> here: strict R@1 is 20.6% and lenient R@1 is 24.0%, and the entire difference is queries where the system returned a word this project has already ruled <i>acceptable</i>. Lenient R@1 is the metric the decision rule resolves on (METHODS §9a). So training the encoder to push near-synonyms apart optimises a 3.4pp strict gap while actively risking the headline number — the eval set's <code>acceptable[]</code> field exists precisely because returning a synonym is <b>not</b> an error. Mine negatives, but not from a synonym list.</p>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Mine from measured failures, not from a synonym heuristic.</b> The per-query <code>results</code> arrays in <code>eval/runs/*.json</code> are a direct record of what the live system actually returns instead of the right answer — the empirically confusable words, not the ones a thesaurus predicts. Use those as the negative source. Same mechanism as top-k mining, aimed at observed errors rather than assumed ones.</li>
+      <li><b>Never mine using the eval set's own queries.</b> Negatives mined from <code>v1.jsonl</code> queries and then trained on are training on the test set, and every subsequent number on that set becomes meaningless. Mine over RD-14's synthetic queries or a held-out slice only. This is the reason this ticket depends on RD-14 rather than being independent of it.</li>
+      <li><b>Exclude synset mates and <code>acceptable[]</code> members from the negative pool.</b> A word sharing the target's synset is by construction not a wrong answer — synset mates share one gloss and their vectors are <i>bit-identical</i>, so labelling one a negative asks the model to separate two copies of the same text. Filter them out explicitly rather than trusting the mining to avoid them.</li>
+      <li><b>Watch echo as the primary regression.</b> Echo fell 40.7% → 14.5% at the cutover and CLAUDE.md treats it as a headline metric. Negatives drawn from the same semantic field are drawn from exactly the neighbourhood where echo lives; a mining strategy that raises it back has traded the cutover's main win for a smaller one.</li>
+      <li><b>Report strict and lenient R@1 separately in any evaluation of the result</b>, for the reason in the callout. A run that shows strict up and lenient flat has demonstrated the failure mode, not a win.</li>
+      <li><b>Consider whether this belongs to the reranker instead.</b> Hard negatives are the standard way to train a <i>cross-encoder</i>, and RD-12's reranker addresses 53 points of headroom against this path's 23. If RD-12 fine-tunes its cross-encoder, this mining work likely has a better home there — reassess before doing it for the bi-encoder.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>What the ranking failures actually are</h3>
+    <p>CLAUDE.md's margin analysis found that on the lemma index, echo results outscored the true target by +0.134 mean cosine and non-echo results by +0.094 — the target sat below nearly everything. That was a representation failure, not a negatives failure, and it is what RD-02 fixed by changing what was indexed. Re-run the margin probe (<code>scripts/probe-margins.ts</code>) on the gloss index before assuming the remaining failures have the shape hard negatives address.</p>
+
+    <h3>Synset ties are not a defect</h3>
+    <p>The synset-keyed collapse was measured lossless: 287/287 identical top-10 order, 0 discordant rank-1 pairs, 204,549 gloss rows collapsing to 114,662 with 0 divergent. Where two synonyms tie, the tie-break is <code>--expansion-order wordnet</code> — sense familiarity as a prior — and CLAUDE.md already flags that choosing it on benchmark score alone is mild benchmark-fitting. Ties are handled; they are not the thing to train away.</p>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>CLAUDE.md</code> §"Established facts" — the margin measurements and the synset-collapse result.</li>
+      <li><code>scripts/lib/retrieval.ts</code> — the shared search path any mining script must reuse rather than reimplement.</li>
+      <li><a href="12-cross-encoder-reranker.html">RD-12</a> — the alternative home for this work.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>"Fix synonym collapse" assumes synonyms are errors; here they are scored as correct.</b> This project chose lenient R@1 as its decision metric and built <code>acceptable[]</code> to support it, so an intervention that separates synonyms is optimising against its own scoring rule. A technique that is right in general can be aimed at the wrong target in a specific system — check which metric moves before adopting the framing that comes with the technique.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The system's own errors are a better negative source than a lexical resource.</b> WordNet can say which words are related; only the run artifacts can say which words this encoder actually confuses. The second set is smaller, more specific, and already sitting in <code>eval/runs/</code>.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li>Negatives mined from observed retrieval failures, reusing <code>scripts/lib/retrieval.ts</code>, not a second search path</li>
+      <li>No negatives mined using <code>eval/sets/v1.jsonl</code> queries</li>
+      <li>Synset mates and <code>acceptable[]</code> members explicitly excluded from the negative pool</li>
+      <li>Margin probe re-run on the gloss index before assuming the failure shape</li>
+      <li>Any resulting model reported with strict <i>and</i> lenient R@1, plus echo, paired vs. the current production run</li>
+      <li>Explicit decision recorded on whether the negatives serve the bi-encoder (RD-09) or RD-12's cross-encoder</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-15 · reverse-dictionary</footer>
+</div>

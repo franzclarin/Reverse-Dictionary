@@ -1,0 +1,84 @@
+<meta charset="utf-8">
+<title>RD-14 · Synthetic query-style training pairs</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-14</div>
+
+  <div class="ticket-head">
+    <h1>Generate query-style training pairs from glosses</h1>
+    <span class="badge badge-p2">P2 · training data</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Write training examples that sound like real people, because the existing ones sound like a dictionary.</p>
+    <p><b>Today —</b> the model has only ever seen terse definitions as its input examples. Nobody types <i>"a motor vehicle with four wheels"</i> into a search box.</p>
+    <p><b>Do —</b> use a language model, offline, to write 5–10 natural phrasings for each meaning — <i>"the thing you drive"</i>, <i>"when you..."</i>, <i>"something that..."</i> — as new training material.</p>
+    <p><b>Why it matters —</b> this is the raw material RD-09 needs. Two cautions carried in the ticket: the examples must be attached to <i>meanings</i> rather than bare words, or it retrains the exact fault RD-02 removed; and it runs as an offline script, so the live app gains no AI dependency.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Depends on:</b> <a href="12-cross-encoder-reranker.html">RD-12</a> reporting first — it addresses a much larger slice of the same problem</span>
+    <span><b>Feeds:</b> <a href="09-expand-embedding-training-data.html">RD-09</a> (the retrain), <a href="15-hard-negative-mining.html">RD-15</a> (negatives are mined against these queries)</span>
+    <span><b>Touches:</b> a new dev-only script in <code>scripts/</code>, a new corpus file. <b>No application code and no runtime dependency.</b></span>
+    <span><b>Risk:</b> contaminating <code>eval/sets/v1.jsonl</code>; teaching the model an LLM's register rather than a person's</span>
+    <span><b>Est:</b> days for the pipeline, then a metered generation run</span>
+  </div>
+
+  <p class="lede">RD-09 step 2 already names this — "a target word paired with several ways a person might actually describe it" — and leaves it entirely unspecified. This ticket is that specification. The training corpus is 181,149 WordNet triplets whose queries <i>are</i> terse gloss text; the app is used with sentences like "when you can't remember a word." Nothing in training has ever looked like that.</p>
+
+  <div class="callout">
+    <span class="callout-label">Read the size of this bet before starting</span>
+    <p>Retraining competes for the <b>23.0%</b> of queries where the target is never retrieved at all, at any depth to 100. The other <b>53.0%</b> — already retrieved, merely mis-ranked — belongs to RD-12, which needs no new data and no training run. The prior on retraining in this codebase is also weak: the last attempt bought <b>+4.5pp</b>, below the project's own 6pp bar. This ticket is worth doing; it is not worth doing first.</p>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Pair queries with synsets, not words.</b> The obvious framing — <code>(synthetic_query, word)</code> — retrains the exact defect RD-02 was built to remove. CLAUDE.md's measurement is unambiguous: <code>VocabEmbedding</code> stores bare-lemma vectors, <code>cos(embed(word), stored[word]) = 1.000000</code>, and search was "a 12-word description against a 1-token document." Generate <i>from</i> the gloss and key the pair to the <b>synset</b>, matching what the index actually holds since the cutover.</li>
+      <li><b>Dev-only script, no runtime dependency.</b> Same posture as <code>tsx</code> and <code>wordnet-db</code>: a devDependency, never imported by the app, API key read from the environment, output written as JSONL and committed. The deployed bundle keeps its no-generative-dependency invariant — Claude was removed on 2026-08-18 and nothing here reintroduces it into a request path.</li>
+      <li><b>Meter the cost before committing to it.</b> 117,791 synsets × 5–10 queries is <b>0.6–1.2M generations</b>. Run a stratified pilot first — sampled across POS and across <code>meta.zipf</code> frequency bands, since <code>eval/data/zipf-en.tsv</code> already provides the banding — sized to what one RD-09 eval cycle can actually consume. A full-corpus run before a pilot has demonstrated the pairs help is spending the budget on an untested assumption.</li>
+      <li><b>Verify disjointness from every eval set, mechanically.</b> Output must be checked against <code>eval/sets/v1.jsonl</code> (sha256 <code>cc03e134…</code>) and, once it exists, RD-10's <code>v2-elu.jsonl</code>. Check on both <code>query</code> and <code>target</code>, and record the check in the corpus provenance. This is the one step that cannot be skipped and re-added later.</li>
+      <li><b>Vary the phrasing deliberately, and record the templates.</b> "when you…", "something that…", "the word for…" are three registers, not one; generating all pairs under a single instruction produces a corpus that teaches one sentence shape. Store the prompt/template with each row so the corpus can be sliced by register at eval time — the same discipline <code>meta.style</code> already gives the eval harness.</li>
+      <li><b>Record full provenance</b>: generating model and version, prompt templates, generation date, sampling strategy, and the disjointness check. Every run in this project records its config; a training corpus that cannot say how it was made cannot be reproduced or audited later.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>The known failure mode is style, not quality</h3>
+    <p>Synthetic queries measure a model's idea of how people ask, not how people ask. RD-10 rejected generative text for <i>evaluation</i> on exactly this ground, and that judgement stands — which is why the honest held-out check for any model trained on this corpus is <b>RD-10's set, not this one</b>. Training on synthetic data and evaluating on synthetic data would produce a number that only describes the generator.</p>
+
+    <h3>The training/eval distinction is why this is allowed at all</h3>
+    <p>RD-10's objection was scoped to eval data, where a generated query would replace the real-phrasing signal the set exists to provide. Training is a different use: the corpus is a means of teaching the encoder a register, and it is measured against sets it did not write. State this distinction in the corpus README so a later reader does not see it as a contradiction of RD-10.</p>
+
+    <h3>ELU data must stay out of this corpus</h3>
+    <p>RD-10 flags that Stack Exchange content is CC-BY-SA <i>and</i> that SE's terms carry restrictions around AI <b>training</b> use — a different question from evaluation use. RD-10 names this ticket's predecessor as "the ticket most tempted to reach for it." Do not use ELU rows as training pairs unless that is separately cleared, and keep the two corpora physically separate so the mistake requires an explicit act.</p>
+
+    <h3>There is no real-query corpus to compare against, by design</h3>
+    <p>No query text has ever been logged. <code>lib/shadowLookup.ts</code> stores a hash and top-1 only; the pre-RD-06 <code>Lookup</code> model was <code>{id, userId, createdAt}</code>, a rate-limit counter. There is nothing to validate the synthetic register against except RD-10's harvested set, which is a further argument for doing RD-10 first.</p>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The natural framing of this ticket contains the bug RD-02 just fixed.</b> "Generate queries for each vocab word" produces word-keyed pairs, which is the lemma-target shape that cost this project 13.9 points of recall. The index changed at the cutover; anything downstream that still thinks in words rather than synsets is describing the old system.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>A held-out split is free and was the original run's real gap.</b> RD-09 records this already: the first fine-tune ran <code>eval_on_start: False</code> and <code>prediction_loss_only: True</code>, which is why its 10.9% figure is unusable. More data does not fix that; only a split does. This corpus should be generated with its split boundary decided up front, not carved out afterwards.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li>Pairs keyed to synsets and generated from gloss text, not to bare lemmas</li>
+      <li>Generator is a dev-only script in <code>scripts/</code>; no new runtime dependency and no key required to build or serve the app</li>
+      <li>Stratified pilot run and evaluated before any full-corpus generation is funded</li>
+      <li>Disjointness from <code>eval/sets/v1.jsonl</code> (and <code>v2-elu.jsonl</code> if present) mechanically verified and recorded</li>
+      <li><code>v1.jsonl</code> verified byte-identical afterward</li>
+      <li>Prompt templates stored per row so the corpus can be sliced by register</li>
+      <li>Provenance recorded: model, templates, date, sampling strategy, disjointness result</li>
+      <li>No Stack Exchange / ELU content present in the corpus</li>
+      <li>Train/held-out boundary decided and documented before generation, not after</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-14 · reverse-dictionary</footer>
+</div>

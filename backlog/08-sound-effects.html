@@ -1,13 +1,22 @@
+<meta charset="utf-8">
 <title>RD-08 · Add sound effects</title>
 <link rel="stylesheet" href="style.css">
 <div class="wrap">
-  <div class="crumbs"><a href="index.html">← Tickets</a> / RD-08</div>
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-08</div>
 
   <div class="ticket-head">
     <h1>Add sound effects to make the search experience more immersive</h1>
     <span class="badge badge-p3">P3 · polish</span>
     <span class="badge badge-done">✓ Done · 2026-08-26</span>
   </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>The app was silent. Now it makes typewriter noises.</p>
+    <p><b>Was —</b> no sounds at all, and no audio files anywhere in the project.</p>
+    <p><b>Did —</b> added five effects — a key click while typing, a ding on submit, a stamp when results land, a soft tone on errors, and a click for smaller actions — <i>generated in code</i> rather than played from files.</p>
+    <p><b>Result —</b> done 2026-08-26. No audio assets and no new dependency were added. There is a mute toggle in the nav bar, and the choice is remembered between visits.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Touches:</b> <code>context/SoundContext.tsx</code> (new), <code>app/layout.tsx</code>, <code>components/Navbar.tsx</code>, <code>components/SearchInput.tsx</code>, <code>components/SearchResults.tsx</code>, <code>components/WordShareButtons.tsx</code></span>
     <span><b>Risk:</b> low — additive, muted by default preference is respected, no new dependency</span>
