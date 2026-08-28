@@ -5,11 +5,31 @@ import { useSound } from "@/context/SoundContext";
 import { APPROXIMATIONS, type Stage } from "./stages";
 import type { Snapshot } from "./types";
 
+/**
+ * Example queries, every one of which lands its intended word at rank 1.
+ *
+ * **Verified against the live index, not guessed.** Two of the originals did
+ * not work and had to go: "the smell of rain on dry earth" returned `humidity`
+ * — and could never have been right, because `petrichor` is not in the
+ * vocabulary at all (see RD-17) — and "a fear of being forgotten after you die"
+ * returned `thanatophobia`, which is the fear of death itself.
+ *
+ * Each one also has a rank-1 synset with **more than one member**, so stage 7
+ * always has a real tie to demonstrate rather than a lone word:
+ *
+ *   wandering, roving, vagabondage        0.726
+ *   sunset, sundown                       0.745
+ *   bibliophile, booklover, book lover    0.931
+ *   ambidextrous, two-handed              0.761
+ *
+ * **Retest before changing this list**, and retest it wholesale if the index is
+ * ever rebuilt. A broken example is the first thing a visitor clicks.
+ */
 export const EXAMPLES = [
-  "the smell of rain on dry earth",
   "walking without a destination in mind",
-  "a fear of being forgotten after you die",
   "the last light before the sun goes down",
+  "a person who loves books",
+  "able to use both hands equally well",
 ];
 
 export function QueryBar({
