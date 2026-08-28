@@ -19,7 +19,7 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 
 ## How search works (the core flow)
 
-1. `app/page.tsx` `handleSearch()` → POST `/api/lookup` only. **No Claude fallback** — errors surface directly (with the server's `detail`).
+1. `app/page.tsx` `handleSearch()` only routes to `/search?q=…`; **`components/SearchResults.tsx` owns the POST to `/api/lookup`**, so a query typed on the landing page and one re-run from the results bar go through exactly one code path. **No Claude fallback** — errors surface directly (with the server's `detail`).
 2. `app/api/lookup/route.ts`:
    - `embed(query)` (`lib/embedder.ts`) → 384-dim L2-normalised vector.
    - `searchGloss()` (`lib/glossSearch.ts`) — pgvector query over **`GlossEmbedding`** inside a `$transaction` with `SET LOCAL ivfflat.probes = 40`:
@@ -57,6 +57,57 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 - `app/word/[word]/error.tsx` is the boundary that keeps a server-side exception from surfacing as Next's bare "Application error … Digest: …".
 - **Known cosmetic issue:** with `dynamic = "force-dynamic"`, `notFound()` renders the correct 404 page but the HTTP status is already committed as 200. Pre-existing; matters only for SEO.
 
+## The `/explain` page (RD-18)
+
+`/explain` shows the retrieval pipeline running on a phrase you type: WordPiece
+tokens, one real 384-d vector per token, those vectors averaging into one, and
+the nearest senses lighting up in a projected cloud. **It moves no metric and
+ships nothing into the search path** — judge it on whether someone with no ML
+background comes away understanding [echo](backlog/glossary.html).
+
+- **Everything numeric on it is real.** It calls the same `/api/lookup` with
+  `debug: true`, so scores come from the live 117,791-synset index through the
+  served code path. There is no second retrieval implementation to drift.
+- **Two gated seams, both off by default.** `searchGlossSynsets()` takes
+  `{ withGloss, withVector }`; with both off it emits **character-identical SQL**
+  to the pre-RD-12 query. `/api/lookup` takes `debug: true`, which adds a `debug`
+  key and changes nothing else. `k` is now validated (1…100) — it used to flow
+  unbounded into `LIMIT`.
+- **`embedTokens()` (`lib/embedder.ts`) is the animation's honesty.** One
+  `pooling: "none"` forward pass returns `last_hidden_state`; mean-then-normalise
+  reproduces `embed()` exactly, because Transformers.js's `mean_pooling()` is a
+  plain attention-masked mean. So the film averages the encoder's **actual**
+  token vectors rather than something synthesised to look like activity. The
+  serving path still calls `embed()`, untouched.
+- **The browser never loads the model.** `lib/viz/wordpiece.ts` reimplements
+  BERT WordPiece from `public/viz/wordpiece.json` (the 30,522-piece vocabulary,
+  293 KB) rather than importing `@xenova/transformers` into the client, which
+  would have dragged ~1 MB of JS and the onnxruntime-web loader into a page
+  whose whole point is that the 86 MB ONNX file stays on the server. `/explain`
+  first-load JS is **102 kB**.
+- **A reimplementation is only honest if it is checked**, so `npm run verify-viz`
+  asserts it against the real `AutoTokenizer` over every query in the frozen eval
+  set plus deliberately awkward strings (accents, OOV, CJK, truncation) — 415/415
+  identical. It caught a genuine quirk worth keeping: **an over-long input loses
+  its `[SEP]`**, because truncation happens *after* post-processing appends it.
+- **PCA, and the reason is not aesthetics.** `scripts/build-viz-snapshot.ts` fits
+  a fixed 384×3 basis offline, so a synset the fit never saw still has an exact
+  place and the layout does not move between queries. Measured: **three
+  components carry 11.9% of the variance**, which is printed on the page. UMAP
+  and t-SNE were rejected because a live query would have no honest position.
+- **`/explain` must never get an `outputFileTracingIncludes` entry.** It renders
+  from `public/viz/` and calls the API; verified traced at 20 files, none of them
+  model or ONNX.
+- Canvas 2D, not `three` — 6,200 points with an orbit camera and a painter's-algorithm
+  depth sort did not justify a rendering dependency in a repo with five.
+  `components/explain/PointCloud.tsx` writes the query's screen position into a
+  **ref** each frame so `TransformFilm.tsx` can fly the vector into the cloud;
+  routing 60fps through React state would re-render the page for nothing.
+- The steps card hides and restores (`localStorage`, `rd-explain-steps-open`).
+  **The four approximation labels along the bottom deliberately do not hide with
+  it** — a control that tucked the caveats away while the persuasive picture kept
+  running would invert the reason they exist.
+
 ## Data model (`prisma/schema.prisma`)
 
 Models: `Word`, `VocabEmbedding`, `GlossEmbedding`, `ShadowLookup`.
@@ -79,6 +130,7 @@ Models: `Word`, `VocabEmbedding`, `GlossEmbedding`, `ShadowLookup`.
 - **Never cache a rejected promise.** `globalThis._embedderPromise` memoises the model load. If a rejected promise stays in that slot, every later request on the same warm instance fails instantly with the same stale error forever, even after the network heals. `getEmbedder()` clears the slot on rejection (guarded by identity check); `loadEmbedder()` retries 3× with exponential backoff and bails early on non-network errors so it doesn't burn the 60s budget.
 - Observed cause codes: `ENOTFOUND` (bad/stale host), `ECONNREFUSED` (host up, nothing listening), plus `EAI_AGAIN` / `UND_ERR_CONNECT_TIMEOUT` for DNS and CDN stalls.
 - The error `detail` returned to the client includes `subsystem` + `code`, but **`hostname` only outside production** (a database host can identify a private DB). The full shape is always in the server logs.
+- **The retrieval transaction waits for Neon to wake up.** `searchGlossSynsets()` passes `{ maxWait: 15s, timeout: 20s }` to `$transaction`. Prisma's 2s default is shorter than Neon's compute wake-up, so the first query after an idle period died with `P2028 Unable to start a transaction in the given time` — a 500 for the user with nothing wrong with the query. The eval harness works around the same thing by warming the database first; a route cannot warm anything, so it waits. Both values sit well inside the route's `maxDuration = 60`.
 - Migrations: Neon pooled connections break `prisma migrate deploy`'s advisory lock — apply SQL via `prisma db execute --file` instead.
 - Env: local `.env.local` needs only `DATABASE_URL` (Neon owner role). No Clerk or Upstash keys required anymore.
 
@@ -269,6 +321,9 @@ npm run lint
 npx tsc --noEmit       # type-check (run before committing)
 npm run fetch-model    # download the ONNX model into models/ (idempotent; build runs it too)
 
+npm run build-viz      # rebuild /explain's two static assets (PCA snapshot + WordPiece vocab)
+npm run verify-viz     # RD-18's honesty gate — see below; run it after touching retrieval
+
 npm run eval:prod      # offline eval of the PRODUCTION path (gloss index, probes=40)
 npm run eval           # same set against the lemma index — now the rollback path
 npm run eval:exact     # nearest-neighbour ceiling (sequential scan)
@@ -299,6 +354,8 @@ npx tsx scripts/eval.ts --set eval/sets/v1.jsonl --tag cell_gloss_ft --index-fil
 - **Deploy by pushing to `main`** — the Git integration clones the repo, so `.gitignore` applies and the build is correct. `vercel deploy --prod` **fails**: the CLI uploads the working directory instead, sweeping in `reverse_dict_model.zip` and `_model_tmp/` (~1.5GB) and blowing the 100MB per-file cap. `.gitignore` does not apply to CLI deploys — only `.vercelignore` does, and there isn't one.
 - The repo lives under OneDrive. Its placeholder files make Next's startup cleanup of `.next` fail with `EINVAL: readlink …`, and `next dev` then **exits 0 without serving**. If dev dies instantly, `rm -rf .next` and restart.
 - ESLint config is `.eslintrc.json` (`next/core-web-vitals`). Without it `npm run lint` drops into an interactive setup wizard and hangs non-interactive shells.
+- **Committed `/explain` artifacts:** `public/viz/pipeline-snapshot.json` (~800 KB, 280 KB gzipped) and `public/viz/wordpiece.json` (293 KB). Both are committed rather than built in CI: the page cannot render without them, and the snapshot needs a database the build does not have. Regenerate with `npm run build-viz` — the PCA fit is deterministic, so a rebuild against the same data is byte-identical. `public/` did not exist before RD-18.
+- **`npm run verify-viz` is the gate on `/explain` telling the truth**, and it is cheap. It asserts: the serving `SELECT` is byte-identical to a frozen copy with both debug options off; the debug branch returns the same words as the serving branch; the browser tokenizer matches `AutoTokenizer`; the pooled vector is the mean of the real token vectors; and retrieved synsets project onto their snapshot coordinates. Run it after touching `lib/glossSearch.ts`, `lib/embedder.ts`, or `lib/viz/*`.
 - **Committed eval artifacts:** `eval/data/zipf-en.tsv` (1.7 MB), `eval/sets/*.tsv|jsonl`, and the reference runs `eval/runs/baseline.json` / `exact.json` / `filtered.json` / **`prod_gloss_shipped.json`**. **Rerank runs are not committed** — they carry a persisted shortlist and run ~5.8 MB, they describe a rejected experiment rather than a production path, and CLAUDE.md already cites uncommitted runs (`prod_gloss`, `prod_gloss_p100`) in its own tables. Regenerate with `npm run eval:rerank`; the `*.shortlist.jsonl` sidecars are gitignored. That last one is the current production path; the other three describe the pre-cutover lemma index, which is now the *rollback* path — compare new runs against `prod_gloss_shipped`, not `baseline`, unless you specifically mean "versus what we replaced". Ignored: the rest of `eval/runs/`, `eval/audit/`, `eval/data/pool-manifest.json`. Vector cells (~230 MB) live outside the repo entirely — see `EVAL_CELL_DIR`.
 - **Don't pipe a loop's command through `tail`/`head` when you care whether it worked.** The pipeline reports the exit status of the *last* stage, so six consecutive failures reported success and wasted a 37-minute run. Check status per iteration, or use `PIPESTATUS`.
 - Other docs: `README.md` (overview, local setup, API reference), `ARCHITECTURE.md` (system design), `DEPLOYMENT.md` (deploying to Vercel). Consolidated from five docs to three on 2026-08-26 — `SETUP.md` and `GETTING_STARTED.md` were near-duplicates of README's own setup section and were folded into it rather than kept as separate files.

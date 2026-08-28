@@ -85,7 +85,16 @@
       <div class="term">
         <div class="term-name">vocabulary</div>
         <div class="term-def">
-          <p>The full set of words the app can possibly return — 141,854 of them. If a word is not in the vocabulary, no amount of improvement will make search find it.</p>
+          <p>The full set of words the app can possibly return — <b>149,400</b> of them, being every lemma in every synset of the live definition index. If a word is not in the vocabulary, no amount of improvement will make search find it.</p>
+          <span class="eg">the older word-based index held 141,854; RD-02 raised the figure as a side effect, because it was built from WordNet directly rather than from that hand-accumulated table</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">coverage</div>
+        <div class="term-def">
+          <p>How much of the language the vocabulary actually contains. Distinct from accuracy: a coverage failure means the right answer was never a candidate, so no ranking change can reach it.</p>
+          <p>This app's coverage is fixed by <b>WordNet 3.0, frozen in 2006</b> — which is why it cannot return <code>petrichor</code>, <code>selfie</code> or <code>gaslighting</code> at all (RD-17).</p>
         </div>
       </div>
 
@@ -224,9 +233,18 @@
       </div>
 
       <div class="term">
+        <div class="term-name">distractor</div>
+        <div class="term-def">
+          <p>Every word in the index that is <i>not</i> the answer to the question being asked — i.e. almost all of them. The more distractors there are, the harder it is to put the right word first, which is why adding vocabulary is never free.</p>
+          <span class="eg">a live search ranks the true answer against <b>117,791</b> definitions. Test cells built on a matched 20,000-word pool are an easier problem, which is why their absolute scores are never compared to production</span>
+        </div>
+      </div>
+
+      <div class="term">
         <div class="term-name">reachable</div>
         <div class="term-def">
           <p>Whether the right answer even exists in the app's vocabulary. Unreachable questions are kept in the test set but excluded from headline scores — dropping them entirely would flatter the numbers by deleting the questions the app cannot possibly answer.</p>
+          <p><b>The catch:</b> fixing coverage moves those questions <i>into</i> the scored slice, so a strictly better app can score worse. Compare on a fixed denominator and report coverage as its own number (RD-17).</p>
         </div>
       </div>
 
@@ -275,6 +293,22 @@
     <h2>4 · The models</h2>
     <p class="sec-intro">The app runs one small language model today. Several tickets are about training it better, or adding a second one.</p>
     <div class="terms">
+
+      <div class="term">
+        <div class="term-name">tokenization</div>
+        <div class="term-def">
+          <p>The first thing that happens to anything you type. The sentence is chopped into pieces drawn from a fixed list of 30,522 of them — not always whole words, since anything unusual gets split into fragments the model has seen before.</p>
+          <span class="eg">e.g. <b>nostalgic</b> is not in the list, so it arrives as several pieces. This is why the model is never simply stumped by a word it has not met.</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">mean pooling</div>
+        <div class="term-def">
+          <p>The model produces one embedding <i>per piece</i>, and this is the step that averages them into a single embedding for the whole phrase. Ordinary averaging, nothing cleverer.</p>
+          <span class="eg">it is why a twelve-word description and a four-word definition can be compared at all — both come out as one vector of the same size.</span>
+        </div>
+      </div>
 
       <div class="term">
         <div class="term-name">bi-encoder</div>
@@ -355,6 +389,38 @@
         <div class="term-name">quantization</div>
         <div class="term-def">
           <p>Shrinking a model by storing its numbers less precisely. Faster and smaller, slightly less accurate. Noted in these tickets mainly because <b>no quantized version of this model exists</b> — a fact that has been mistaken for a tuning choice.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">dimensionality reduction (PCA)</div>
+        <div class="term-def">
+          <p>Squashing each embedding's 384 numbers down to 3 so they can be drawn on a screen, keeping the directions along which meanings differ most. Necessarily lossy: most of the information is thrown away.</p>
+          <span class="eg">what makes RD-18's picture possible — and the reason distances in that picture are <b>not</b> the scores the app ranks by, which are computed on all 384.</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">variance<br>explained</div>
+        <div class="term-def">
+          <p>How much of the original detail a flattened picture keeps. Squashing 384 numbers down to 3 throws most of them away, and this is the number that says how much.</p>
+          <span class="eg">e.g. the three directions drawn on <b>/explain</b> carry <b>11.9%</b> — so about seven-eighths of what separates two meanings is not on the screen, which is why distance there is never the ranking</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">projection /<br>basis</div>
+        <div class="term-def">
+          <p>The fixed recipe for flattening. A <b>basis</b> is the set of directions you keep; <b>projecting</b> is measuring a point against them. Fit it once and it becomes a fixed table, so anything new can be placed by the same rule instead of redrawing the whole picture.</p>
+          <span class="eg">this is why a word sense the drawing never sampled still lands in exactly the right spot rather than being guessed from its neighbours</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">UMAP</div>
+        <div class="term-def">
+          <p>A rival to PCA for flattening. It usually makes prettier, more clearly separated clumps, but it has no fixed recipe: a new point cannot be added without redoing the layout.</p>
+          <span class="eg">rejected for <b>/explain</b> for exactly that reason — the world would shift between queries, and the one point that must be honest is the query&rsquo;s own</span>
         </div>
       </div>
 

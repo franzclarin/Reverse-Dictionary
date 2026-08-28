@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "fetch-model": "node scripts/fetch-model.mjs",
+    "build-viz": "tsx scripts/build-viz-snapshot.ts && tsx scripts/build-tokenizer-asset.ts",
+    "verify-viz": "tsx scripts/verify-viz-snapshot.ts",
     "build": "npm run fetch-model && next build",
     "start": "next start",
     "lint": "next lint",

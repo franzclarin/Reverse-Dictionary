@@ -44,8 +44,8 @@ const BASE_BACKOFF_MS = 500;
 
 type Embedder = (
   text: string,
-  options: { pooling: "mean"; normalize: boolean }
-) => Promise<{ data: Float32Array }>;
+  options: { pooling: "mean" | "none"; normalize: boolean }
+) => Promise<{ data: Float32Array; dims: number[] }>;
 
 // Store the loading promise on globalThis so it survives module re-eval and
 // dev hot-reloads (one ONNX session init per warm instance).
@@ -143,4 +143,67 @@ export async function embed(text: string): Promise<number[]> {
   // embeddings were generated with (mean Pooling + Normalize).
   const output = await pipe(text, { pooling: "mean", normalize: true });
   return Array.from(output.data);
+}
+
+/**
+ * The same embedding, with the per-token vectors it was pooled from (RD-18).
+ *
+ * `/explain` animates each token becoming numbers and those numbers averaging
+ * into one. That is only worth drawing if the token vectors are the REAL ones,
+ * so this returns what the encoder actually produced rather than anything
+ * synthesised to look plausible.
+ *
+ * `pooling: "none"` returns `last_hidden_state` at dims `[1, seq, 384]`, and
+ * Transformers.js's own `mean_pooling()` is an attention-masked mean — for a
+ * single un-padded input, a plain arithmetic mean down the sequence. So the
+ * mean-then-normalise below reproduces `embed()` exactly from one forward pass,
+ * rather than costing a second one.
+ *
+ * **That equivalence is asserted, not assumed**: `scripts/verify-viz-snapshot.ts`
+ * checks `embedTokens(q).pooled` against `embed(q)` elementwise. If it ever
+ * stops holding, the page is claiming something false and the check fails first.
+ *
+ * NOT used by the serving path. `/api/lookup` calls `embed()` unless a request
+ * explicitly asks for the debug payload.
+ */
+export async function embedTokens(
+  text: string
+): Promise<{ tokenVectors: number[][]; pooled: number[] }> {
+  const pipe = await getEmbedder();
+  const output = await pipe(text, { pooling: "none", normalize: false });
+
+  const [, sequence, dim] = output.dims;
+  if (output.dims.length !== 3 || output.data.length !== sequence * dim) {
+    throw new SubsystemError(
+      "model",
+      `unexpected token-embedding shape [${output.dims.join(", ")}] for ${output.data.length} values`
+    );
+  }
+
+  const tokenVectors: number[][] = [];
+  const sum = new Float64Array(dim);
+  for (let t = 0; t < sequence; t++) {
+    const offset = t * dim;
+    const vector = new Array<number>(dim);
+    for (let i = 0; i < dim; i++) {
+      const value = output.data[offset + i];
+      vector[i] = value;
+      sum[i] += value;
+    }
+    tokenVectors.push(vector);
+  }
+
+  // Mean, then L2 normalise — the two layers that sit after the transformer in
+  // the sentence-transformers pipeline that seeded the database.
+  let norm = 0;
+  for (let i = 0; i < dim; i++) {
+    sum[i] /= sequence;
+    norm += sum[i] * sum[i];
+  }
+  norm = Math.sqrt(norm) || 1;
+
+  const pooled = new Array<number>(dim);
+  for (let i = 0; i < dim; i++) pooled[i] = sum[i] / norm;
+
+  return { tokenVectors, pooled };
 }

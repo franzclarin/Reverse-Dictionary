@@ -39,6 +39,16 @@ export type SynsetHit = { synsetKey: string; lemmas: string[]; similarity: numbe
 export type GlossSynsetHit = SynsetHit & { gloss: string };
 
 /**
+ * A `SynsetHit` fetched with `{ withGloss: true, withVector: true }`.
+ *
+ * Added for RD-18: the /explain page projects each retrieved synset through a
+ * fixed PCA basis to place it in the drawn cloud. It needs the stored vector to
+ * do that EXACTLY rather than guessing a position from the synset's neighbours,
+ * which is the difference between a diagram and a decoration.
+ */
+export type VizSynsetHit = GlossSynsetHit & { vector: number[] };
+
+/**
  * IVFFlat probes for the gloss index. **Not 10** — the lemma index's value does
  * not transfer, and assuming it did cost 5.5 points of lenient R@1.
  *
@@ -65,6 +75,31 @@ export const GLOSS_PROBES = 40;
 
 /** The one place the gloss table's name is written. */
 export const GLOSS_INDEX = "GlossEmbedding";
+
+/**
+ * The IVFFlat `lists` the index was built with — see the migration
+ * `20260822000000_add_gloss_embeddings`. Not used to query (Postgres reads it
+ * off the index); recorded here because `GLOSS_PROBES` above is only meaningful
+ * as a fraction of it, and because /explain states both on screen. **Re-tune
+ * `GLOSS_PROBES` if this ever changes.**
+ */
+export const GLOSS_LISTS = 115;
+
+/**
+ * Interactive-transaction budget for the retrieval query.
+ *
+ * Prisma defaults to a 2s `maxWait`, and Neon auto-suspends its compute: the
+ * first query after an idle period pays several seconds of wake-up before the
+ * transaction can even begin, which aborts it with `P2028 Unable to start a
+ * transaction in the given time` — a 500 for the user, and nothing wrong with
+ * the query. CLAUDE.md records the same failure taking down whole eval runs,
+ * where the fix was to warm the database first; a route cannot warm anything,
+ * so it waits instead.
+ *
+ * Both sit well inside the route's `maxDuration = 60`, so a genuinely stuck
+ * query still fails as a query rather than as a function timeout.
+ */
+const TRANSACTION_OPTIONS = { maxWait: 15_000, timeout: 20_000 };
 
 /**
  * Expand ranked synsets into ranked words.
@@ -117,27 +152,36 @@ export async function searchGlossSynsets(
    */
   probes: number = GLOSS_PROBES,
   /**
-   * Also select the `gloss` column. **Off by default on purpose**: with it off
-   * this emits byte-identical SQL to the pre-RD-12 query, so the serving path
-   * pulls not one extra byte over the wire. Only a caller that actually reads
-   * gloss text — the cross-encoder — should turn it on.
+   * Extra columns. **Both off by default on purpose**: with both off this emits
+   * byte-identical SQL to the pre-RD-12 query, so the serving path pulls not one
+   * extra byte over the wire. Only a caller that actually reads the extra data
+   * should turn one on — `withGloss` for the cross-encoder (RD-12), `withVector`
+   * for the /explain projection (RD-18).
+   *
+   * `withVector` returns `embedding::text`, i.e. a `"[a,b,...]"` literal, not a
+   * number array — halfvec has no Prisma-native representation. Parse it with
+   * `parseVectorLiteral()` from `lib/viz/projection.ts`.
    */
-  { withGloss = false }: { withGloss?: boolean } = {}
+  {
+    withGloss = false,
+    withVector = false,
+  }: { withGloss?: boolean; withVector?: boolean } = {}
 ): Promise<SynsetHit[]> {
   const glossColumn = withGloss ? `"gloss", ` : "";
+  const vectorColumn = withVector ? `embedding::text AS vector, ` : "";
 
   return prisma.$transaction(async (tx) => {
     // SET LOCAL inside a transaction so it applies only to this query.
     await tx.$executeRawUnsafe(`SET LOCAL ivfflat.probes = ${Number(probes)}`);
     return tx.$queryRawUnsafe<SynsetHit[]>(
-      `SELECT "synsetKey", ${glossColumn}"lemmas", 1 - (embedding <=> $1::halfvec) AS similarity
+      `SELECT "synsetKey", ${glossColumn}${vectorColumn}"lemmas", 1 - (embedding <=> $1::halfvec) AS similarity
          FROM "${GLOSS_INDEX}"
          ORDER BY embedding <=> $1::halfvec
          LIMIT $2`,
       vectorLiteral,
       k
     );
-  });
+  }, TRANSACTION_OPTIONS);
 }
 
 /**

@@ -1,0 +1,160 @@
+<meta charset="utf-8">
+<title>RD-18 · An interactive 3D explainer for the retrieval pipeline</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-18</div>
+
+  <div class="ticket-head">
+    <h1>An interactive 3D explainer for the retrieval pipeline</h1>
+    <span class="badge badge-done">✓ Done</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Nobody can see what this app does. You type a sentence, a word comes back, and everything in between is a black box — including to people who have read the whole backlog.</p>
+    <p><b>Today —</b> the pipeline is explained in prose across <code>CLAUDE.md</code>, this backlog and the <a href="glossary.html">glossary</a>. All of it is accurate and none of it is <i>visible</i>.</p>
+    <p><b>Do —</b> a page at <code>/explain</code> where you type a phrase and watch it happen: the sentence broken into pieces, those pieces becoming one arrow in a cloud of meanings, the nearest meanings lighting up, and a ranked list of words with their real scores.</p>
+    <p><b>Why it matters —</b> it teaches the one thing the prose keeps failing to convey: <b>this app never matches words, it matches meanings</b>, and the thing it ranks is not a word at all — it is a <a href="glossary.html">synset</a>, which then bursts into several words that all score identically.</p>
+    <p><b>Result —</b> done 2026-08-28. Shipped at <code>/explain</code>. Nothing was served into the search path and no metric moved, by design.</p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">Result — done 2026-08-28</span>
+    <p>The page runs the <b>real</b> pipeline on whatever you type. It calls the same <code>/api/lookup</code> with an opt-in <code>debug</code> flag, so every score comes from the live 117,791-synset index through the served code path; with the flag off the SQL is <b>character-identical</b> to what it was before, and a frozen copy of that <code>SELECT</code> is asserted in <code>scripts/verify-viz-snapshot.ts</code> so a future edit breaks a test rather than a promise.</p>
+    <p>Two things cost more than planned and were worth it. First, <b>the animation needed data that did not exist</b>: showing each word being embedded is only honest if each token's vector is the real one, and the API returned just the pooled vector. <code>embedTokens()</code> now takes one <code>pooling: "none"</code> pass and derives the pooled vector from it — and the harness asserts that derivation equals <code>embed()</code> to <b>2.2e-8</b>, so the averaging on screen is the actual arithmetic. Second, the browser tokenizer was <b>reimplemented rather than imported</b>, to keep ~1&nbsp;MB of Transformers.js out of a page whose whole argument is that the model stays on the server; it is checked against the real <code>AutoTokenizer</code> over <b>415/415</b> strings.</p>
+    <p>Measured and displayed: three principal components carry <b>11.9%</b> of the variance in 384 dimensions. <code>/explain</code> first-load JS is <b>102&nbsp;kB</b>, and its function traces <b>20 files, none of them the model</b>.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Depends on:</b> nothing — every number it displays already exists</span>
+    <span><b>Touched:</b> <code>app/explain/</code>, <code>components/explain/</code>, <code>lib/viz/</code>, <code>scripts/build-viz-snapshot.ts</code>, <code>scripts/build-tokenizer-asset.ts</code>, <code>scripts/verify-viz-snapshot.ts</code>, opt-in debug seams in <code>lib/glossSearch.ts</code> / <code>lib/embedder.ts</code> / <code>app/api/lookup/route.ts</code>, first-ever <code>public/</code></span>
+    <span><b>Outcome:</b> shipped. No retrieval change, no schema change, no new dependency — <code>three</code> was forecast and not needed</span>
+    <span><b>Risk (as filed):</b> a visualisation that lies. 3D distance is <i>not</i> the ranking, and a pretty picture is more persuasive than a correct one</span>
+    <span><b>Cost:</b> one day, no production exposure until deploy, no database writes</span>
+  </div>
+
+  <p class="lede">A reverse dictionary is an unusually good thing to visualise, because its entire mechanism is geometric: a sentence becomes a point, and the answer is whatever is nearest. That is genuinely drawable, unlike most of what a model does. The catch is that the space has <b>384 dimensions</b> and the screen has three, so every frame of this thing is a projection — and the whole ticket turns on being loud about which parts are real measurements and which parts are stagecraft.</p>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — M</div>
+      <div class="stat-value">One route, one script, one debug field</div>
+      <div class="stat-note">No schema change, no migration, no retrieval change. The retrieval code it visualises already exposes exactly the right seams: <code>searchGlossSynsets()</code> was split out of <code>searchGloss()</code> in <a href="12-cross-encoder-reranker.html">RD-12</a> so a caller could see synsets and gloss text before expansion — which is precisely what this page needs.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — communication only</div>
+      <div class="stat-value">Moves no metric, by design</div>
+      <div class="stat-note">This is the first ticket in the backlog that is not an argument about recall. It ships nothing into the search path and cannot regress it. Judge it on whether someone with no ML background can explain <a href="glossary.html">echo</a> after five minutes with it.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Trace the pipeline before drawing it.</b> Done — see <i>Prerequisite knowledge</i> below. The trace is in this ticket because a generic "tokenize → embed → rank" diagram would be <i>wrong about this system</i> in two specific ways: there is no reranking stage, and the thing being ranked is a synset rather than a word.</li>
+      <li><b>Precompute the snapshot offline</b> (<code>scripts/build-viz-snapshot.ts</code>). Sample a few thousand synsets from <code>GlossEmbedding</code>, fit <a href="glossary.html">PCA</a> over their vectors, and emit one static JSON: the 384×3 basis, the mean vector, per-synset 3D coordinates, <a href="glossary.html">lemmas</a>, <a href="glossary.html">gloss</a> text, and <b>the measured variance explained by the three components</b>. Import <code>embed</code> from <code>lib/embedder.ts</code> if any embedding is needed at all — never a second encoder, the same rule the eval harness enforces.</li>
+      <li><b>Add a dev-gated debug field to <code>/api/lookup</code></b> returning the query's 384-d vector and the retrieved synsets with their gloss text. <code>searchGlossSynsets(prisma, vec, k, probes, { withGloss: true })</code> already returns that shape. <b>Gate it</b> — with <code>withGloss</code> off the query is byte-identical to today's, and that property is deliberate and worth keeping in production.</li>
+      <li><b>Tokenize in the browser, for real.</b> Load only the tokenizer from <code>models/franzclarin/ReverseDictionary/tokenizer.json</code> (~700 KB) — not the 86 MB model. The sub-words shown on screen are then the actual sub-words the server fed to the encoder, not a plausible-looking split.</li>
+      <li><b>Build the stage sequence</b> — tokens → pooled vector → arrival in the cloud → neighbours lighting up → camera flight → synset expansion → ranked list. Each stage gets a caption that <i>names</i> the operation, not just narrates it: "mean pooling", "cosine similarity, computed in 384 dimensions", "IVFFlat, 40 probes of 115 lists".</li>
+      <li><b>Project returned synsets through the shipped basis.</b> A result that is not in the sampled cloud must still appear in exactly the right place, which works because PCA is a fixed matrix and the debug field returns the vectors. Do not fake a position by averaging neighbours.</li>
+      <li><b>Label every approximation on screen</b>, from the list below. This is the acceptance-critical step, not the polish step.</li>
+      <li><b>Decide whether it is public.</b> A dev-gated debug field and a public page are in tension. Either gate the route with the field, or have the page degrade to a precomputed demo in production.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>The pipeline as it actually is</h3>
+    <p>Traced through <code>app/api/lookup/route.ts</code> → <code>lib/embedder.ts</code> → <code>lib/glossSearch.ts</code>, plus <code>models/franzclarin/ReverseDictionary/config.json</code>. Read this before drawing anything.</p>
+    <table>
+      <tr><th class="num">#</th><th>stage</th><th>what actually happens</th><th>where</th></tr>
+      <tr><td class="num">1</td><td>request</td><td>POST <code>{query, k=10}</code>, 500-character cap</td><td><code>app/api/lookup/route.ts</code></td></tr>
+      <tr><td class="num">2</td><td>tokenize</td><td>BERT <b>WordPiece</b>, lower-cased, wrapped in <code>[CLS]</code>…<code>[SEP]</code>, vocabulary of <b>30,522</b> pieces, truncated at 256</td><td><code>tokenizer.json</code></td></tr>
+      <tr class="highlight"><td class="num">3</td><td>encode</td><td><b><code>BertModel</code>, 6 layers, hidden size 384, 12 attention heads</b> — the <code>all-MiniLM-L6-v2</code> architecture, fine-tuned. <b>No decoder</b>, which is why word pages have no definitions</td><td><code>config.json</code></td></tr>
+      <tr><td class="num">4</td><td>pool</td><td><code>{ pooling: "mean" }</code> — the per-token outputs averaged into one vector, <code>[CLS]</code> and <code>[SEP]</code> included. Reproduces the sentence-transformers Pooling layer that seeded the database</td><td><code>lib/embedder.ts</code></td></tr>
+      <tr><td class="num">5</td><td>normalize</td><td><code>{ normalize: true }</code> → unit-length 384-d vector, so <a href="glossary.html">cosine similarity</a> is a plain dot product</td><td>same</td></tr>
+      <tr><td class="num">6</td><td>retrieve</td><td><code>SET LOCAL ivfflat.probes = 40</code> inside a transaction, then <code>ORDER BY embedding &lt;=&gt; $1::halfvec LIMIT k</code> over <code>GlossEmbedding</code> — <b>117,791 synsets</b>, <a href="glossary.html">halfvec</a>(384), <a href="glossary.html">IVFFlat</a> with <code>lists = 115</code></td><td><code>lib/glossSearch.ts</code></td></tr>
+      <tr class="highlight"><td class="num">7</td><td>expand</td><td><b>The step a generic diagram would miss.</b> Rows are <i>synsets, not words</i>. <code>expandSynsets()</code> unpacks each into its member lemmas in WordNet's own order, dedupes across synsets, truncates to <code>k</code>. Every word <b>inherits its synset's score</b> — so synonyms come back at <i>identical</i> similarity</td><td><code>lib/glossSearch.ts</code></td></tr>
+      <tr><td class="num">8</td><td>render</td><td><code>{ results: [{word, similarity}], timingMs }</code> → navigate to the top word, runners-up as <code>?alternatives=</code></td><td>route + <code>app/page.tsx</code></td></tr>
+    </table>
+    <p><b>There is no reranking stage and no generative model anywhere in this.</b> <a href="12-cross-encoder-reranker.html">RD-12</a> measured a <a href="glossary.html">cross-encoder</a> and rejected it; the generative dependency was removed on 2026-08-18. A diagram showing either is a diagram of a system this repo does not have — and both are exactly what someone would draw from memory of how retrieval systems usually look.</p>
+
+    <h3>What is genuinely 3D, and what is a 2D panel pretending to be interesting</h3>
+    <table>
+      <tr><th>thing</th><th>form</th><th>why</th></tr>
+      <tr><td>the synset cloud, the query's arrival in it, neighbours lighting up, camera flight</td><td><b>3D</b></td><td>Actually spatial. Nearness <i>is</i> the mechanism, so this is the one part where the metaphor and the maths agree.</td></tr>
+      <tr class="highlight"><td>stage 7 — one node bursting into several word chips at identical height</td><td><b>3D, and the centrepiece</b></td><td>The least understood step in the pipeline and the most visually legible. It explains in one animation why <code>bungle</code> and <code>botch</code> tie, and why a single large synset can fill the whole result list.</td></tr>
+      <tr><td>the 384-d vector itself</td><td>2D heatmap strip</td><td>384 numbers are data, not geometry. Drawing them as bars in 3D adds nothing and costs the frame budget.</td></tr>
+      <tr><td>the 6-layer, 12-head encoder</td><td>2D schematic</td><td>Attention heads are not spatial. Any 3D rendering of them is decoration, and decoration that implies structure is a lie.</td></tr>
+      <tr><td>mean pooling</td><td>2D — N arrows collapsing to 1</td><td>Reads instantly flat; in 3D it is occluded by its own tokens.</td></tr>
+      <tr><td>the ranked list and its scores</td><td>2D panel</td><td>It is a list.</td></tr>
+    </table>
+
+    <h3>The reduction is PCA, and the reason is not aesthetics</h3>
+    <p>PCA is the only one of the three candidates that is <b>parametric</b>: it fits once, offline, and produces a fixed 384×3 matrix. A new query projects through that same matrix instantly, deterministically, and in the same frame it arrives.</p>
+    <table>
+      <tr><th>method</th><th>new point without refitting?</th><th>verdict</th></tr>
+      <tr class="highlight"><td><b>PCA</b></td><td><b>yes</b> — one matrix multiply</td><td><b>Use this.</b> Layout is stable across queries, and any synset the API returns can be placed <i>exactly</i> rather than guessed.</td></tr>
+      <tr><td>UMAP</td><td>no — needs a refit or an approximate transform</td><td>Prettier clusters, but the world would shift between queries and a live typed phrase has no honest position in it.</td></tr>
+      <tr><td>t-SNE</td><td>no, and it has no out-of-sample transform at all</td><td>Also actively distorts global distance, which is the one quantity this page exists to show.</td></tr>
+    </table>
+    <p>The cost is that three principal components carry only a modest share of 384-d variance. <b>Measure it in step 2 and print the number on screen.</b> An unlabelled projection invites the viewer to read distances off the picture, which is exactly the wrong lesson.</p>
+
+    <h3>The four things that must be labelled as approximated</h3>
+    <ol>
+      <li><b>3D distance is not the ranking.</b> Scores are cosine similarity in all 384 dimensions; the picture shows three. A true nearest neighbour can appear far away, and two points that look adjacent may be unrelated. This is the single most misleading property of the page and needs permanent on-screen text, not a footnote.</li>
+      <li><b>The cloud is a sample.</b> A few thousand synsets, not all 117,791. Retrieval always searches the full index.</li>
+      <li><b>The vector is computed on the server.</b> Tokenization in the browser is real; the encoding is not local. The model is <b>86 MB</b> of <a href="glossary.html">ONNX</a> and there is <i>no</i> quantized artifact — <code>CLAUDE.md</code> records that <code>model_quantized.onnx</code> does not exist on the hub, and that producing one would change query vectors and require a full <code>eval:prod</code> behind it. Shipping it to a browser is not a tuning decision, it is a new experiment.</li>
+      <li><b>The IVFFlat partition cannot be drawn.</b> <code>probes = 40</code> over <code>lists = 115</code> is a partition of a 384-dimensional space. Any 3D cell boundary is a metaphor. Either say so explicitly or demote it to the 2D schematic.</li>
+    </ol>
+
+    <h3>Two things worth showing precisely because they are counter-intuitive</h3>
+    <ul>
+      <li><b>Ties are real and they are policy.</b> Synset mates carry bit-identical vectors, so retrieval genuinely cannot separate them; their order comes from WordNet's own within-synset ordering, which is a familiarity prior. <code>CLAUDE.md</code> measures that choice at <b>2.5 points</b> of <a href="glossary.html">lenient R@1</a> over alphabetical ordering, on identical vectors. A visualisation that shows the tie makes that legible in a way the prose has not.</li>
+      <li><b><a href="glossary.html">Echo</a> is visible in the geometry.</b> Type a query containing <i>rain</i> and the echo results are not merely wrong, they sit <i>closer</i> than the right answer. That is the entire backlog in one frame, and it is the strongest argument for building this at all.</li>
+    </ul>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>lib/glossSearch.ts</code> — the file header is the authoritative statement of expansion semantics, and warns that changing them invalidates the measurement <a href="02-embedding-cutover.html">RD-02</a> shipped on.</li>
+      <li><code>lib/embedder.ts</code> — pooling and normalisation, and the warning that Transformers.js's <code>env</code> is a process-wide singleton that must be configured at the call site. <b>A browser-side tokenizer load is a fourth consumer of that singleton</b> and the same rule applies.</li>
+      <li><a href="12-cross-encoder-reranker.html">RD-12</a> — why there is no rerank stage to draw, and where <code>searchGlossSynsets()</code> came from.</li>
+      <li><a href="glossary.html">The glossary</a> — this page and the glossary have the same audience and should not contradict each other.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The obvious diagram of this system is wrong in two places.</b> Drawn from memory, a retrieval pipeline has a reranking stage and ranks documents that are words. This one has no reranker — <a href="12-cross-encoder-reranker.html">RD-12</a> measured and rejected it — and it ranks <a href="glossary.html">synsets</a>, which then expand into several words at identical scores. Both errors would look entirely plausible on screen. <b>Trace before you draw</b>, and put the trace in the ticket so the next person does not re-derive it from a stock picture.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The reranker seam is the visualisation seam.</b> <code>searchGlossSynsets()</code> was split out for a cross-encoder that never shipped, and it returns exactly what this page needs: the synsets, their gloss text and their scores, before anything collapses them into words. A refactor done for a rejected experiment left the codebase better shaped for an unrelated one.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The animation needed data the API did not have, and that was the whole test of the ticket.</b> "Show each word being embedded" has a cheap version — draw something plausible under each token — and it would have looked identical to the honest one. The honest one required <code>embedTokens()</code>: one <code>pooling: "none"</code> forward pass returning the encoder's real per-token output, with the pooled vector derived from it rather than fetched separately. What made it safe to claim was not care, it was the assertion — the harness checks that derivation against <code>embed()</code> and gets <b>2.2e-8</b>. <b>When a picture asserts an arithmetic relationship, test the relationship.</b></p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Reimplementing the tokenizer was cheaper than importing it, and better documented.</b> Loading <code>AutoTokenizer</code> in the browser would have pulled ~1&nbsp;MB of Transformers.js and the onnxruntime-web loader into a page whose central claim is that the 86&nbsp;MB model never reaches a browser. ~100 lines of WordPiece instead, checked against the real tokenizer over the entire frozen eval set plus deliberately awkward strings — <b>415/415 identical</b>. The check paid for itself immediately by catching a real quirk: <b>an over-long input loses its <code>[SEP]</code></b>, because truncation runs <i>after</i> post-processing appends it. The tidier algorithm would have been wrong.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Building the explainer surfaced a live bug in the thing being explained.</b> Neon auto-suspends its compute, and Prisma's default 2s interactive-transaction <code>maxWait</code> is shorter than the wake-up, so the <i>first</i> query after an idle period died with <code>P2028</code> — a 500 with nothing wrong with the query. The eval harness had always worked around this by warming the database first, which is why it never showed up as a serving problem. A page that invites strangers to type a phrase has no warm-up. <code>searchGlossSynsets()</code> now waits instead.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Three layouts were built and two were thrown away, on purpose.</b> The shared engine — projection, canvas, panels, run hook — was built once, so each shell was ~150 lines of chrome over it. Choosing between three real pages taking a real query beat choosing between three descriptions, and the two rejected ones cost almost nothing because the expensive part was never duplicated.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The forecast dependency was not needed.</b> This ticket named <code>three</code> in its own <i>Touches</i> line. 6,200 points with an orbit camera and a painter's-algorithm depth sort is a canvas-2D job, and drawing depth as radius-and-alpha is two lines by hand against a custom shader in WebGL. The repo still has five production dependencies.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A projection is a claim about distance, and viewers will believe it.</b> The reason to choose PCA here is not that it looks best — it does not — but that it is a fixed matrix, so the layout does not move between queries and every returned point can be placed exactly rather than interpolated from its neighbours. Choosing UMAP for prettier clusters would mean the query's own position is invented, which is the one point on screen that must not be.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li class="done">Every similarity score displayed comes from the real retrieval path over the live 117,791-synset index — no fabricated or interpolated scores anywhere — the page calls <code>/api/lookup</code> with <code>debug: true</code>; the harness asserts the debug branch returns the <i>same words</i> as the serving branch.</li>
+      <li class="done">Tokens shown are the tokenizer's actual output, not a whitespace split dressed up as sub-words — <code>lib/viz/wordpiece.ts</code>, checked against the real <code>AutoTokenizer</code> on <b>415/415</b> strings including accents, OOV, CJK and truncation.</li>
+      <li class="done">The synset → lemma expansion is visibly distinct from ranking, and tied scores are shown as tied — stage 7 bursts one sense into its member words at identical scores, and the ranked list marks tied rows as tied.</li>
+      <li class="done">PCA variance explained is measured in the build script and displayed on the page — <b>11.9%</b>, measured in <code>scripts/build-viz-snapshot.ts</code> and printed beside the cloud.</li>
+      <li class="done">All four approximations from the list above are labelled in the interface, not only in this ticket — permanently, along the bottom bar; they deliberately do <i>not</i> hide with the steps card.</li>
+      <li class="done">Any synset returned by a query is placed at its exact projected position, including ones absent from the sampled cloud — asserted to <b>4.6e-5</b> against the snapshot coordinates; the API returns the stored vector and the client projects it through the same fixed basis.</li>
+      <li class="done">Orbit and zoom controls work, and the camera can be taken back to a known home view — drag, scroll, and a ⌂ home button; the camera also flies to frame each result.</li>
+      <li class="done">No change to <code>/api/lookup</code>'s existing response shape, and the production query stays byte-identical with the debug field off — <code>results</code> and <code>timingMs</code> untouched; the <code>SELECT</code> is asserted character-identical to a frozen copy. <code>k</code> is now validated, which it was not before.</li>
+      <li class="done">The 86 MB model is never downloaded by a browser — verified in the network panel: only the two <code>/viz/</code> assets and <code>/api/lookup</code>. The route traces 20 files, none of them the model.</li>
+      <li class="done">Stage captions name the operation — "mean pooling", "cosine similarity" — rather than only narrating it — the operation name rides on the animation itself, so it is on screen even with the prose hidden.</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-18 · reverse-dictionary · done 2026-08-28 · shipped, no retrieval change</footer>
+</div>

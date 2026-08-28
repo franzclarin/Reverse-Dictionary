@@ -26,7 +26,7 @@
 <div class="wrap">
   <div class="crumbs">reverse-dictionary · <a href="glossary.html">Glossary</a></div>
   <h1>Tickets</h1>
-  <p class="lede">Sixteen tickets covering everything this app has changed or still needs to. If you are new to it, read <b>Start here</b> below first — and keep the <a href="glossary.html">glossary</a> open, since these tickets use a lot of vocabulary they never stop to define.</p>
+  <p class="lede">Eighteen tickets covering everything this app has changed or still needs to. If you are new to it, read <b>Start here</b> below first — and keep the <a href="glossary.html">glossary</a> open, since these tickets use a lot of vocabulary they never stop to define.</p>
 
 
   <section>
@@ -44,6 +44,10 @@
       <p><b>What was tried after that, and also did not work.</b> RD-16. The remaining ideas were all "train the model on better data", so before spending weeks on it we checked the assumption and tried five ready-made models on the same job. The assumption had already been fixed by RD-02 without anyone noticing. And none of the five beat the model we have — including one trained on 215 million question-and-answer pairs, which came in <b>seven points worse</b>.</p>
 
       <p><b>What is next.</b> RD-10 — a second, independently written test set. Every number on this page comes from 287 queries written blind by one person in one sitting. That was enough to decide RD-02, to reject RD-12 and to hold RD-09, and it is now the limiting factor: the cheap improvements are measured and gone, so anything left is an expensive bet, and betting means trusting the ruler more than it has earned.</p>
+
+      <p><b>The one that is not about ranking.</b> RD-17. Everything above is an argument about putting the right word <i>first</i>. But the app cannot return <code>petrichor</code> at all — the dictionary it was built from was frozen in 2006, and <code>selfie</code>, <code>umami</code>, <code>gaslighting</code> and <code>deepfake</code> are not in it either. That is <b>8% of the test set scoring zero no matter what</b>, and it has been recorded in the test file since the day it was written. Adding a modern word source is the only remaining idea whose mechanism is not in doubt.</p>
+
+      <p><b>The one you can watch.</b> Everything above is prose about a machine nobody can see. <a href="18-pipeline-visualization.html">RD-18</a> built <code>/explain</code>: type a phrase and the pipeline runs in front of you — the words break into sub-words, each sub-word becomes a real block of 384 numbers, those blocks average into one, and that one lands among the nearest meanings. Every score on it comes from the live index, and every place the picture simplifies is labelled on the picture. If one page is going to make <a href="glossary.html">echo</a> obvious, it is that one.</p>
     </div>
 
     <div class="grid-2">
@@ -56,6 +60,8 @@
           <li><a href="16-training-data-bottleneck.html">RD-16</a> — the move after that, and why it was not needed</li>
           <li><a href="13-rerank-serving-path.html">RD-13</a> — how RD-12 would have reached users, and why it never did</li>
           <li><a href="10-real-phrasing-eval-set.html">RD-10</a> — whether any of these numbers can be trusted</li>
+          <li><a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> — the failure that is not a ranking failure at all</li>
+          <li><a href="18-pipeline-visualization.html">RD-18</a> — the whole pipeline, animated; the fastest way in if you would rather see it than read it</li>
         </ol>
         <p>The rest are infrastructure, cleanup and polish, and can be read in any order or not at all.</p>
       </div>
@@ -160,13 +166,21 @@
           <circle cx="335" cy="300" r="9" fill="var(--p3)"/>
           <text x="335" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p3)">RD-15</text>
 
+          <circle cx="565" cy="85" r="10" fill="var(--p1)"/>
+          <text x="565" y="65" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-17</text>
+          <text x="565" y="107" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(adds capability, not ranking)</text>
+
+          <circle cx="470" cy="318" r="9" fill="var(--p2)" opacity="0.55"/>
+          <text x="470" y="300" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p2)">RD-18 ✓</text>
+          <text x="470" y="287" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(explains, doesn't improve)</text>
+
           <circle cx="200" cy="95" r="9" fill="var(--p0)" opacity="0.55"/>
           <text x="200" y="76" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p0)">RD-16 ✓</text>
           <text x="200" y="115" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(answered three tickets in an afternoon)</text>
         </g>
         <defs><marker id="am" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--ink-soft)"/></marker></defs>
       </svg>
-      <div class="viz-caption">Two "do first" tickets have now come back negative. RD-12's 53-point reranking headroom is real but no off-the-shelf reranker reached it; RD-16 then checked the three retraining tickets' premises and found one already fixed by RD-02 and the central one measurably wrong — a same-size encoder trained on 215M QA pairs scored <b>7 points worse</b> than the fine-tune. RD-09, RD-14 and RD-15 are held rather than cancelled, and the plot no longer shows anything with a measured payoff. That is what makes <b>RD-10</b> the next move: every remaining bet is expensive, and all of these verdicts rest on 287 queries written blind by one person. Fix the ruler before betting again. RD-01 sits low only because its impact was entirely borrowed from unlocking RD-02, not direct.</div>
+      <div class="viz-caption">Two "do first" tickets have now come back negative. RD-12's 53-point reranking headroom is real but no off-the-shelf reranker reached it; RD-16 then checked the three retraining tickets' premises and found one already fixed by RD-02 and the central one measurably wrong — a same-size encoder trained on 215M QA pairs scored <b>7 points worse</b> than the fine-tune. RD-09, RD-14 and RD-15 are held rather than cancelled, and the plot no longer shows anything with a measured payoff. That is what makes <b>RD-10</b> the next move: every remaining bet is expensive, and all of these verdicts rest on 287 queries written blind by one person. Fix the ruler before betting again. <b>RD-17</b> is the exception on this plot: it is the only remaining ticket that adds a word the app could not previously return at all, rather than reordering words it already finds — which is why its mechanism is not in doubt and its risk is entirely on the cost side. RD-01 sits low only because its impact was entirely borrowed from unlocking RD-02, not direct. <b>RD-18 ✓</b> is plotted low for a different reason again: it is the only ticket here that is not an argument about ranking at all, and it was supposed to move nothing on either axis. It did not, and that is the pass condition rather than a disappointment.</div>
     </div>
   </section>
 
@@ -332,8 +346,28 @@
           <div class="row-tags"><span>evaluation</span><span>size: M</span><span>impact: null result (three tickets answered)</span></div>
         </a>
       </li>
+      <li>
+        <a class="row" href="17-expand-vocabulary-beyond-wordnet.html">
+          <div class="row-top">
+            <span class="row-title">RD-17 &middot; Expand the vocabulary beyond WordNet 3.0</span>
+            <span class="badge badge-p1">P1</span>
+          </div>
+          <p class="row-sub">The app cannot return <code>petrichor</code> &mdash; not because it ranks it badly, but because the dictionary it was built from was frozen in <b>2006</b>. <code>selfie</code>, <code>umami</code>, <code>hangry</code>, <code>gaslighting</code> and <code>deepfake</code> are missing too. Already recorded in the frozen set as <b>25 <code>reachable: false</code> rows &mdash; 8.0% of the benchmark scoring zero by construction</b>. Found while filing: two of those 25 (<code>capsize</code>, <code>loiter</code>) were quietly fixed by RD-02, and the headline metric would <i>fall</i> 24.0% &rarr; 22.3% on a successful fix unless the denominator is held fixed.</p>
+          <div class="row-tags"><span>data engineering</span><span>size: M/L</span><span>impact: high (7.4% currently unanswerable)</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="18-pipeline-visualization.html">
+          <div class="row-top">
+            <span class="row-title">RD-18 &middot; An interactive 3D explainer for the retrieval pipeline</span>
+            <span class="badge badge-done">✓ Done</span>
+          </div>
+          <p class="row-sub">Done 2026-08-28 — shipped at <code>/explain</code>, and it moved no metric, which was the point. A page at <code>/explain</code> where you type a phrase and watch it happen: the sentence split into pieces, those pieces becoming one point in a cloud of meanings, the nearest meanings lighting up, and a ranked list with the real scores. Ships nothing into the search path and moves no metric &mdash; it exists so the mechanism is <i>visible</i>. Found while filing: the diagram anyone would draw from memory is wrong twice over. This pipeline has <b>no reranking stage</b> (RD-12 rejected it) and it ranks <b>synsets, not words</b>, which then expand into several words at <i>identical</i> scores. Found en route: the first query after Neon auto-suspends died on Prisma's 2s transaction default — a real serving bug the eval harness had always warmed away.</p>
+          <div class="row-tags"><span>documentation</span><span>size: M</span><span>impact: communication (no retrieval change)</span></div>
+        </a>
+      </li>
     </ul>
   </section>
 
-  <footer class="done">16 tickets · generated from a live repo audit, 2026-08-26 · RD-12…RD-15 added 2026-08-27 · RD-12 and RD-16 closed as null results 2026-08-28</footer>
+  <footer class="done">18 tickets · generated from a live repo audit, 2026-08-26 · RD-12…RD-15 added 2026-08-27 · RD-12 and RD-16 closed as null results 2026-08-28 · RD-17 and RD-18 filed 2026-08-28 · RD-18 done 2026-08-28</footer>
 </div>

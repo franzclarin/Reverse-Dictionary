@@ -1,0 +1,155 @@
+<meta charset="utf-8">
+<title>RD-17 · Expand the vocabulary beyond WordNet 3.0</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-17</div>
+
+  <div class="ticket-head">
+    <h1>Expand the vocabulary beyond WordNet 3.0</h1>
+    <span class="badge badge-p1">P1 · data engineering</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>The app cannot return <code>petrichor</code>. Not because it ranks it badly — because it has never heard of it.</p>
+    <p><b>Today —</b> every word the app can return comes from a dictionary frozen in 2006. <code>petrichor</code>, <code>selfie</code>, <code>umami</code>, <code>hangry</code>, <code>gaslighting</code> and <code>deepfake</code> are simply not in it.</p>
+    <p><b>Do —</b> add a modern word source, most likely Wiktionary, and measure two things: whether the new words can actually be found, and whether adding them damages the words that already work.</p>
+    <p><b>Why it matters —</b> this is the only remaining idea in the backlog that adds a <i>capability</i> rather than improving a ranking. It is also the only one whose mechanism is not in doubt: if the word is in the index it can be retrieved, and if it is not, nothing else in this repo can help.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Depends on:</b> nothing — but reads better after <a href="10-real-phrasing-eval-set.html">RD-10</a>, which would say <i>which</i> missing words people ask for</span>
+    <span><b>Touches:</b> <code>scripts/build-gloss-index.ts</code>, a new source reader beside <code>scripts/lib/wordnet.ts</code>, <code>GlossEmbedding</code>, a new eval slice</span>
+    <span><b>Risk:</b> ~1M new candidates make ranking harder for the 92% that already work — and the headline metric <i>punishes</i> success here (see below)</span>
+    <span><b>Est:</b> 2–4 days, plus a one-off embedding run measured in hours</span>
+  </div>
+
+  <p class="lede">Search answers out of <code>GlossEmbedding</code> — 117,791 <a href="glossary.html">synsets</a>, expanding to <b>149,400 distinct answerable <a href="glossary.html">lemmas</a></b>. That table is built by <code>scripts/build-gloss-index.ts</code> from <code>wordnet-db</code>, which is <b>Princeton WordNet 3.0, frozen in 2006</b>. A word that is not a lemma in one of those synsets cannot be returned by any query, at any <a href="glossary.html">probes</a> setting, under any <a href="glossary.html">reranking</a> scheme. This is the one failure mode in this project that is not a ranking problem.</p>
+
+  <div class="callout">
+    <span class="callout-label">The evidence was already in the repo</span>
+    <p><code>eval/sets/v1.jsonl</code> carries <b>25 rows marked <code>meta.reachable: false</code></b>, excluded from every headline number — and <code>petrichor</code> is literally one of them. The full list, verified against the live index on 2026-08-28:</p>
+    <p><code>hangry · limerence · saudade · sonder · staycation · vaporware · veganism · cryptocurrency · deepfake · fatberg · microplastic · <b>petrichor</b> · philtrum · selfie · clickbait · crowdfunding · webinar · <s>capsize</s> · corpsing · doomscrolling · enshittification · gaslighting · greenwashing · <s>loiter</s> · mansplaining</code></p>
+    <p>That is <b>25 of 312 authored rows — 8.0% of the benchmark scoring zero by construction</b>, and it has been sitting there since the set was frozen on 2026-08-19. It is the largest single named failure class in the repo that nobody has costed.</p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">Found while writing this ticket — two of the 25 are no longer unreachable</span>
+    <p><code>capsize</code> and <code>loiter</code> <b>are</b> in the live index. The <code>reachable</code> flags were computed against <code>VocabEmbedding</code> (141,854 rows); <a href="02-embedding-cutover.html">RD-02</a>'s gloss index was built straight from WordNet and carries <b>149,400</b> lemmas, repairing part of the old ~5% coverage gap as a side effect nobody was looking for. The real figure is <b>23 rows, 7.4%</b>.</p>
+    <p><code>meta.reachable</code> is stored truth inside a <a href="glossary.html">frozen set</a>, so this is not an edit — it is either a <code>v2</code> or an analysis-time recompute. <a href="05-audit-doc-and-eval-set-followups.html">RD-05</a> already owns that job and its rule ("new version, never in-place").</p>
+  </div>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — M/L</div>
+      <div class="stat-value">A filter, an embedding run, and a migration</div>
+      <div class="stat-note">The pipeline is mostly built: <code>build-gloss-index.ts</code> already groups senses, embeds with the production embedder and batch-inserts. What is new is a second source reader and — the actual work — the filter deciding which of Wiktionary's roughly one million English senses are worth indexing.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — high, and bounded</div>
+      <div class="stat-value">7.4% of authored queries currently score zero</div>
+      <div class="stat-note">Unlike RD-09/RD-14/RD-15 the mechanism is not in doubt. Unlike RD-12 there is no model that has to cooperate. The uncertainty is entirely on the cost side — storage, licensing, and what a million extra <a href="glossary.html">distractors</a> do to the queries that already work.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Confirm the actual Neon cap first.</b> Everything below is sized against it, and nobody currently knows what it is. <a href="01-gloss-index-data-migration.html">RD-01</a>'s plan changed mid-flight — the plan was upgraded, the <code>DROP INDEX</code> was skipped, the database sits at <b>673MB</b> — and that ticket explicitly records the new cap as <i>not verified</i>. <code>CLAUDE.md</code> still says 512MB and ~460MB, so anyone sizing this ticket from it sizes it against a ceiling that is both wrong and lower than reality.</li>
+      <li><b>Try the cheap source before the expensive one.</b> Open English WordNet is the maintained successor to PWN 3.0 with the same synset/gloss structure, so adopting it changes only the reader inside <code>scripts/lib/wordnet.ts</code> and costs roughly zero extra storage. Diff its lemma set against the live 149,400 and look for the <code>petrichor</code> class specifically. If it is there, that is the entire ticket. Expect it is not — but this is an afternoon, and step 3 is a week.</li>
+      <li><b>Build the candidate set from Wiktionary.</b> The machine-readable extractions (Kaikki.org / <code>wiktextract</code>) publish per-sense glosses as JSONL, which maps directly onto a <code>GlossEmbedding</code> row. Filter hard — English only, real gloss text, drop inflected forms, proper nouns, and obsolete/rare-tagged senses. <b>Commit the filter as code, not as a description.</b> It determines both the storage bill and the distractor count, and it is the parameter this ticket will be re-run against.</li>
+      <li><b>Build it as a local cell, not a table.</b> <code>scripts/build-encoder-cell.ts</code> already produces full-scale cells outside Postgres under <code>EVAL_CELL_DIR</code>, and <a href="16-training-data-bottleneck.html">RD-16</a>'s cells cross-validated against a live production run to the digit. Zero database writes, no <a href="glossary.html">migration</a>, no rollback path needed to reach a decision. Do not touch <code>GlossEmbedding</code> until the numbers exist.</li>
+      <li><b>Score two slices, and report both.</b> (a) the 287-row reachable slice, paired McNemar against <code>prod_gloss_shipped</code> — this is the regression test, and adding candidates can only make it harder; (b) the 23 still-unreachable rows as a new coverage slice, whose queries are <i>already written blind and already frozen</i>. Thin at n=23, which is <a href="10-real-phrasing-eval-set.html">RD-10</a>'s argument, not a reason to skip it.</li>
+      <li><b>Decide the migration separately.</b> If the numbers hold, size the table, pick the storage lever (below), and treat the insert as its own RD-01-shaped job with its own audit.</li>
+      <li><b>Decide what a new word's page shows.</b> <code>getRelatedWords()</code> reads <code>VocabEmbedding</code>, which any newly added word will not be in — so <code>/word/petrichor</code> would resolve to a page with an empty definition <i>and</i> no related words. Deriving neighbours from <code>GlossEmbedding</code> instead is the obvious fix and is a behaviour change worth measuring on its own.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>What is actually missing, verified</h3>
+    <p>Checked against <code>node_modules/wordnet-db/dict/index.noun</code> and against the live index's <code>lemmas</code> arrays on 2026-08-28:</p>
+    <table>
+      <tr><th>probe</th><th>in the index?</th><th>note</th></tr>
+      <tr><td><code>petrichor</code></td><td>no</td><td>coined 1964, never entered WordNet</td></tr>
+      <tr><td><code>selfie</code> · <code>umami</code> · <code>hangry</code></td><td>no</td><td>post-2006, or never lexicalised by Princeton</td></tr>
+      <tr><td><code>sonder</code> · <code>saudade</code> · <code>kintsugi</code> · <code>limerence</code> · <code>zugzwang</code></td><td>no</td><td>loanwords and coinages</td></tr>
+      <tr><td><code>doomscrolling</code> · <code>gaslighting</code> · <code>enshittification</code></td><td>no</td><td>the whole 2010s onward</td></tr>
+      <tr><td><code>defenestration</code> · <code>meme</code> · <code>podcast</code></td><td>yes</td><td>old words are fine; the hole is chronological, not obscurity</td></tr>
+      <tr class="highlight"><td><code>schadenfreude</code></td><td><b>yes — as <code>Schadenfreude</code></b></td><td>capitalised in WordNet. Irrelevant to retrieval, which never string-matches, but it will bite any lookup that does</td></tr>
+    </table>
+    <p>There is also <b>no similarity floor</b> anywhere in <code>app/api/lookup/route.ts</code>. A missing word does not fail loudly — it returns the nearest wrong thing with a plausible-looking score, which is why this class of failure has stayed invisible.</p>
+
+    <h3>The headline metric punishes success here. Fix the denominator before running anything.</h3>
+    <p>This is the trap in the ticket, and it is not obvious. Headline recall is computed over the <b>287 reachable rows</b>: <code>prod_gloss_shipped</code> gets rank 1 on 69 of them, <b>69/287 = 24.0%</b>. Add the missing vocabulary and those 23 rows become reachable and enter the slice. If the new words are indexed but never rank first:</p>
+    <table>
+      <tr><th>state</th><th class="num">rank-1 hits</th><th class="num">slice</th><th class="num">lenient R@1</th></tr>
+      <tr class="highlight"><td>today</td><td class="num">69</td><td class="num">287</td><td class="num"><b>24.0%</b></td></tr>
+      <tr><td>vocabulary added, new words never rank first</td><td class="num">69</td><td class="num">310</td><td class="num">22.3%</td></tr>
+      <tr><td>vocabulary added, new words rank first half the time</td><td class="num">80</td><td class="num">310</td><td class="num">25.8%</td></tr>
+    </table>
+    <p><b>A strictly better app can score 1.7 points worse.</b> Report this comparison on a <i>fixed</i> denominator — the 287 rows both systems can answer — and carry the coverage slice as its own separate number, exactly the way <a href="glossary.html">echo</a> is carried beside recall rather than folded into it. Anything else makes the decision on an artefact of arithmetic.</p>
+
+    <h3>Storage, from measurements rather than estimates</h3>
+    <p>Live figures, 2026-08-28. <code>CLAUDE.md</code>'s "Storage ceiling" bullet contradicts all of this and should be corrected under <a href="05-audit-doc-and-eval-set-followups.html">RD-05</a>.</p>
+    <table>
+      <tr><th>table</th><th class="num">rows</th><th class="num">heap</th><th class="num">indexes</th><th class="num">total</th><th class="num">per row</th></tr>
+      <tr><td><code>VocabEmbedding</code> · <code>vector(384)</code></td><td class="num">141,854</td><td class="num">222 MB</td><td class="num">230 MB</td><td class="num">451 MB</td><td class="num">3.3 KB</td></tr>
+      <tr class="highlight"><td><code>GlossEmbedding</code> · <code>halfvec(384)</code></td><td class="num">117,791</td><td class="num">113 MB</td><td class="num">100 MB</td><td class="num">213 MB</td><td class="num"><b>1.85 KB</b></td></tr>
+      <tr><td colspan="4"><code>pg_database_size</code></td><td class="num"><b>673 MB</b></td><td class="num">—</td></tr>
+    </table>
+    <p>At 1.85 KB per synset: an unfiltered million-sense Wiktionary index is <b>~1.85 GB</b>, which is not a plan. A hard filter landing at 300–500k senses is <b>~555–925 MB</b> on top of the existing 673 MB. Two levers if that does not fit:</p>
+    <ul>
+      <li><b>Convert <code>VocabEmbedding</code> to <a href="glossary.html">halfvec</a> — frees ~225 MB, costs nothing.</b> It is still <code>vector(384)</code> at 4 bytes per dimension while the gloss table is already halved. <code>CLAUDE.md</code> records <code>halfvec(384)</code> as measured-free: 0 discordant pairs, mean cosine 0.99999998. This is the cheapest 225 MB in the repo and is worth doing whether or not this ticket proceeds.</li>
+      <li><b>Drop <code>VocabEmbedding</code> entirely — frees 451 MB, costs two things.</b> It backs <code>getRelatedWords()</code> on every word page, and it is <a href="02-embedding-cutover.html">RD-02</a>'s rollback path. Step 7 above removes the first dependency; the second is a judgement call about how settled the cutover is.</li>
+    </ul>
+
+    <h3>Sources, and why not the others</h3>
+    <table>
+      <tr><th>source</th><th>has <code>petrichor</code>?</th><th class="num">added rows</th><th>the catch</th></tr>
+      <tr><td><b>Open English WordNet</b></td><td>probably not</td><td class="num">~0 net</td><td>Same structure, so nearly free to try. Verify the delta before assuming it is worthless — and before assuming it is enough.</td></tr>
+      <tr class="highlight"><td><b>Wiktionary</b> (<code>wiktextract</code>/Kaikki)</td><td><b>yes</b>, and the whole class</td><td class="num">~300k–1M</td><td>CC BY-SA — attribution <i>and</i> share-alike, which the current WordNet licence does not impose. Noisier glosses, heavy on obsolete and dialectal senses. This is the real candidate.</td></tr>
+      <tr><td><b>A curated supplement</b>, 2–5k words</td><td>yes, the ones you thought of</td><td class="num">~5k (≈9 MB)</td><td>Nearly free, no licence question, negligible distractor risk — and you are guessing the list. Does not generalise, but is a legitimate fallback if step 5 comes back negative.</td></tr>
+    </table>
+
+    <h3>The obvious filter does not work — checked, so it does not have to be checked again</h3>
+    <p>Gating Wiktionary by word frequency using the already-committed <code>eval/data/zipf-en.tsv</code> (92,937 rows) looks like the way to keep the list small and useful. It is not. That table is OpenSubtitles-derived, and it contains <b>none</b> of <code>petrichor</code>, <code>sonder</code>, <code>hangry</code>, <code>umami</code>, <code>saudade</code>, <code>doomscrolling</code>, <code>gaslighting</code> or <code>limerence</code>. A frequency filter removes precisely the words this ticket exists to add. <code>CLAUDE.md</code> already warns that this source "under-weights literary/technical vocabulary" — this is that warning arriving with a bill.</p>
+
+    <h3>The risk this ticket has to clear</h3>
+    <p>Going from 117,791 candidates to several hundred thousand can only make discrimination harder for the queries that already work — the encoder's job gets strictly worse as the field gets more crowded, and <a href="16-training-data-bottleneck.html">RD-16</a> established that this encoder is <i>already</i> failing to discriminate finely among 117,791 glosses. Wiktionary also carries far more near-duplicate and obsolete senses than WordNet, which is the worst possible shape of distractor.</p>
+    <p>This project has twice now measured a confident premise and found it wrong — <a href="12-cross-encoder-reranker.html">RD-12</a>'s reranker and <a href="16-training-data-bottleneck.html">RD-16</a>'s corpus bet. Step 4 exists so that this one is measured in a local file at zero production exposure, exactly as those were.</p>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>CLAUDE.md</code> §"Established facts" — particularly <i>"the vocabulary was never curated — treat any rebuild as a deliberate re-selection"</i>, which is this ticket's premise, already written down and not yet acted on.</li>
+      <li><a href="01-gloss-index-data-migration.html">RD-01</a> — the shape any real migration takes, including the mid-flight plan change that left the storage picture undocumented.</li>
+      <li><a href="16-training-data-bottleneck.html">RD-16</a> — how to build and verify a full-scale cell outside the database, and the cross-validation that licences reading it.</li>
+      <li><code>eval/sets/v1.jsonl</code>, the <code>reachable: false</code> rows — the 23 queries this ticket is scored against, already written blind.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A coverage hole is invisible to the metric built to catch it.</b> Excluding unreachable rows from headline recall is the right call — including them would depress every number by a constant and compare nothing. The side effect is that 8% of the benchmark scores zero forever and no number on the dashboard ever moves, so the largest named failure class in the repo sat in the file from the day it was frozen without ever being costed. <b>Track the size of an excluded slice as its own number</b>, or exclusion quietly becomes deletion.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>RD-02 expanded the vocabulary and nobody noticed.</b> It was argued, measured and shipped as a ranking fix. It also took the answerable lemma set from 141,854 to 149,400, because the gloss index was built from WordNet directly rather than from the accidentally-curated <code>VocabEmbedding</code> table — which is why <code>capsize</code> and <code>loiter</code> are still flagged unreachable while working fine. A change can improve something the frozen instrument is not pointed at, and freezing the instrument is what hides it.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>An improvement can move the headline number down.</b> Fixing coverage grows the denominator faster than the numerator unless the new words rank well immediately. Any metric whose denominator is <i>"the questions we can currently answer"</i> silently penalises answering more questions. Fix the denominator before running the comparison, not after reading a result you dislike.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b><code>CLAUDE.md</code>'s storage section is stale in the direction that matters.</b> It records a 512MB cap and ~460MB of usage against a live 673MB on an upgraded plan — and RD-01's own ticket says so. Documentation that is wrong <i>and</i> conservative is worse than documentation that is merely missing: it produces a confident "this cannot fit" from someone who never runs the query.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li>The upgraded Neon cap confirmed and written down, and <code>CLAUDE.md</code>'s storage figures corrected against the live database</li>
+      <li>Open English WordNet's lemma delta against the live 149,400 measured and recorded, whatever the verdict</li>
+      <li>Source filter committed as code, with the resulting sense count and projected table size recorded</li>
+      <li>Expanded index built as a local cell under <code>EVAL_CELL_DIR</code> and verified by synset before any database write</li>
+      <li>Regression measured on a <b>fixed 287-row denominator</b>, paired McNemar against <code>prod_gloss_shipped</code>; <a href="glossary.html">echo</a> reported beside it as usual</li>
+      <li>Coverage slice scored separately over the 23 unreachable rows and reported as its own number, never folded into headline recall</li>
+      <li>Licence obligations recorded in the index's provenance if a share-alike source ships</li>
+      <li>Word-page behaviour for a newly added word decided and implemented, not discovered by a user</li>
+      <li><code>eval/sets/v1.jsonl</code> verified byte-identical throughout; any <code>reachable</code> correction lands as a new version</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-17 · reverse-dictionary</footer>
+</div>

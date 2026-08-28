@@ -30,13 +30,28 @@ export default function Navbar() {
           </span>
         </Link>
 
+        {/* RD-18's explainer. The first nav link this bar has ever carried. */}
+        <Link
+          href="/explain"
+          className="font-mono ml-auto mr-4 rounded px-1 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          style={{
+            fontSize: 11,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "var(--rd-ink-muted)",
+            outlineColor: "var(--rd-accent)",
+          }}
+        >
+          How it works
+        </Link>
+
         <button
           type="button"
           onClick={toggle}
           aria-pressed={enabled}
           aria-label={enabled ? "Mute sound effects" : "Unmute sound effects"}
           title={enabled ? "Sound on" : "Sound off"}
-          className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-lg transition-colors hover:bg-[var(--rd-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition-colors hover:bg-[var(--rd-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
           style={{ color: "var(--rd-ink-muted)", outlineColor: "var(--rd-accent)" }}
         >
           {enabled ? (
