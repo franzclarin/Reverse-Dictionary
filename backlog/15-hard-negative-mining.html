@@ -31,6 +31,12 @@
     <p>"Synonym collapse" is worth at most <b>3.4 points</b> here: strict R@1 is 20.6% and lenient R@1 is 24.0%, and the entire difference is queries where the system returned a word this project has already ruled <i>acceptable</i>. Lenient R@1 is the metric the decision rule resolves on (METHODS §9a). So training the encoder to push near-synonyms apart optimises a 3.4pp strict gap while actively risking the headline number — the eval set's <code>acceptable[]</code> field exists precisely because returning a synonym is <b>not</b> an error. Mine negatives, but not from a synonym list.</p>
   </div>
 
+  <div class="callout">
+    <span class="callout-label">Blocked by its own dependency — RD-16, 2026-08-28</span>
+    <p>This ticket mines negatives against <a href="14-synthetic-query-training-pairs.html">RD-14</a>'s synthetic queries, and RD-14 is now held: <a href="16-training-data-bottleneck.html">RD-16</a> measured its premise on the live index and found the <a href="glossary.html">register gap</a> at <b>+1.8pp</b>, down from +26.1pp. There are no queries to mine against, and the retrain they would feed (<a href="09-expand-embedding-training-data.html">RD-09</a>) is held on its own evidence — a same-size encoder trained on 215M QA pairs scored 7.0 points <i>below</i> the fine-tune.</p>
+    <p>Nothing here is wrong; it is simply third in a chain whose first two links are now held. <b>The task item that survives independently is the margin probe</b> — this ticket already requires re-running <code>scripts/probe-margins.ts</code> on the gloss index before assuming the remaining failures have the shape hard negatives address, and RD-16 did not do that. It remains the honest first step if this is ever picked up.</p>
+  </div>
+
   <section>
     <h2>Task</h2>
     <ol>

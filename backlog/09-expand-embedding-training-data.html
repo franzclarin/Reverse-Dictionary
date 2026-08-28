@@ -6,7 +6,7 @@
 
   <div class="ticket-head">
     <h1>Retrain on better training data — a second attempt, with an eval split this time</h1>
-    <span class="badge badge-p2">P2 · sentence embeddings</span>
+    <span class="badge badge-p3">P3 · sentence embeddings</span>
   </div>
   <div class="callout">
     <span class="callout-label">In plain terms</span>
@@ -44,6 +44,15 @@
     <span class="callout-label">How much is left for retraining to win — measured 2026-08-27</span>
     <p>Recomputed from <code>eval/runs/prod_gloss_shipped.json</code> at depth 100, the live gloss index splits its failures cleanly. The target is at rank 1 for <b>24.0%</b> of authored reachable queries, sits at ranks 2–100 for a further <b>53.0%</b>, and is <b>never retrieved at all for 23.0%</b>. Only that last slice is a retrieval problem — the middle one is a ranking problem, which <a href="12-cross-encoder-reranker.html">RD-12</a> addresses with no new data and no training run.</p>
     <p><b>This bounds the ticket.</b> Retraining competes for 23 points with a prior of +4.5pp from the last attempt; reranking competes for 53 with none of the sourcing cost. That does not make this ticket wrong — a better representation is the only thing that reaches the 23% — but it settles the ordering, and it is evidence that did not exist when this ticket was written.</p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">⚠ Core bet tested by proxy and lost — RD-16, 2026-08-28. Read before starting.</span>
+    <p>This ticket's bet is that a better training corpus, on the same model, buys recall. That experiment already exists as a public checkpoint. <code>multi-qa-MiniLM-L6-cos-v1</code> is the <i>same architecture, same width, same layer count</i> as <code>franzclarin/ReverseDictionary</code>, pretrained on <b>215 million question–answer pairs</b> against this project's 181,149 WordNet triplets. Capacity held fixed, corpus changed — precisely the ablation this ticket proposes.</p>
+    <p>It scored <b>18.5% lenient R@1 against the fine-tune's 25.4%</b>: <b>−7.0 points</b>, 35 regressions against 15 wins, p = 0.007. The only significant result in a six-cell sweep, and it points the wrong way.</p>
+    <p>Two more of this ticket's assumptions went with it. The <a href="glossary.html">register gap</a> that motivates its step 2 is <b>+1.8pp</b> on the live index (<a href="14-synthetic-query-training-pairs.html">RD-14</a>). And enriching the indexed text with WordNet's usage examples — the "the glosses are too thin" reading — cost 1.4 points and raised echo.</p>
+    <p><b>What this does and does not establish.</b> It does not prove no corpus could help; a corpus built for <i>description-to-definition paraphrase</i> is not what any of these checkpoints was trained on. It does establish that the largest, most obvious, most professionally-built alternative corpus makes this task <i>worse</i>, which is a much harder starting position than this ticket assumed. And it converges with <a href="12-cross-encoder-reranker.html">RD-12</a>: QA and web-passage training data hurt here at both the bi-encoder and the cross-encoder stage, for the same reason.</p>
+    <p><b>Status: held, not cancelled.</b> The 23.0% never-retrieved slice is still only reachable by a better representation. But the prior on getting one by retraining is now measured and negative, and the next move on this path is <a href="10-real-phrasing-eval-set.html">RD-10</a> — a ruler that can resolve a bet this expensive. Full write-up: <code>eval/METHODS.md</code> §14.</p>
   </div>
 
   <section>

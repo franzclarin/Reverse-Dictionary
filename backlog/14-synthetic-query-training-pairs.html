@@ -6,7 +6,7 @@
 
   <div class="ticket-head">
     <h1>Generate query-style training pairs from glosses</h1>
-    <span class="badge badge-p2">P2 · training data</span>
+    <span class="badge badge-p3">P3 · training data</span>
   </div>
   <div class="callout">
     <span class="callout-label">In plain terms</span>
@@ -17,7 +17,8 @@
   </div>
 
   <div class="meta-row">
-    <span><b>Depends on:</b> <a href="12-cross-encoder-reranker.html">RD-12</a> reporting first — it addresses a much larger slice of the same problem</span>
+    <span><b>Blocked:</b> <a href="16-training-data-bottleneck.html">RD-16</a> measured this ticket's premise on the live index and it did not hold</span>
+    <span><b>Depended on:</b> <a href="12-cross-encoder-reranker.html">RD-12</a> reporting first — done 2026-08-28, negative</span>
     <span><b>Feeds:</b> <a href="09-expand-embedding-training-data.html">RD-09</a> (the retrain), <a href="15-hard-negative-mining.html">RD-15</a> (negatives are mined against these queries)</span>
     <span><b>Touches:</b> a new dev-only script in <code>scripts/</code>, a new corpus file. <b>No application code and no runtime dependency.</b></span>
     <span><b>Risk:</b> contaminating <code>eval/sets/v1.jsonl</code>; teaching the model an LLM's register rather than a person's</span>
@@ -25,6 +26,14 @@
   </div>
 
   <p class="lede">RD-09 step 2 already names this — "a target word paired with several ways a person might actually describe it" — and leaves it entirely unspecified. This ticket is that specification. The training corpus is 181,149 WordNet triplets whose queries <i>are</i> terse gloss text; the app is used with sentences like "when you can't remember a word." Nothing in training has ever looked like that.</p>
+
+  <div class="callout">
+    <span class="callout-label">⚠ Premise falsified — RD-16, 2026-08-28. Do not start this without reading it.</span>
+    <p>This ticket's stated reason for existing is the <a href="glossary.html">register gap</a>: the model has only seen dictionary phrasing, users write descriptions, and the distance between the two costs recall. That was <b>true and large on the lemma index</b>, and it is the index the ticket was written against.</p>
+    <p>On the index that actually serves users it is <b>noise</b>. Scoring the leaked, register-matched <a href="glossary.html">tripwire</a> slice beside the blind authored slice in the same run: the gap at R@10 went from <b>+26.1pp</b> to <b>+1.8pp</b>, and at rank 1 from <b>+9.3pp</b> to <b>−0.4pp</b>. Conditioned on the target being retrievable at all, the register-matched slice is now the <i>worse</i> of the two (−3.7pp). Reproduce with <code>npx tsx scripts/probe-register-gap.ts</code>.</p>
+    <p><b><a href="02-embedding-cutover.html">RD-02</a> closed this ticket's gap for free</b>, by changing what was indexed rather than what the model was trained on. Queries written in dictionary register are no longer answered better than queries written by a person, so a corpus of more human-sounding queries is buying something that has already been bought.</p>
+    <p>What survives: the <i>corrections</i> in this ticket are still right and still worth reading — synset-keyed pairs, dev-only generation, disjointness, provenance, a split decided up front. If a retrain is ever funded on other grounds, this is still how the data should be made. What does not survive is the argument that it is the thing to fix.</p>
+  </div>
 
   <div class="callout">
     <span class="callout-label">Read the size of this bet before starting</span>

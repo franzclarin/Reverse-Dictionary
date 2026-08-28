@@ -1,0 +1,168 @@
+<meta charset="utf-8">
+<title>RD-16 · Is training data the bottleneck?</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-16</div>
+
+  <div class="ticket-head">
+    <h1>Is training data the bottleneck? A pre-retrain diagnostic</h1>
+    <span class="badge badge-done">✓ Done</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Before spending weeks teaching the model, check whether teaching it is the thing that is wrong.</p>
+    <p><b>Today —</b> three tickets (<a href="09-expand-embedding-training-data.html">RD-09</a>, <a href="14-synthetic-query-training-pairs.html">RD-14</a>, <a href="15-hard-negative-mining.html">RD-15</a>) all assume the model needs better training material. They were written before the index changed, and one of their central assumptions has since stopped being true.</p>
+    <p><b>Do —</b> two cheap measurements. First, re-check the assumption against the live index. Second, try several ready-made models that anyone can download, on this exact task, and see whether any of them beats the one we trained.</p>
+    <p><b>Why it matters —</b> if a free off-the-shelf model wins, the answer to "should we gather more training data" is <i>no, someone already did</i>. If none of them wins, the retrain finally has a real case instead of a hopeful one. Either way it costs an afternoon of local compute and no data collection at all.</p>
+    <p><b>Result —</b> done 2026-08-28. The assumption was wrong, and <b>nothing off the shelf beat the model we already have</b>. A model trained on 215 million question–answer pairs — the same size as ours — scored <b>7 points worse</b>. Nothing shipped; the retraining tickets are answered rather than started.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Gates:</b> <a href="09-expand-embedding-training-data.html">RD-09</a>, <a href="14-synthetic-query-training-pairs.html">RD-14</a>, <a href="15-hard-negative-mining.html">RD-15</a> — all three resolve on this number</span>
+    <span><b>Follows:</b> <a href="12-cross-encoder-reranker.html">RD-12</a>, whose gate on those tickets has now opened</span>
+    <span><b>Touches:</b> two new dev-only scripts, <code>eval/</code>. No application code unless the ship gate below is met.</span>
+    <span><b>Cost:</b> 1h23m of local compute, no API spend, no database writes, no production exposure</span>
+    <span><b>Write-up:</b> <code>eval/METHODS.md</code> §14</span>
+  </div>
+
+  <p class="lede"><a href="12-cross-encoder-reranker.html">RD-12</a> came back negative, which opened the gate on the three retraining tickets. That makes the retrain the next thing in the queue — and the first time anyone has had to take its premises seriously rather than file them. Two of them do not survive being checked.</p>
+
+  <div class="callout">
+    <span class="callout-label">Finding 1 — the register gap is closed (measured 2026-08-28)</span>
+    <p><a href="14-synthetic-query-training-pairs.html">RD-14</a> exists because <i>"the model has only ever seen terse definitions; nobody types gloss text."</i> That was true, large, and measured — on the <b>lemma index</b>. On the index that actually serves users it is noise.</p>
+    <table>
+      <tr><th>index</th><th class="num">authored R@1</th><th class="num">R@10</th><th class="num">tripwire R@1</th><th class="num">R@10</th><th class="num">register gap @10</th></tr>
+      <tr><td><code>baseline</code> — lemma, pre-cutover</td><td class="num">10.1%</td><td class="num">36.2%</td><td class="num">19.4%</td><td class="num">62.4%</td><td class="num"><b>+26.1pp</b></td></tr>
+      <tr class="highlight"><td><code>prod_gloss_shipped</code> — live</td><td class="num">24.0%</td><td class="num">51.9%</td><td class="num">23.7%</td><td class="num">53.8%</td><td class="num"><b>+1.8pp</b></td></tr>
+    </table>
+    <p>The <a href="glossary.html">tripwire</a> slice is 93 paraphrases of dictionary definitions carrying documented <code>meta.leakage: "paraphrase"</code> — maximum register match <i>plus</i> leakage. On the live index it scores <i>below</i> the blind authored slice at rank 1, and its targets are the easier ones (86.0% inside the top 100 against 77.0%). Conditioned on being retrievable at all, the register-matched slice is <b>worse</b>: 27.5% against 31.2%.</p>
+    <p><b><a href="02-embedding-cutover.html">RD-02</a> closed the gap RD-14 was written to close, at zero training cost.</b> Reproduce with <code>npx tsx scripts/probe-register-gap.ts</code>.</p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">Finding 2 — the remaining failures do not have a register shape</span>
+    <p>From <code>prod_gloss_shipped.json</code>, authored reachable (n=287): rank 1 = <b>69</b>, ranks 2–10 = <b>80</b>, ranks 11–100 = <b>72</b>, never retrieved = <b>66</b> (23.0%). The never-retrieved slice has the same frequency profile as the whole set (zipf median 2.93 against 2.99) and is spread across all four authoring styles. What it looks like is a near miss in the right neighbourhood:</p>
+    <table>
+      <tr><th>target</th><th>query</th><th>returned first</th></tr>
+      <tr><td><code>coffee</code></td><td><i>the hot dark bitter drink that people need first thing in the morning</i></td><td><code>eye opener</code></td></tr>
+      <tr><td><code>shadow</code></td><td><i>the dark shape you cast on the ground when the sun is behind you</i></td><td><code>counterglow</code></td></tr>
+      <tr><td><code>bucket</code></td><td><i>the round container with a handle that you carry water in</i></td><td><code>water jug</code></td></tr>
+      <tr><td><code>glum</code></td><td><i>quietly miserable and low without making a fuss about it</i></td><td><code>dispirited</code></td></tr>
+    </table>
+    <p>A query that is a <i>paraphrase of a definition</i> still reaches rank 1 only ~24% of the time. That is an encoder failing to discriminate finely among 117,791 glosses — not a distribution mismatch that more query-side data would repair.</p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">Result — done 2026-08-28</span>
+    <p>Six full-scale cells over all <b>117,791</b> WordNet synsets, each an exact brute-force scan, scored against the frozen set. All six passed integrity at <b>59/60</b> by synset. <b>Lenient Recall@1, authored reachable (n=287). The fine-tune scores 25.4%</b> — the number to beat.</p>
+    <table>
+      <tr><th>cell</th><th>encoder</th><th class="num">lenient R@1</th><th class="num">strict</th><th class="num">R@10</th><th class="num">MRR@10</th><th class="num">echo</th><th class="num">delta</th><th>verdict</th></tr>
+      <tr class="highlight"><td><code>full_gloss_ft</code></td><td>the fine-tune <i>(control)</i></td><td class="num"><b>25.4</b></td><td class="num">21.6</td><td class="num">54.0</td><td class="num">0.304</td><td class="num">14.6%</td><td class="num">—</td><td>—</td></tr>
+      <tr><td><code>full_gloss_mpnet</code></td><td><code>all-mpnet-base-v2</code> · 768d, 110M</td><td class="num">28.2</td><td class="num">23.0</td><td class="num">54.7</td><td class="num">0.314</td><td class="num">13.8%</td><td class="num">+2.8</td><td>null result (p = 0.32)</td></tr>
+      <tr><td><code>full_gloss_ft_ex</code></td><td>fine-tune, definition + examples</td><td class="num">24.0</td><td class="num">20.2</td><td class="num">49.8</td><td class="num">0.283</td><td class="num">15.5%</td><td class="num">−1.4</td><td>no difference (p = 0.50)</td></tr>
+      <tr><td><code>full_gloss_l12</code></td><td><code>all-MiniLM-L12-v2</code> · 384d, 12 layers</td><td class="num">23.0</td><td class="num">18.5</td><td class="num">46.7</td><td class="num">0.265</td><td class="num">15.4%</td><td class="num">−2.4</td><td>no difference (p = 0.35)</td></tr>
+      <tr><td><code>full_gloss_gte</code></td><td><code>gte-small</code> · 384d</td><td class="num">22.6</td><td class="num">17.4</td><td class="num">46.3</td><td class="num">0.254</td><td class="num">16.5%</td><td class="num">−2.8</td><td>no difference (p = 0.31)</td></tr>
+      <tr><td><code>full_gloss_mqa6</code></td><td><code>multi-qa-MiniLM-L6-cos-v1</code> · 384d, <b>215M QA pairs</b></td><td class="num">18.5</td><td class="num">14.3</td><td class="num">41.1</td><td class="num">0.219</td><td class="num">16.4%</td><td class="num"><b>−7.0</b></td><td><b>significant regression</b> (p = 0.007)</td></tr>
+    </table>
+    <p><b>The fine-tune wins.</b> Every 384-dimensional alternative lost to it, and the one trained specifically on 215M question–answer pairs lost by <b>7.0 points</b> (35 regressions against 15 wins, p = 0.007) — the only result in the sweep significant in either direction. That arm was chosen as the direct proxy for <a href="09-expand-embedding-training-data.html">RD-09</a>: same architecture, same width, same layer count, differing only in what it was trained on. Holding capacity fixed and changing only the training corpus made retrieval <i>worse</i>.</p>
+    <p><b>Capacity buys a little, and not enough.</b> The single arm that scored above the control was five times its size at twice the width — and <b>+2.8 points is a null result</b> under the bar pre-registered above, at p = 0.32. It also fails both hard ship conditions: 768 dimensions has nowhere to go in a <code>halfvec(384)</code> column under Neon's ceiling, and its ONNX artifact does not fit <a href="11-bundle-embedding-model.html">RD-11</a>'s in-bundle budget. <b>Nothing shipped.</b></p>
+    <p><b>Richer document text does not help either.</b> Adding WordNet's usage examples to the indexed definition cost 1.4 points and raised <a href="glossary.html">echo</a> — the competing "the gloss is information-poor" hypothesis, measured rather than argued.</p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">Control cross-validation — the check that had to pass first</span>
+    <p><code>full_gloss_ft</code> and <code>prod_gloss_p100</code> search the same 117,791 synsets with the same model, one by exact scan and one at <code>probes=100</code>. They agree to the digit: lenient R@1 <b>25.4% against 25.4%</b>, strict <b>21.6% against 21.6%</b>. Two independently built indexes — one in Postgres, one a local file — landing on the same number is what licenses reading the other five cells at all.</p>
+  </div>
+
+  <section>
+    <h2>Pre-registration — recorded before any encoder number existed</h2>
+    <div class="callout">
+      <p><b>A candidate encoder beating the fine-tune control by fewer than ~6 points of lenient Recall@1 on the authored reachable slice is a null result, not a win</b> — including when the paired McNemar test reaches significance. This is <code>eval/METHODS.md</code> §9a's pre-committed bar, applied unchanged.</p>
+      <p><a href="glossary.html">Echo</a> is reported beside it as a primary metric: a recall gain that arrives with an echo rise is a trade, not a win.</p>
+      <p>Six cells are built. <b>The winner is selected on lenient R@1 and nothing else, and a post-hoc maximum of six cells is to be reported as exactly that</b> — the discipline <a href="12-cross-encoder-reranker.html">RD-12</a>'s fusion control was held to.</p>
+      <p>Only the control cell is comparable to <code>prod_gloss_p100</code>. Every cell is an exact brute-force scan; production is an approximate index at <code>probes=40</code>. All cross-cell comparisons are exact-against-exact and paired.</p>
+      <p><b>Ship gate</b> — three conditions, all required, none of them about recall alone: (1) the delta clears the bar above with p &lt; 0.05 paired and echo not materially worse; (2) the model is <b>384-dimensional</b>, because <code>GlossEmbedding</code> is <code>halfvec(384)</code> and <code>VocabEmbedding</code> still holds 452MB of Neon's ceiling; (3) its ONNX artifact fits <a href="11-bundle-embedding-model.html">RD-11</a>'s in-bundle budget — <code>/api/lookup</code> traces at 151.6MB against a 250MB limit. A 768-dim winner fails (2) and (3) and becomes a follow-up ticket, not a deploy.</p>
+      <p class="eg">Recorded 2026-08-28, before <code>scripts/build-encoder-cell.ts</code> was run for the first time.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <div class="callout">
+      <span class="callout-label">The lever that has worked here twice is representation, not training</span>
+      <p>Fine-tuning bought <b>+4.5pp</b> over its own base model on the lemma index — below this project's bar. Changing what was <i>indexed</i> bought <b>+12.9 to +15.7pp</b> with no training at all. An off-the-shelf encoder swap is another representation change, and it is the cheapest one left.</p>
+    </div>
+    <div class="callout">
+      <span class="callout-label">Why an off-the-shelf model is a fair test of "more training data"</span>
+      <p><code>multi-qa-MiniLM-L6-cos-v1</code> is the <i>same architecture and size</i> as the production fine-tune — 6 layers, 384 dimensions — pretrained on 215M question–answer pairs. Holding capacity fixed and changing only the training corpus is precisely the experiment RD-09 proposes, already run, by someone else, for free. If it wins, RD-09's hypothesis is confirmed and its work is largely unnecessary. If it loses, RD-09 is asking for something the architecture may not be able to hold.</p>
+    </div>
+    <div class="callout">
+      <span class="callout-label">The 23% is the only slice this can address</span>
+      <p>The target is inside the top 100 for 77.0% of queries. That 53-point middle belongs to reranking, and <a href="12-cross-encoder-reranker.html">RD-12</a> has shown no off-the-shelf tool reaches it. Retrieval work — this ticket, RD-09, RD-14 — competes for the 23.0% that is never retrieved at any depth. Do not let a representation win be written up as if it claimed the 53.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><s>Record the register finding reproducibly, not as a number in a document.</s> Done — <code>scripts/probe-register-gap.ts</code>, reading two committed runs, no model and no database.</li>
+      <li><s>Build full-scale local cells, not sampled ones.</s> Done — <code>scripts/build-encoder-cell.ts</code>, WordNet → cell, 117,791 synsets, no database and no pool manifest. This is the first cell family in the project whose absolute recall is directly comparable to a production run.</li>
+      <li><s>Reuse the single definitions of everything.</s> Done — <code>readSenses</code>, <code>glossTextFor</code>, <code>embedWith</code>, <code>writeIndex</code>. No second copy of anything.</li>
+      <li><s>Infer the vector width; do not assume 384.</s> Done — and it mattered: the 768-dim arm is the only one that outscored the control, so a builder that assumed 384 would have quietly excluded the sweep's most informative cell.</li>
+      <li><s>Do not touch the harness's encode path.</s> Done — <code>eval.ts</code>, <code>lib/</code> and <code>app/</code> are unmodified. Every candidate is mean-pooled and prefix-free.</li>
+      <li><s>Include a content arm as well as encoder arms.</s> Done — <code>gloss_examples</code> at full scale, −1.4 points.</li>
+      <li><s>Cross-validate the control before reading anything else.</s> Done, and it passed to the digit against <code>prod_gloss_p100</code>.</li>
+      <li><s>Record the decision on RD-09/RD-14/RD-15 explicitly.</s> Done — below, and in each ticket.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>The decision</h2>
+    <p><b>Hold all three retraining tickets.</b> Not cancelled — answered, with numbers, on the specific arguments each of them makes.</p>
+    <ul>
+      <li><b><a href="14-synthetic-query-training-pairs.html">RD-14</a> — premise falsified.</b> Its reason for existing is the register gap, and the register gap is <b>+1.8pp</b> on the live index, down from +26.1pp on the one it was written against. There is no longer a phrasing penalty to remove.</li>
+      <li><b><a href="09-expand-embedding-training-data.html">RD-09</a> — its core bet was tested by proxy and lost.</b> "Same model, better training corpus" is exactly what <code>multi-qa-MiniLM-L6-cos-v1</code> is, and it scored <b>7.0 points worse</b> at p = 0.007. That is not proof that no corpus could help; it is evidence that the obvious one, built at a scale this project cannot approach, actively hurts.</li>
+      <li><b><a href="15-hard-negative-mining.html">RD-15</a> — unchanged and still last.</b> It depends on RD-14's queries, which are now unfunded, and its own motivation was already corrected down to 3.4 points.</li>
+      <li><b>No production change.</b> The only arm above the control was +2.8 points (a null result), 768-dimensional, and too large to bundle. The ship gate failed on all three of its conditions independently.</li>
+    </ul>
+    <p>What is left pointing anywhere: the <b>23.0%</b> never retrieved at any depth is now known not to be reachable by register-matched data, by a QA-pretrained encoder of the same size, by a deeper encoder, by a more modern one, by richer document text, or by five times the capacity. The next honest move is <a href="10-real-phrasing-eval-set.html">RD-10</a> — a second, independently written test set — because every one of these verdicts rests on 287 queries written blind by one person in one sitting.</p>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A ticket's premise can expire without the ticket noticing.</b> RD-14 was written against a measured, real, 26-point effect. Eight days later RD-02 removed that effect, and RD-14 went on sitting in the backlog arguing for weeks of data collection to fix something already fixed. Nothing flagged it, because the fix and the ticket were about different-sounding things. <b>When a change lands, re-check the tickets whose case rests on the state it changed</b> — the same lesson RD-12 recorded about its own superseded diagnostic, arriving a second time in the same backlog.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Someone else's training run is the cheapest possible test of your training hypothesis.</b> RD-09 asks for weeks of sourcing to find out whether a better corpus helps. <code>multi-qa-MiniLM-L6-cos-v1</code> is that experiment already run — identical architecture, identical width, 215M pairs instead of 181k — and downloading it answered the question in seven minutes. Before funding a training run, check whether the ablation you want is already a public checkpoint.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>QA and web-passage training data is actively harmful on this task, and that is now two independent measurements.</b> <a href="12-cross-encoder-reranker.html">RD-12</a> found MS MARCO cross-encoders ranking glosses by term overlap. This ticket finds a QA-pretrained <i>bi-encoder</i> losing 7 points on the same set. Different architecture, different stage of the pipeline, same cause: those corpora teach <b>question-to-answer-passage relevance</b>, and a reverse dictionary needs <b>description-to-definition paraphrase</b>. The relation is the thing that transfers or fails to — not the model size, and not the architecture.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The fine-tune is better than its own reputation, and the old framing was measuring the wrong thing.</b> CLAUDE.md had recorded it as worth "+4.5pp, a null result" — true, but that compares it to its <i>own base model</i>. Against five modern alternatives at the same width it wins every time, and the nearest competitor is a null result at five times the parameter count. "Weak lever" was a statement about the gain from fine-tuning, and it had been quietly reread as a statement about the model's quality.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The pre-committed bar disposed of the tempting result again.</b> <code>all-mpnet-base-v2</code> came in <b>+2.8 points</b> and it was the one number in the sweep worth wanting. It is p = 0.32 on 50 discordant pairs, and it is the maximum of five candidates picked after seeing all five. The bar was set in August against a register gap that no longer exists — and the second, independent half of its justification, that n≈287 cannot resolve single-digit deltas, is exactly what did the work here.</p></div>
+
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Hashing the indexed text identifies a cell that metadata cannot describe.</b> Every cell here is stamped <code>variant: "gloss_synset"</code> because that string is what makes the harness expand synsets — so the metadata literally cannot say whether a cell holds definitions or definitions-plus-examples. Recomputing the input hash for each candidate variant recovers it from the artifact instead of the label, and would catch a stale cell that a label never could.</p></div>
+
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A negative sweep is not the same as a closed question, and the difference is worth writing down.</b> Six cells say the representation is not cheaply improvable. They do not say the 23% is unreachable — only that six specific, cheap things do not reach it. That distinction is the one RD-12 had to make about its 53 points, and it is made here for the same reason: so a later reader does not turn "we tried" into "there is nothing there."</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li class="done">Register-gap finding reproducible from committed run artifacts — <code>scripts/probe-register-gap.ts</code></li>
+      <li class="done">METHODS §4's ~43-point gap marked superseded in place as a lemma-index fact; §9a's effect-size anchor recorded as gone, with the bar itself deliberately unchanged</li>
+      <li class="done">Full-scale synset cells built from WordNet with no database and no pool manifest, carrying <code>inputsSha256</code> and <code>vectorsSha256</code></li>
+      <li class="done">Control cross-validated against <code>prod_gloss_p100</code> first — agreed to the digit on lenient and strict R@1</li>
+      <li class="done">All six cells verified at 59/60 by synset, with the text variant recovered from the input hash</li>
+      <li class="done">Every candidate mean-pooled and prefix-free; <code>eval.ts</code>, <code>lib/</code> and <code>app/</code> unmodified</li>
+      <li class="done">Content arm (<code>gloss_examples</code>) measured at full scale — −1.4 points, echo up</li>
+      <li class="done">All cells reported with lenient R@1, strict R@1, R@10, MRR@10 and echo, paired McNemar against the control</li>
+      <li class="done">Decision recorded against the pre-registered bar; the +2.8pp maximum of five candidates labelled as a post-hoc maximum and a null result</li>
+      <li class="done">RD-09, RD-14 and RD-15 amended; RD-14's premise addressed explicitly</li>
+      <li class="done"><code>eval/sets/v1.jsonl</code> verified unchanged (<code>cc03e134…</code>) after every run</li>
+      <li class="done">Production not re-indexed — the ship gate failed on all three conditions independently</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-16 · reverse-dictionary · done 2026-08-28 · negative sweep, nothing shipped</footer>
+</div>

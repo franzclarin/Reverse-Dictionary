@@ -246,6 +246,15 @@
       </div>
 
       <div class="term">
+        <div class="term-name">register gap</div>
+        <div class="term-def">
+          <p>How much better the app does when a question is phrased like a dictionary rather than like a person. Measured by scoring two slices of the same test set side by side: the blind hand-written ones, and the knowingly-leaked <b>tripwire</b> ones above.</p>
+          <p>It was the argument for training the model on more human-sounding examples — and it has since closed on its own.</p>
+          <span class="eg">on the old word-based index the gap was <b>+26.1 points</b>; on the definition-based index that replaced it, <b>+1.8</b> — noise. Searching definitions instead of words fixed it, with no retraining at all (RD-16)</span>
+        </div>
+      </div>
+
+      <div class="term">
         <div class="term-name">McNemar<br>(paired comparison)</div>
         <div class="term-def">
           <p>A statistical test for "is this change real, or just noise?" It compares two systems <i>question by question</i>, counting where one wins and the other loses. With only ~300 test questions, comparing two overall percentages cannot detect a change of a few points — this can.</p>

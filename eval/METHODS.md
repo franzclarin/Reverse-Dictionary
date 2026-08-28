@@ -136,6 +136,36 @@ distributions, and a benchmark built from the first tells you almost nothing abo
 the second. Any future number quoted without saying which register it came from is
 uninterpretable.
 
+> **SUPERSEDED as a description of production — 2026-08-28, RD-16. Kept, not deleted.**
+>
+> The paragraph above is a fact about the **lemma** index, measured 2026-08-19,
+> eight days before the RD-02 cutover replaced it. On the gloss index the gap is
+> gone. Both slices, scored inside the same run, lenient rank throughout
+> (`npx tsx scripts/probe-register-gap.ts`):
+>
+> | run | slice | R@1 | R@10 | in top 100 | R@1 given in top 100 |
+> |---|---|---|---|---|---|
+> | `baseline` (lemma) | authored | 10.1% | 36.2% | 58.2% | 17.4% |
+> | | tripwire | 19.4% | 62.4% | 73.1% | 26.5% |
+> | | **gap** | **+9.3pp** | **+26.1pp** | +14.9pp | **+9.1pp** |
+> | `prod_gloss_shipped` (live) | authored | 24.0% | 51.9% | 77.0% | 31.2% |
+> | | tripwire | 23.7% | 53.8% | 86.0% | 27.5% |
+> | | **gap** | **−0.4pp** | **+1.8pp** | +9.0pp | **−3.7pp** |
+>
+> The ~43-point figure was never a like-for-like comparison — it set the tripwire's
+> R@10 against a *different* 25-query probe. The like-for-like number on the same
+> run is **+26.1pp**, and it is now **+1.8pp**. Conditioned on the target being
+> retrievable at all, the register-matched slice is now **worse** (−3.7pp): its
+> targets are the easier ones (86.0% inside the top 100 against 77.0%) and it still
+> does not rank them first any more often.
+>
+> **What is superseded and what is not.** The *blind drafting protocol* of §5 is
+> not weakened — it is the reason this comparison can be made at all, and a set
+> authored against glosses would still be worthless. What no longer holds is the
+> inference built on top of the gap: that the production index is highly sensitive
+> to phrasing, and that closing that sensitivity is available work. RD-02 closed
+> it, with no training and no new data. See §14.
+
 ---
 
 ## 5. The blind drafting protocol
@@ -161,7 +191,11 @@ three epochs with no held-out data. A query that borrows a gloss's phrasing — 
 loosely, even from the memory of having just read it — is a query the model has
 effectively already seen. Blind authoring is the only thing standing between this
 benchmark and the tripwire's 62.4%, and the ~43-point register gap in §4 is the
-measure of exactly how much it is worth.
+measure of exactly how much it was worth **on the lemma index**. On the gloss
+index the gap is +1.8pp (§4's supersession note), which does not retire this
+protocol — a set authored from glosses would still be leaked, and unleaking it
+afterwards is impossible — but it does mean the protocol is now insurance rather
+than a live correction.
 
 If this protocol is ever violated for a subsequent version of the set, that version
 is worthless and must be discarded rather than patched. **The set is frozen once
@@ -411,6 +445,23 @@ so it stays auditable:
 
 If this rule is ever changed again, it must be changed the same way: deliberately,
 in writing, dated, with both wordings kept — and before the numbers, never after.
+
+#### Its effect-size anchor has since been superseded — the bar has not
+
+The original wording justified ~6 points by pointing at the register gap: *"the
+scale of the register gap already measured — 62.4% against ~19%, i.e. tens of
+points."* That gap was a lemma-index fact and is now +1.8pp (§4's supersession
+note, RD-16). The anchor is gone.
+
+**The threshold stands unchanged, and deliberately so.** Its second and
+independent justification — that at n≈287 a paired test cannot separate a
+five-point delta from noise, demonstrated by a synthetic run reading p = 0.51 on a
+5.7-point difference — is a property of the sample size, not of the register gap,
+and it is untouched. More to the point, lowering a pre-committed bar *after* the
+evidence that motivated it moved is the exact failure mode this section exists to
+prevent, and it would retroactively convert two recorded null results (the +4.5pp
+fine-tune, RD-12's +1.8pp fusion cell) into wins. The anchor is recorded as
+superseded; the number it anchored is not renegotiated.
 
 #### What is still reported
 
@@ -999,3 +1050,131 @@ What the repo keeps regardless of the verdict:
 - A database warm-up before timing, for the same reason the embedder has one:
   Neon auto-suspends, and the wake-up both wrecked the p50 and could abort a run
   outright on Prisma's 2s transaction `maxWait`.
+
+---
+
+## 14. RD-16 — is training data the bottleneck? (2026-08-28)
+
+§13 closed reranking and reopened the three retraining tickets (RD-09, RD-14,
+RD-15), which had been gated on it. This section is what happened when their
+premises were checked before they were funded. **Nothing here shipped.** No
+application code, no database write, no production exposure.
+
+### 14a. The register gap closed when the index changed
+
+RD-14 exists because the model has only ever seen dictionary phrasing while users
+write descriptions. §4 measured that as a ~43-point effect and §9a cites it as the
+effect size that justifies a representation change.
+
+It is a **lemma-index** fact. Scored on the live gloss index, both slices inside
+the same run, lenient rank throughout (`scripts/probe-register-gap.ts`):
+
+| run | slice | R@1 | R@10 | in top 100 | R@1 given in top 100 |
+|---|---|---|---|---|---|
+| `baseline` (lemma) | authored | 10.1% | 36.2% | 58.2% | 17.4% |
+| | tripwire | 19.4% | 62.4% | 73.1% | 26.5% |
+| | **gap** | **+9.3pp** | **+26.1pp** | +14.9pp | **+9.1pp** |
+| `prod_gloss_shipped` (live) | authored | 24.0% | 51.9% | 77.0% | 31.2% |
+| | tripwire | 23.7% | 53.8% | 86.0% | 27.5% |
+| | **gap** | **−0.4pp** | **+1.8pp** | +9.0pp | **−3.7pp** |
+
+The ~43-point figure was never like-for-like — it set the tripwire's R@10 against
+a *different* 25-query probe. The like-for-like number is +26.1pp, and it is now
++1.8pp. The slices have disjoint targets (0 of 93 shared), so no paired test is
+reported; `R@1 | in top 100` divides out the difficulty difference instead, and
+on that measure the register-matched slice is now the **worse** of the two.
+
+**RD-02 closed RD-14's gap for free.** §4 and §5 are marked superseded in place.
+§9a's threshold is deliberately *not* renegotiated — see the note there.
+
+### 14b. The encoder sweep
+
+Six cells, each **all 117,791 WordNet synsets**, exact brute-force scan, built by
+`scripts/build-encoder-cell.ts` and verified by `scripts/verify-encoder-cell.ts`.
+All six passed at 59/60 by synset with input hashes matching. Lenient R@1,
+authored reachable (n=287); paired McNemar against the control:
+
+| cell | encoder | lenient R@1 | strict | R@10 | MRR@10 | echo | Δ | verdict |
+|---|---|---|---|---|---|---|---|---|
+| `full_gloss_ft` | the fine-tune (**control**) | **25.4** | 21.6 | 54.0 | 0.304 | 14.6% | — | — |
+| `full_gloss_mpnet` | `all-mpnet-base-v2` (768d, 110M) | 28.2 | 23.0 | 54.7 | 0.314 | 13.8% | +2.8 | null (p = 0.32) |
+| `full_gloss_ft_ex` | fine-tune, definition + examples | 24.0 | 20.2 | 49.8 | 0.283 | 15.5% | −1.4 | no difference (p = 0.50) |
+| `full_gloss_l12` | `all-MiniLM-L12-v2` (384d, 12L) | 23.0 | 18.5 | 46.7 | 0.265 | 15.4% | −2.4 | no difference (p = 0.35) |
+| `full_gloss_gte` | `gte-small` (384d) | 22.6 | 17.4 | 46.3 | 0.254 | 16.5% | −2.8 | no difference (p = 0.31) |
+| `full_gloss_mqa6` | `multi-qa-MiniLM-L6-cos-v1` (384d, **215M QA pairs**) | 18.5 | 14.3 | 41.1 | 0.219 | 16.4% | **−7.0** | **significant regression** (p = 0.007) |
+
+**Control cross-validation, run first.** `full_gloss_ft` and `prod_gloss_p100`
+search the same synsets with the same model, one exactly and one at `probes=100`.
+They agree to the digit: lenient 25.4% vs 25.4%, strict 21.6% vs 21.6%. Two
+independently built indexes — one in Postgres, one a local file — landing on the
+same number is what licenses reading the other five cells.
+
+**These cells are the first in this project whose absolute recall is comparable
+to a production run.** Phase E's cells are a matched 20,287-word pool and are not.
+Do not table the two together; `scale` in the cell metadata is what keeps
+`report.ts` from doing so.
+
+### 14c. What the sweep establishes
+
+- **The fine-tune wins at its own size.** Every 384-dimensional alternative lost
+  to it. The reputation it carried in CLAUDE.md — "+4.5pp, a null result" — is a
+  statement about the *gain from fine-tuning over its own base*, and had been
+  quietly reread as a statement about the model's quality. Against five modern
+  alternatives it is the best 384-dim option measured.
+- **RD-09's central bet lost by proxy.** `multi-qa-MiniLM-L6-cos-v1` holds
+  architecture, width and depth fixed and changes only the training corpus —
+  181,149 WordNet triplets against 215M QA pairs. That is RD-09's ablation, run
+  by someone else at a scale this project cannot reach, and it is **7.0 points
+  worse**, the only significant result in the sweep.
+- **Capacity buys +2.8 points, which is a null result.** `all-mpnet-base-v2` is
+  5× the parameters at 2× the width, p = 0.32, and it is the maximum of five
+  candidates selected after seeing all five. It also fails both hard serving
+  conditions: 768 dimensions does not fit a `halfvec(384)` column under Neon's
+  ceiling, and its ONNX artifact does not fit RD-11's in-bundle budget.
+- **Richer document text does not help.** Adding WordNet's usage examples cost
+  1.4 points and raised echo — the competing "the gloss is information-poor"
+  hypothesis, measured rather than argued.
+- **QA and web-passage training data is harmful here, at both stages.** §13 found
+  MS MARCO cross-encoders ranking glosses by term overlap; 14b finds a
+  QA-pretrained bi-encoder losing 7 points. Different architecture, different
+  pipeline stage, same cause: those corpora teach **question-to-answer-passage
+  relevance**, and this task is **description-to-definition paraphrase**. What
+  transfers or fails to transfer is the *relation*, not the size or the shape of
+  the model.
+
+### 14d. What it does not establish
+
+It does not show the 23.0% never-retrieved slice is unreachable. It shows that
+six specific, cheap interventions do not reach it: register-matched training data
+(the gap is closed), a QA-pretrained encoder of the same size (−7.0), a deeper one
+(−2.4), a more modern one (−2.8), richer document text (−1.4), and 5× capacity
+(+2.8, null). A corpus built specifically for description-to-definition paraphrase
+is still untested — no public checkpoint is trained on that relation, which is
+both why this sweep could not test it and the strongest remaining argument for
+RD-09. The prior on getting there by retraining is now measured and negative.
+
+**The binding constraint is the ruler.** Every verdict above rests on 287 queries
+written blind by one author in one sitting (§8), and the two decisions it has left
+to make — fund a bespoke corpus, or accept the current recall — are both more
+expensive than the ones it has already decided. That is RD-10.
+
+### 14e. Method notes worth keeping
+
+- **A depth-100 deep scan is on by default**, so every cell carried its own
+  never-retrieved figure without a second run — the same property §13 exploited.
+- **The input hash identifies the text variant.** Every cell here is stamped
+  `variant: "gloss_synset"` because that exact string is what switches on member
+  expansion in `eval.ts`, so the metadata cannot record whether the rows hold
+  definitions or definitions-plus-examples. `verify-encoder-cell.ts` recomputes
+  the hash for each candidate variant and reports which one matches, recovering it
+  from the artifact rather than the label — and catching a stale cell that a label
+  never would.
+- **The width must be inferred, not assumed.** `embed-eval-pool.ts` hardcodes
+  `DIM`, which is why it cannot hold a 768-dim encoder. That arm turned out to be
+  the only one scoring above the control, so a builder that assumed 384 would have
+  silently excluded the sweep's most informative cell.
+- **Only mean-pooled, prefix-free encoders were eligible.** BGE (CLS pooling) and
+  E5 (`"query: "` / `"passage: "` prefixes) were excluded because `embedWith`
+  would mis-encode them, and matching them would mean changing how the harness
+  encodes *queries* too. That exclusion is a scope decision, not a judgement on
+  those models.
