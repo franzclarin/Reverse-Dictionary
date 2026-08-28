@@ -12,7 +12,7 @@ import { EMPTY_RUN } from "./types";
  * Two things here are load-bearing for the page not being a lie:
  *
  *  1. It calls the SAME `/api/lookup` the app calls, with `debug: true`. Every
- *     similarity shown therefore comes from the live 117,791-synset index
+ *     similarity shown therefore comes from the live 693,325-sense index
  *     through the served code path — there is no second retrieval implementation
  *     to drift from it.
  *  2. It places retrieved synsets with `project()`, the same function the build

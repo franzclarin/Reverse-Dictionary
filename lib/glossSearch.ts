@@ -1,7 +1,19 @@
 import type { PrismaClient } from "@prisma/client";
 
 /**
- * Synset-keyed gloss retrieval — the production search path as of RD-02.
+ * Sense-keyed gloss retrieval — the production search path as of RD-02.
+ *
+ * TWO SOURCES SHARE ONE TABLE SINCE RD-17, and the key says which:
+ *
+ *   `<pos>:<offset>`             a WordNet 3.0 synset, 117,791 of them, whose
+ *                                `lemmas` are the synonyms sharing that gloss.
+ *   `wikt:<word>:<pos>:<n>`      a Wiktionary sense, 575,534 of them. Wiktionary
+ *                                has no synsets, so `lemmas` holds exactly one
+ *                                word and expansion below is a no-op for it.
+ *
+ * Retrieval does not distinguish them — the vectors live in one space and the
+ * ORDER BY sees one table — which is the point: the expansion semantics are
+ * unchanged, and a Wiktionary row is simply a synset of size one.
  *
  * This is a deliberate mirror of `searchLocalSynsets()` in
  * `scripts/lib/localIndex.ts`, which is what produced the `cell_gloss_ft_synset`
@@ -21,7 +33,8 @@ import type { PrismaClient } from "@prisma/client";
  *      recomputed from WordNet at query time. `scripts/build-gloss-index.ts`
  *      writes `lemmas` as `sense.words`, which IS WordNet's order, so the two
  *      agree by construction. **Never sort this array** — alphabetical ordering
- *      measured 2.5 points worse on identical vectors.
+ *      measured 2.5 points worse on identical vectors. A `wikt:` row's array has
+ *      one element, so no ordering question arises for it.
  */
 
 export type ResultRow = { word: string; similarity: number };
@@ -49,41 +62,48 @@ export type GlossSynsetHit = SynsetHit & { gloss: string };
 export type VizSynsetHit = GlossSynsetHit & { vector: number[] };
 
 /**
- * IVFFlat probes for the gloss index. **Not 10** — the lemma index's value does
- * not transfer, and assuming it did cost 5.5 points of lenient R@1.
+ * IVFFlat probes for the gloss index. **Not 10, and not 40 any more.**
  *
- * Measured on the frozen set (authored reachable slice, n=287, RD-02 cutover):
+ * `probes` is only meaningful against `GLOSS_LISTS`: a probe scans roughly
+ * `rows / lists` candidates, so the two are one setting with two halves. RD-17
+ * took the table from 117,791 rows to 693,325 and rebuilt the index at
+ * `lists = 833`, which re-scoped every probe — so the value was re-swept rather
+ * than carried over. Measured on the live index, frozen set, authored reachable
+ * slice (n=287):
  *
- *   probes=10    lenient R@1 18.5%   R@10 39.4%   db p50 458ms
- *   probes=40    lenient R@1 24.0%   R@10 49.8%   db p50 479ms
- *   probes=100   lenient R@1 25.4%   R@10 51.6%   db p50 616ms
- *   (exact ceiling, brute force: ~25.8% / ~51.2%)
+ *   probes=10    lenient R@1 25.4%   R@10 51.9%   R@100 78.0%   db p50 579ms
+ *   probes=40    lenient R@1 24.7%   R@10 54.7%   R@100 81.9%   db p50 568ms
+ *   probes=100   lenient R@1 25.1%   R@10 55.7%   R@100 83.6%   db p50 582ms
+ *   probes=200   lenient R@1 25.1%   R@10 55.7%   R@100 83.6%   db p50 687ms
+ *   (exact ceiling, brute-force cell: 25.1% / 55.7%)
  *
- * 40 is the knee: it recovers almost all of the approximation loss for ~20ms,
- * while 100 buys 1.4 further points for ~137ms. Those p50s are local-to-Neon
- * round trips (~450ms of each is network), so the *scan* cost is roughly
- * 8/29/166ms — which is the number that matters in production, where both
- * sides sit in iad1.
+ * **100 is the knee, and it sits exactly on the exact-scan ceiling** — both R@1
+ * and R@10 reproduce the brute-force cell to the digit, and 200 buys nothing at
+ * all for ~100ms. probes=10 scores 0.3pp higher on R@1, which is one query out
+ * of 287 and inside the noise; picking it for that while giving up 3.8 points of
+ * R@10 would be fitting the benchmark rather than reading it.
  *
- * Why the lemma index tolerates probes=10 and this one does not: `lists = 115`
- * over 117,791 synset rows means each probe covers ~1,000 rows, and gloss
- * vectors cluster far less cleanly than bare lemmas, so the correct answer
- * frequently sits outside the 10 nearest lists. Re-tune this if the index is
- * ever rebuilt with a different `lists`.
+ * Those p50s are local-to-Neon round trips (~450ms of each is network), so the
+ * *scan* cost is what matters in production where both sides sit in iad1 — and
+ * it is roughly flat from 10 to 100 because a finer partition (833 lists rather
+ * than 115) means each probe covers ~830 rows instead of ~1,000.
+ *
+ * Re-sweep this if the row count or `lists` ever changes again.
  */
-export const GLOSS_PROBES = 40;
+export const GLOSS_PROBES = 100;
 
 /** The one place the gloss table's name is written. */
 export const GLOSS_INDEX = "GlossEmbedding";
 
 /**
  * The IVFFlat `lists` the index was built with — see the migration
- * `20260822000000_add_gloss_embeddings`. Not used to query (Postgres reads it
- * off the index); recorded here because `GLOSS_PROBES` above is only meaningful
- * as a fraction of it, and because /explain states both on screen. **Re-tune
+ * `20260828000001_gloss_index_retune`, which rebuilt it at `round(sqrt(693325))`
+ * after RD-17 grew the table 5.9x. Not used to query (Postgres reads it off the
+ * index); recorded here because `GLOSS_PROBES` above is only meaningful as a
+ * fraction of it, and because /explain states both on screen. **Re-tune
  * `GLOSS_PROBES` if this ever changes.**
  */
-export const GLOSS_LISTS = 115;
+export const GLOSS_LISTS = 833;
 
 /**
  * Interactive-transaction budget for the retrieval query.

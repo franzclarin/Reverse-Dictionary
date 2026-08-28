@@ -50,6 +50,12 @@ model GlossEmbedding {
   /// recomputed at query time.
   lemmas    String[]
   embedding Unsupported("halfvec(384)")
+
+  /// GIN over `lemmas` (RD-17). Backs the word-page existence check, which asks
+  /// whether the SEARCH index can answer with a word — `VocabEmbedding` is the
+  /// rollback path and disagrees with this table on 8,005 lemmas. Without it
+  /// that check is a sequential scan on every /word/<slug> render.
+  @@index([lemmas], type: Gin)
 }
 
 /// Sampled agreement log between the two indexes, written by /api/lookup.

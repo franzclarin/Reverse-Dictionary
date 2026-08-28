@@ -4,7 +4,7 @@ Guidance for working in this repo. Keep this file current when architecture or w
 
 ## What this is
 
-A **reverse dictionary** web app: the user describes a concept ("the smell of rain on dry earth") and gets the word. Retrieval is powered by a **fine-tuned sentence-embedding model** over a 141k-word vocabulary, with semantic search via pgvector.
+A **reverse dictionary** web app: the user describes a concept ("the smell of rain on dry earth") and gets the word. Retrieval is powered by a **fine-tuned sentence-embedding model** over a ~522k-word vocabulary — WordNet 3.0 plus a filtered Wiktionary supplement (RD-17) — with semantic search via pgvector.
 
 ## Stack
 
@@ -22,13 +22,13 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 1. `app/page.tsx` `handleSearch()` only routes to `/search?q=…`; **`components/SearchResults.tsx` owns the POST to `/api/lookup`**, so a query typed on the landing page and one re-run from the results bar go through exactly one code path. **No Claude fallback** — errors surface directly (with the server's `detail`).
 2. `app/api/lookup/route.ts`:
    - `embed(query)` (`lib/embedder.ts`) → 384-dim L2-normalised vector.
-   - `searchGloss()` (`lib/glossSearch.ts`) — pgvector query over **`GlossEmbedding`** inside a `$transaction` with `SET LOCAL ivfflat.probes = 40`:
+   - `searchGloss()` (`lib/glossSearch.ts`) — pgvector query over **`GlossEmbedding`** (693,325 senses since RD-17: 117,791 WordNet synsets + 575,534 Wiktionary senses) inside a `$transaction` with `SET LOCAL ivfflat.probes`:
      `ORDER BY embedding <=> $1::halfvec LIMIT $2`, similarity = `1 - (embedding <=> …)`.
-   - The rows that come back are **synsets, not words**. `expandSynsets()` unpacks each into its member `lemmas` (WordNet's own within-synset order — never sort it), dedupes by word across synsets, and truncates to `k`. Each word inherits its synset's similarity.
+   - The rows that come back are **senses, not words**. `expandSynsets()` unpacks each into its member `lemmas` (WordNet's own within-synset order — never sort it), dedupes by word across senses, and truncates to `k`. Each word inherits its sense's similarity. A Wiktionary row has exactly one lemma, so expansion is a no-op for it; only WordNet synsets have mates.
    - Returns `{ results: [{ word, similarity }] }` — the API contract is unchanged from the lemma era, so the frontend needed no change.
 3. UI navigates to `/word/[top.word]` with runners-up as `?alternatives=`.
 
-**The cutover (RD-02, 2026-08-27).** Search ran over bare lemmas in `VocabEmbedding` until this point; the switch to gloss text per synset is the fix for lexical echo described under "Established facts". `VocabEmbedding` stays populated and indexed as the rollback path — reverting the one `searchGloss()` call in the route is the entire rollback, no data migration. `lib/wordData.ts` (`getRelatedWords`) still reads `VocabEmbedding` and was deliberately not switched: it finds neighbours of a *word*, which is what a lemma index is actually good at.
+**The cutover (RD-02, 2026-08-27).** Search ran over bare lemmas in `VocabEmbedding` until this point; the switch to gloss text per synset is the fix for lexical echo described under "Established facts". `VocabEmbedding` stays populated and indexed as the rollback path — reverting the one `searchGloss()` call in the route is the entire rollback, no data migration. `lib/wordData.ts` (`getRelatedWords`) still reads `VocabEmbedding` **for neighbours** and was deliberately not switched: it finds neighbours of a *word*, which is what a lemma index is actually good at. It no longer reads it to decide whether a word *exists* — see "Word pages"; that mismatch 404'd 8,005 answerable words until RD-17.
 
 **`probes = 40`, not 10.** The lemma index's tuning does not transfer — see `GLOSS_PROBES` in `lib/glossSearch.ts` for the measured sweep. Assuming it did cost 5.5 points of lenient R@1.
 
@@ -50,7 +50,11 @@ A **reverse dictionary** web app: the user describes a concept ("the smell of ra
 `/word/[word]` is powered **entirely by the embedding model**; there is no Claude call anywhere in the flow.
 
 - An embedding model has no decoder, so it **cannot** produce a definition, etymology, pronunciation, or examples. Don't try to restore those from it.
-- `getRelatedWords()` (`lib/wordData.ts`) is the core of the page: nearest neighbours by cosine distance over `VocabEmbedding`. It reads the word's **stored** vector via a subquery, so it never loads ONNX — pure pgvector, fast.
+- **Existence is decided by `GlossEmbedding`, neighbours by `VocabEmbedding` (RD-17, 2026-08-28).** These were both `VocabEmbedding` until RD-17, and that was a live bug: search has answered out of the gloss index since the RD-02 cutover, the two tables' lemma sets differed by **8,005 words** when this was found, and `getWordData()` 404'd every one of them. `/word/capsize` returned 404 while search happily returned `capsize`. The same ticket's expansion took that gap to **379,633**, so it had to be fixed in the same change. Whatever search can return must render.
+- `getRelatedWords()` (`lib/wordData.ts`) is the core of the page: nearest neighbours by cosine distance over `VocabEmbedding`, reading the word's **stored** vector via a subquery, so it never loads ONNX — pure pgvector, fast. Words with no lemma vector fall back to a **sense** neighbourhood over `GlossEmbedding`, expanded with the same `expandSynsets()` the search path uses. The lemma path is untouched, so no page that worked before RD-17 changed behaviour.
+  - The gloss fallback's subquery is `WITH q AS MATERIALIZED`. Spelled inline twice like the lemma path's, Postgres re-plans the GIN lookup for both the SELECT and the ORDER BY: measured **1533ms → 719ms**.
+  - Backed by `GlossEmbedding_lemmas_gin_idx` (migration `20260828000000_gloss_lemma_lookup`). Without it the existence check is a seq scan over 117,791 rows on every render.
+- **A word with no vector has no neighbours, and the code now says so.** 47 of the 475 `Word` rows are Claude-era profiles with no vector in *either* table (`petrichor` is one — real definition, in no index). `embedding <=> (SELECT … WHERE word = $1)` against a subquery matching nothing is not an error in Postgres: the subquery is NULL, every distance is NULL, and the page rendered **twelve arbitrary rows presented as semantic neighbours**. Pre-existing, not introduced by the two-table split; fixed by checking for a vector before querying.
 - `getWordData()` returns an existing `Word` row if present (words profiled before Claude was removed keep their definition — reading them is free), otherwise creates a **minimal row with empty text fields** so the word has a stable id and URL. The page renders around whatever is empty.
 - **Gotcha:** those minimal rows are indistinguishable from a real profile by presence alone. If a generative source is ever added back, regenerate on `definition === ""`, not on row-absence, or every word visited during this era will stay blank forever.
 - Both `getWordData` and `getRelatedWords` are wrapped in React `cache()` so the page and `generateMetadata` share one query per request instead of duplicating it.
@@ -132,6 +136,8 @@ Models: `Word`, `VocabEmbedding`, `GlossEmbedding`, `ShadowLookup`.
 - The error `detail` returned to the client includes `subsystem` + `code`, but **`hostname` only outside production** (a database host can identify a private DB). The full shape is always in the server logs.
 - **The retrieval transaction waits for Neon to wake up.** `searchGlossSynsets()` passes `{ maxWait: 15s, timeout: 20s }` to `$transaction`. Prisma's 2s default is shorter than Neon's compute wake-up, so the first query after an idle period died with `P2028 Unable to start a transaction in the given time` — a 500 for the user with nothing wrong with the query. The eval harness works around the same thing by warming the database first; a route cannot warm anything, so it waits. Both values sit well inside the route's `maxDuration = 60`.
 - Migrations: Neon pooled connections break `prisma migrate deploy`'s advisory lock — apply SQL via `prisma db execute --file` instead.
+- **An IVFFlat rebuild needs `SET maintenance_work_mem` in the migration file.** Neon's default is 64 MB; the build over 693,325 `halfvec(384)` rows at `lists = 833` needs 169 MB and fails outright with `memory required is 169 MB, maintenance_work_mem is 64 MB`. `prisma db execute --file` runs the whole file as one transaction, so a failed `CREATE INDEX` rolls its `DROP INDEX` back with it and the serving index survives — the failure is safe to retry, not a window of unindexed production. Verified by checking `pg_indexes` after the first attempt failed.
+- **`lists` and `probes` are one setting with two halves.** A probe scans roughly `rows / lists` candidates, so changing the row count changes what a given `probes` value *means*. RD-17 grew the table 5.9× and re-swept both; never move one without the other.
 - Env: local `.env.local` needs only `DATABASE_URL` (Neon owner role). No Clerk or Upstash keys required anymore.
 
 ## Evaluation (`scripts/`, `eval/`) — additive tooling, read-only
@@ -152,9 +158,20 @@ Offline harness measuring the real retrieval path (`embed(query)` → pgvector t
 - **That headroom is real, and off-the-shelf reranking does not reach it (RD-12, 2026-08-28 — measured and rejected).** Do not re-run this experiment without reading METHODS §13. Three arms of `ms-marco-MiniLM` cross-encoders over the gloss shortlist, depth swept 10/25/50/100, all scored **below plain retrieval** on lenient R@1 (best 24.4% against 24.0%; paired deltas −3.8/−2.4/−2.1pp, every one negative). Recall *falls* as shortlist depth rises, and the `"<lemma>: <definition>"` input variant recovers ground only by driving **echo from 14.5% to 21.4%** — Phase E predicted exactly that, and RD-12 measured it rather than assuming it. The cause is visible in the scores: MS MARCO trains web-passage relevance, so the model ranks glosses by term overlap with the query, which is *echo relocated into the reranker*. A query is a **description** and a gloss is a **definition** — related by paraphrase, not overlap. Parameter-free rank fusion (the control, `scripts/probe-rerank-fusion.ts`) tops out at **25.8%, +1.8pp**, which is a null result under §9a and additionally the maximum of 24 post-hoc cells. **The 53pp remains unclaimed**; a fine-tuned reranker is a separate decision to be made against these numbers, not against the ceiling.
 - **The register gap is closed, and it was RD-14's whole premise (RD-16, 2026-08-28).** METHODS §4 recorded a "~43-point register gap" — dictionary-phrased queries beating hand-written ones — and §9a cites it as the effect size that justifies a representation change. It is a **lemma-index** fact. Scoring the leaked `gloss_tripwire` slice beside the blind authored slice inside the same run: the gap at R@10 went **+26.1pp → +1.8pp** and at rank 1 **+9.3pp → −0.4pp**. Conditioned on the target being retrievable at all the register-matched slice is now the *worse* of the two (−3.7pp), because its targets are the easier ones (86.0% in the top 100 against 77.0%). **RD-02 closed it for free.** Reproduce with `npx tsx scripts/probe-register-gap.ts`; §4 and §5 are superseded in place; §9a's threshold is deliberately not renegotiated.
 - **No off-the-shelf encoder beats the fine-tune, and the QA-pretrained one loses badly (RD-16, 2026-08-28 — measured and rejected).** Six full-scale cells over all 117,791 synsets, exact scan, paired against the fine-tune control at 25.4% lenient R@1. **Every 384-dim alternative lost**: `multi-qa-MiniLM-L6-cos-v1` **−7.0pp** (35/15, p = 0.007 — the only significant result in the sweep), `gte-small` −2.8, `all-MiniLM-L12-v2` −2.4. Enriching the indexed text with WordNet's examples cost −1.4pp and raised echo. The one arm above the control was `all-mpnet-base-v2` at **+2.8pp** — a null result under §9a (p = 0.32, and the maximum of five post-hoc candidates), 768-dim so it cannot fit a `halfvec(384)` column under Neon's ceiling, and too large for RD-11's bundle. **Nothing shipped.** The consequence for retraining: `multi-qa` holds architecture, width and depth fixed and changes only the corpus (181k WordNet triplets → 215M QA pairs), which is RD-09's own ablation run at a scale this project cannot reach — and it made retrieval worse. Full write-up: **METHODS §14**.
+- **The vocabulary was expanded, and the arm designed to be safe is the one that failed (RD-17, 2026-08-28 — SHIPPED).** `GlossEmbedding` now holds **693,325 senses**: WordNet's 117,791 synsets plus **575,534 filtered Wiktionary senses** over 443,645 words. Two arms were built as full-scale cells and scored before anything was written. **`wikt_new`** — index a sense only if WordNet cannot already answer with that headword — lost **8.4 points** of lenient R@1 with **24 regressions and zero wins** (p < 0.00001). **`wikt_all`** — every surviving sense, including new senses of words WordNet already covers — came out **flat** (−0.3pp, 23/22, p = 1.00) while taking R@10 from 54.0% to **59.9%** and the coverage slice from **0.0% to 32.0%** at rank 1. The +8.1pp between the arms is the finding: `wikt_new` can only add **distractors** on the reachable slice, so it measures their cost in isolation; `wikt_all` adds the same distractors *plus* **second surfaces for correct answers**, and those pay for them. **Do not reason about added candidates as pure distractors** — that intuition is what made the losing arm look like the cautious one. Full write-up: **METHODS §15**.
+- **A coverage fix converts an impossibility into a ranking problem, and no further.** 20 of the 25 coverage rows are now retrieved within 100 and 8 rank first; `doomscrolling`, `gaslighting` and `hangry` are indexed and still not in the top 100. RD-17 buys candidacy, not rank. `corpsing` is unreachable by design — Wiktionary carries it only as an inflected form of the verb `corpse`, which the filter drops, and the eval row has no `acceptable[]`.
+- **Echo rose 14.6% → 17.3% and the mechanism is compositional, not a regression in the copied rows.** Added words fill 38.7% of top-10 slots and supply 46.9% of the echo; echo *within* added words is 21.0% against WordNet's 15.0%, because Wiktionary is far richer in transparent derivatives (`paintery`, `pseudopalindrome`). Only 7 of the 23 lost rank-1s were displaced by an echoing word. Reproduce with `npx tsx scripts/probe-supplement-echo.ts`.
+- **Open English WordNet is not the answer, and the 25 unreachable rows are really 23 (RD-17).** OEWN 2024 is +5,307 / −1,003 lemmas against PWN 3.0 and covers **2** of the 23 targets; it also re-keys every synset (`oewn-NNNNNNNN-p`, not `pos:offset`), which would orphan every committed run. Measured, recorded, **not adopted** (`npm run probe:oewn`). Separately, `capsize` and `loiter` are flagged `reachable: false` and have been answerable since RD-02 — the set is frozen, so the denominator deliberately stays 287 (`npm run probe:reachability`).
 - **The fine-tune is better than its recorded reputation.** "+4.5pp, a null result" is a statement about the gain over *its own base model*, and had been quietly reread as a statement about model quality. Against five modern alternatives at the same width it wins every one, and the only thing that beats it is 5× the parameters for a null-result +2.8pp. Do not cite it as a weak model; cite it as a weak *fine-tuning gain*.
 - **QA and web-passage training data is actively harmful on this task, at both pipeline stages.** RD-12 found MS MARCO cross-encoders ranking glosses by term overlap; RD-16 found a QA-pretrained bi-encoder losing 7 points. Different architecture, different stage, one cause: those corpora teach **question-to-answer-passage relevance** and this task needs **description-to-definition paraphrase**. What transfers is the *relation*, not the size or shape of the model. Two independent measurements now say so — treat "model X is trained on more data" as a claim about *which* relation before treating it as a claim about quality.
-- **Storage ceiling.** Neon project limit is **512 MB**; `VocabEmbedding` alone is 452 MB (222 MB table + 230 MB indexes) and the database sits at ~460 MB. There is no room for a second index — an attempt to stage one failed with `53100 project size limit exceeded`. pgvector is **0.8.0** and `halfvec` is available: a full gloss index (~206k rows) is ~656 MB as `vector(384)` but ~328 MB as `halfvec(384)`, which fits only if it *replaces* `VocabEmbedding`.
+- **Storage ceiling — the 512 MB figure was stale and wrong in the direction that matters (corrected RD-17, 2026-08-28).** Measured against the live database, not estimated: `SHOW neon.max_cluster_size` returns **16TB** and `pg_database_size` is **673 MB**. The project was upgraded during RD-01 and the ticket recorded the new cap as unverified; nothing re-checked it, so every later sizing decision was made against a ceiling that was both wrong and *lower than current usage*. **Documentation that is wrong and conservative is worse than documentation that is missing** — it produces a confident "this cannot fit" from someone who never runs the query. Storage is no longer a binding constraint on this project; cost and retrieval quality are. Live per-table figures:
+
+  | table | rows | heap | indexes | total | per row |
+  |---|---|---|---|---|---|
+  | `VocabEmbedding` · `vector(384)` | 141,854 | 222 MB | 230 MB | 451 MB | 3.3 KB |
+  | `GlossEmbedding` · `halfvec(384)` | 117,791 | 113 MB | 100 MB | 213 MB | **1.85 KB** |
+
+  pgvector is **0.8.0** and `halfvec` is measured-free (0 discordant pairs, mean cosine 0.99999998). Converting `VocabEmbedding` to `halfvec` would free ~225 MB; with the cap at 16TB that is no longer worth the risk to the rollback path, and RD-17 deliberately did not do it.
 
 ### The eval set — frozen, never regenerated in place
 
@@ -183,7 +200,7 @@ npx tsx scripts/eval.ts --compare eval/runs/a.json eval/runs/b.json
 
 **`npm run eval` is no longer the production path.** It still targets `VocabEmbedding`, which the RD-02 cutover demoted to the rollback path — kept under that name because the three committed reference runs are named for it and renaming would orphan them. Use `eval:prod` to measure what users actually get. `--probes` now defaults per-index (lemma 10, gloss 40) rather than forcing 10 on everything; every run records the value it actually used.
 
-Reports Recall@1/@3/@10, MRR@10, strict + lenient recall, **echo rate** (a primary metric — a change that improves recall without moving it needs explaining), and latency p50/p95, sliced by source, style, query length, token count, reachability, `lexical_overlap` and frequency band. Per-query results go to `eval/runs/<tag>.json`. `--compare` is **paired**, using exact two-sided McNemar on rank-1 disagreements, and prints named wins and regressions — comparing two independent Recall@1 figures at n≈300 cannot see a three-point change.
+Reports Recall@1/@3/@10, MRR@10, strict + lenient recall, **echo rate** (a primary metric — a change that improves recall without moving it needs explaining), and latency p50/p95, sliced by source, style, query length, token count, reachability, `lexical_overlap` and frequency band. Since RD-17 the **coverage slice is scored, not just counted** — a count cannot distinguish "indexed" from "indexed and findable", which is the only question a vocabulary change asks. Per-query results go to `eval/runs/<tag>.json`. `--compare` is **paired**, using exact two-sided McNemar on rank-1 disagreements, and prints named wins and regressions — comparing two independent Recall@1 figures at n≈300 cannot see a three-point change.
 
 Gotchas that cost real time:
 - **Latency here is not production latency.** `db p50 ≈ 466ms` vs `embed p50 ≈ 20ms` is a local-machine-to-Neon round trip; in production both sit in `iad1`. Valid for comparing runs on one machine, not for describing user experience.
@@ -244,12 +261,47 @@ Authored slice, 287 reachable queries. **Lenient R@1 is the metric the decision 
 |---|---|---|---|---|---|
 | `baseline` (lemma, probes=10) | 10.1% | 5.6% | 26.1% | 40.7% | the pre-cutover production path |
 | `prod_gloss` (probes=10) | 18.5% | 15.7% | 39.4% | 14.8% | gloss index, lemma's probes — **undertuned** |
-| **`prod_gloss_shipped`** (probes=40) | **24.0%** | 20.6% | 49.8% | 14.5% | **what ships** |
-| `prod_gloss_p100` (probes=100) | 25.4% | 21.6% | 51.6% | 14.6% | +1.4pp for ~6x the scan cost; not worth it |
+| `prod_gloss_shipped` (probes=40) | 24.0% | 20.6% | 49.8% | 14.5% | the pre-RD-17 production path |
+| `prod_gloss_p100` (probes=100) | 25.4% | 21.6% | 51.6% | 14.6% | +1.4pp for ~6x the scan cost; not worth it at 117k rows |
+| **`prod_wikt_shipped`** (693,325 rows, lists=833, probes=100) | **25.1%** | 20.6% | **55.7%** | 17.5% | **what ships** — RD-17 |
 
+**Probes were re-swept for the expanded index (RD-17)** — `lists = 115` was sized for 117,791 rows, and a probe scans roughly `rows / lists`, so the old tuning did not carry:
+
+| probes | lenient R@1 | R@10 | lenient R@100 | db p50 |
+|---|---|---|---|---|
+| 10 | 25.4% | 51.9% | 78.0% | 579ms |
+| 40 | 24.7% | 54.7% | 81.9% | 568ms |
+| **100** | **25.1%** | **55.7%** | **83.6%** | 582ms |
+| 200 | 25.1% | 55.7% | 83.6% | 687ms |
+| *exact ceiling (cell)* | *25.1%* | *55.7%* | — | — |
+
+**100 is the knee and sits exactly on the exact-scan ceiling.** `probes=10` scores 0.3pp higher on R@1 — one query out of 287 — while giving up 3.8 points of R@10; taking it would be fitting the benchmark rather than reading it.
+
+- **The expansion on real infrastructure**: `prod_gloss_shipped → prod_wikt_shipped` is **+1.0 point** lenient R@1 (25 wins / 22 regressions, p = 0.77) — a **null result** on the headline, which is the honest read — while R@10 goes 49.8% → 55.7%, lenient R@100 goes 77.0% → 83.6%, and the coverage slice goes 0.0% → 32.0%. Echo 14.5% → 17.5%, explained under "Established facts".
 - **The cutover is confirmed on real infrastructure**: `baseline → prod_gloss_shipped` is **+13.9 points** lenient R@1 (**55 wins / 15 regressions**, p < 0.00001), inside the +12.9–15.7pp band the cells predicted, with **echo 40.7% → 14.5%** and R@10 nearly doubled. Recall and echo moved together, as they did offline.
 - **Probes tuning was worth 5.5 points** and nearly free (~20ms of scan). `probes=100` reaches the exact-scan ceiling (~25.8%), confirming the remaining gap to the cells is *index approximation*, not representation — and that 40 sits at the knee.
 - **The cells' absolute numbers did not transfer, and were never meant to.** A 20,287-word matched pool is an easier problem than 117,791 live synsets; CLAUDE.md said so before the cutover and the measurement bore it out. Only the *relative* cell comparisons were ever valid.
+
+### Vocabulary expansion (RD-17, 2026-08-28) — SHIPPED
+
+Full-scale cells over the **expanded** candidate set, exact scan, paired McNemar against the WordNet-only control. `rd17_control` is per-query identical to RD-16's `full_gloss_ft` (0 rank differences), which is what licenses reading the arms.
+
+| cell | rows | lenient R@1 | strict | R@10 | MRR | echo | Δ lenient | verdict |
+|---|---|---|---|---|---|---|---|---|
+| **`rd17_control`** | 117,791 | **25.4%** | 21.6% | 51.6% | 0.304 | 14.6% | — | — |
+| `rd17_wikt_new` | 539,456 | 17.1% | 15.0% | 41.5% | 0.221 | 17.6% | **−8.4** | **significant regression** (24/0, p < 0.00001) |
+| **`rd17_wikt_all`** | 693,325 | **25.1%** | 20.6% | **55.7%** | 0.307 | 17.3% | −0.3 | **no difference** (23/22, p = 1.00) — **shipped** |
+
+Coverage slice (the 25 `reachable: false` rows), reported separately and **never folded into headline recall**:
+
+| cell | R@1 | R@3 | R@10 | retrieved within 100 |
+|---|---|---|---|---|
+| `rd17_control` | 0.0% | 0.0% | 0.0% | 0 of 25 |
+| `rd17_wikt_all` | **32.0%** | 48.0% | 64.0% | 20 of 25 |
+
+- **The safe-looking arm is the one that failed, 24 regressions to 0 wins.** `wikt_new` indexes a Wiktionary sense only where WordNet cannot already answer, so on the reachable slice its added rows can *only* be distractors — it is the distractor cost measured in isolation, and that cost is −8.4 points. `wikt_all` adds the same distractors plus **second surfaces for correct answers**, and the +8.1pp between the arms is those senses paying for them.
+- **Rank 1 is flat and every depth below it improves.** Lenient recall by depth, control → shipped: `3` 39.4→41.8, `10` 54.0→**59.9**, `50` 73.5→**77.0**, `100` 79.8→**83.6**. The never-retrieved share falls 20.2% → 16.4% — the only thing that has moved the slice §13 called unreachable by reordering at any depth.
+- **`probes` and `lists` were re-tuned for the new row count** — `lists = 115` was sized for 117,791 rows and means something different over 693,325. See `GLOSS_PROBES` in `lib/glossSearch.ts`.
 
 - **Gloss indexing wins, and survived the correction.** `lemma_ft → gloss_ft` is **+12.9 points** lenient R@1 (53 wins / 16 regressions, p < 0.0001) and `lemma_base → gloss_base` is **+15.7** (57/12, p < 0.0001) — still roughly twice the pre-committed ~6-point bar. **Echo falls 44.3% → 14.2%**: recall and echo move together, which is what a real representation fix should do.
 - **The fine-tune is worth little.** `lemma_base → lemma_ft` is +4.5 points, *below* the threshold, so it stands as a **null result** despite p = 0.029. Swapping the index beats retraining by roughly threefold.
@@ -291,12 +343,14 @@ Lenient R@1, authored reachable (n=287), paired McNemar against the control.
 
 | cell | encoder | lenient R@1 | strict | R@10 | MRR@10 | echo | Δ | verdict |
 |---|---|---|---|---|---|---|---|---|
-| **`full_gloss_ft`** | the fine-tune (**control**) | **25.4** | 21.6 | 54.0 | 0.304 | 14.6% | — | — |
-| `full_gloss_mpnet` | `all-mpnet-base-v2` (768d, 110M) | 28.2 | 23.0 | 54.7 | 0.314 | 13.8% | +2.8 | null (p = 0.32) |
-| `full_gloss_ft_ex` | fine-tune, definition + examples | 24.0 | 20.2 | 49.8 | 0.283 | 15.5% | −1.4 | no difference |
-| `full_gloss_l12` | `all-MiniLM-L12-v2` (384d, 12L) | 23.0 | 18.5 | 46.7 | 0.265 | 15.4% | −2.4 | no difference |
-| `full_gloss_gte` | `gte-small` (384d) | 22.6 | 17.4 | 46.3 | 0.254 | 16.5% | −2.8 | no difference |
-| `full_gloss_mqa6` | `multi-qa-MiniLM-L6-cos-v1` (384d, **215M QA pairs**) | 18.5 | 14.3 | 41.1 | 0.219 | 16.4% | **−7.0** | **significant regression** (p = 0.007) |
+| **`full_gloss_ft`** | the fine-tune (**control**) | **25.4** | 21.6 | 51.6 | 0.304 | 14.6% | — | — |
+| `full_gloss_mpnet` | `all-mpnet-base-v2` (768d, 110M) | 28.2 | 23.0 | 53.0 | 0.314 | 13.8% | +2.8 | null (p = 0.32) |
+| `full_gloss_ft_ex` | fine-tune, definition + examples | 24.0 | 20.2 | 48.1 | 0.283 | 15.5% | −1.4 | no difference |
+| `full_gloss_l12` | `all-MiniLM-L12-v2` (384d, 12L) | 23.0 | 18.5 | 44.9 | 0.265 | 15.4% | −2.4 | no difference |
+| `full_gloss_gte` | `gte-small` (384d) | 22.6 | 17.4 | 44.9 | 0.254 | 16.5% | −2.8 | no difference |
+| `full_gloss_mqa6` | `multi-qa-MiniLM-L6-cos-v1` (384d, **215M QA pairs**) | 18.5 | 14.3 | 39.0 | 0.219 | 16.4% | **−7.0** | **significant regression** (p = 0.007) |
+
+> **The `R@10` column above was corrected on 2026-08-28 (RD-17).** It had been transcribed as *lenient* R@10 while every other table on this page — including the production table below — reports **strict** R@10 under the same heading, which is what the harness prints. Recomputed from the same committed runs, no re-scoring: `54.0 → 51.6`, `54.7 → 53.0`, `49.8 → 48.1`, `46.7 → 44.9`, `46.3 → 44.9`, `41.1 → 39.0`. **No verdict changes** — every delta the sweep resolves on is lenient R@1, which is untouched. Recorded rather than silently fixed, because two conventions under one column name is the kind of thing that gets compared across tables later.
 
 - **The control cross-validates against `prod_gloss_p100` to the digit** — lenient 25.4% vs 25.4%, strict 21.6% vs 21.6%. Two independently built indexes, one in Postgres and one a local file, agreeing is what licenses reading the other five cells. Run that check first if these cells are ever rebuilt.
 - **Nothing shipped**, and the ship gate failed on all three of its conditions independently: the best delta is below §9a's bar, the model is 768-dim, and its artifact exceeds RD-11's bundle budget.
@@ -310,7 +364,7 @@ Tickets are static HTML, not an issue tracker: `backlog/index.html` lists them (
 - Use judgement on "big enough" — a typo or a one-line config tweak doesn't need a ticket; a data migration, a removed/added subsystem, anything that changes retrieval behavior, or anything future work would need context on, does.
 - Follow the existing badge (`badge-p0`…`badge-p3`, `badge-done`) and tag (`size:`, `impact:`) vocabulary already used in `index.html` — don't invent a new taxonomy per ticket.
 - **`backlog/glossary.html` is the vocabulary reference for the whole backlog**, and `index.html`'s "Start here" section is its entry point. Every ticket opens with an *In plain terms* callout above its `.meta-row` and links terms into the glossary rather than redefining them inline — follow both conventions in new tickets, and add an entry to the glossary rather than explaining a recurring term in a ticket body.
-- **Open tickets worth knowing about before proposing retrieval work:** RD-10 (real-phrasing eval set) is the only one with a live case. **RD-09/RD-14/RD-15 are HELD, not open** — RD-16 measured their premises on 2026-08-28: RD-14's register gap is closed (+1.8pp), RD-09's corpus bet lost 7.0 points when run by proxy, and RD-15 depends on RD-14. Read METHODS §14 before proposing retraining again. **RD-12 is done and NEGATIVE** — off-the-shelf cross-encoder reranking was measured and rejected, so RD-13 (its serving path) stays blocked by its own gate; read METHODS §13 before proposing reranking again, because the 53pp ceiling it names is real and the tool that was supposed to reach it is not. "Build an eval harness" is already done — see "Evaluation" above; the open gap is RD-10's register coverage, not the harness itself.
+- **Open tickets worth knowing about before proposing retrieval work:** RD-10 (real-phrasing eval set) is the only one with a live case. **RD-17 is done and POSITIVE** — the vocabulary expansion shipped; read METHODS §15 before touching the candidate set again, particularly the finding that added senses are not purely distractors. **RD-09/RD-14/RD-15 are HELD, not open** — RD-16 measured their premises on 2026-08-28: RD-14's register gap is closed (+1.8pp), RD-09's corpus bet lost 7.0 points when run by proxy, and RD-15 depends on RD-14. Read METHODS §14 before proposing retraining again. **RD-12 is done and NEGATIVE** — off-the-shelf cross-encoder reranking was measured and rejected, so RD-13 (its serving path) stays blocked by its own gate; read METHODS §13 before proposing reranking again, because the 53pp ceiling it names is real and the tool that was supposed to reach it is not. "Build an eval harness" is already done — see "Evaluation" above; the open gap is RD-10's register coverage, not the harness itself.
 
 ## Commands
 
@@ -345,6 +399,18 @@ npx tsx scripts/eval.ts --set eval/sets/v1.jsonl --index-file full_gloss_gte --t
 
 # a Phase E cell (local file-backed index; encoder follows the cell's model)
 npx tsx scripts/eval.ts --set eval/sets/v1.jsonl --tag cell_gloss_ft --index-file eval_gloss_ft --per-sense
+
+# RD-17: the vocabulary expansion, in the order it has to run
+npm run probe:oewn           # Open English WordNet delta — measured, NOT adopted
+npm run probe:reachability   # do the frozen set's `reachable` flags still hold? (read-only)
+npm run supplement:fetch     # 3.2GB Kaikki extraction + OEWN into RD_SOURCE_DIR (~/rd_sources)
+npm run supplement:build     # apply the committed filter, both arms, write the manifest
+npm run supplement:cell      # embed the superset ONCE, compose both cells onto full_gloss_ft
+npm run supplement:verify    # input hash, byte-identical prefix, self-retrieval in BOTH halves
+npm run eval:control         # rd17_control — must reproduce RD-16's full_gloss_ft to the digit
+npx tsx scripts/eval.ts --set eval/sets/v1.jsonl --index-file full_gloss_wikt_new --tag rd17_wikt_new
+npx tsx scripts/eval.ts --compare eval/runs/rd17_control.json eval/runs/rd17_wikt_new.json
+npm run supplement:index -- --cell full_gloss_wikt_new --dry-run   # PAST THE GATE ONLY
 ```
 
 ## Repo hygiene
@@ -356,6 +422,7 @@ npx tsx scripts/eval.ts --set eval/sets/v1.jsonl --tag cell_gloss_ft --index-fil
 - ESLint config is `.eslintrc.json` (`next/core-web-vitals`). Without it `npm run lint` drops into an interactive setup wizard and hangs non-interactive shells.
 - **Committed `/explain` artifacts:** `public/viz/pipeline-snapshot.json` (~800 KB, 280 KB gzipped) and `public/viz/wordpiece.json` (293 KB). Both are committed rather than built in CI: the page cannot render without them, and the snapshot needs a database the build does not have. Regenerate with `npm run build-viz` — the PCA fit is deterministic, so a rebuild against the same data is byte-identical. `public/` did not exist before RD-18.
 - **`npm run verify-viz` is the gate on `/explain` telling the truth**, and it is cheap. It asserts: the serving `SELECT` is byte-identical to a frozen copy with both debug options off; the debug branch returns the same words as the serving branch; the browser tokenizer matches `AutoTokenizer`; the pooled vector is the mean of the real token vectors; and retrieved synsets project onto their snapshot coordinates. Run it after touching `lib/glossSearch.ts`, `lib/embedder.ts`, or `lib/viz/*`.
-- **Committed eval artifacts:** `eval/data/zipf-en.tsv` (1.7 MB), `eval/sets/*.tsv|jsonl`, and the reference runs `eval/runs/baseline.json` / `exact.json` / `filtered.json` / **`prod_gloss_shipped.json`**. **Rerank runs are not committed** — they carry a persisted shortlist and run ~5.8 MB, they describe a rejected experiment rather than a production path, and CLAUDE.md already cites uncommitted runs (`prod_gloss`, `prod_gloss_p100`) in its own tables. Regenerate with `npm run eval:rerank`; the `*.shortlist.jsonl` sidecars are gitignored. That last one is the current production path; the other three describe the pre-cutover lemma index, which is now the *rollback* path — compare new runs against `prod_gloss_shipped`, not `baseline`, unless you specifically mean "versus what we replaced". Ignored: the rest of `eval/runs/`, `eval/audit/`, `eval/data/pool-manifest.json`. Vector cells (~230 MB) live outside the repo entirely — see `EVAL_CELL_DIR`.
+- **RD-17's committed artifact is `eval/data/supplement-manifest.json`** — the filter's recorded output: per-arm row counts, per-rule kill counts, the source sha256 and the CC BY-SA licence string. The 3.2 GB Kaikki extraction (`RD_SOURCE_DIR`, default `~/rd_sources`), the filtered JSONL and the composed cells (`EVAL_CELL_DIR`) are **not** committed — all three regenerate from that manifest's URL plus `scripts/lib/wiktionary.ts`. Committing a cache is not the same as committing a record.
+- **Committed eval artifacts:** `eval/data/zipf-en.tsv` (1.7 MB), `eval/sets/*.tsv|jsonl`, and the reference runs `eval/runs/baseline.json` / `exact.json` / `filtered.json` / **`prod_gloss_shipped.json`**. **Rerank runs are not committed** — they carry a persisted shortlist and run ~5.8 MB, they describe a rejected experiment rather than a production path, and CLAUDE.md already cites uncommitted runs (`prod_gloss`, `prod_gloss_p100`) in its own tables. Regenerate with `npm run eval:rerank`; the `*.shortlist.jsonl` sidecars are gitignored. **`eval/runs/prod_wikt_shipped.json` is the current production path** and is what `npm run eval:prod` writes; `prod_gloss_shipped` is now the **pre-expansion** reference (RD-17 deliberately changed the `eval:prod` tag rather than let the script overwrite it), and `baseline`/`exact`/`filtered` describe the pre-cutover lemma index, which is the *rollback* path. Compare new runs against `prod_wikt_shipped` unless you specifically mean "versus what we replaced". Ignored: the rest of `eval/runs/`, `eval/audit/`, `eval/data/pool-manifest.json`. Vector cells (~230 MB) live outside the repo entirely — see `EVAL_CELL_DIR`.
 - **Don't pipe a loop's command through `tail`/`head` when you care whether it worked.** The pipeline reports the exit status of the *last* stage, so six consecutive failures reported success and wasted a 37-minute run. Check status per iteration, or use `PIPESTATUS`.
 - Other docs: `README.md` (overview, local setup, API reference), `ARCHITECTURE.md` (system design), `DEPLOYMENT.md` (deploying to Vercel). Consolidated from five docs to three on 2026-08-26 — `SETUP.md` and `GETTING_STARTED.md` were near-duplicates of README's own setup section and were folded into it rather than kept as separate files.

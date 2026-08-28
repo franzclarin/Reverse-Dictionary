@@ -13,7 +13,7 @@ Queries like these are what the app is built for — semantic search over single
 
 ## Features
 
-- **Semantic search**: a query is embedded and compared against 117,791 pre-computed WordNet *sense definitions* via pgvector cosine similarity, then each matching sense is expanded into the words that share it — no generative model in the loop.
+- **Semantic search**: a query is embedded and compared against **693,325** pre-computed *sense definitions* via pgvector cosine similarity, then each matching sense is expanded into the words that share it — no generative model in the loop. The senses are WordNet 3.0's 117,791 synsets plus 575,534 filtered Wiktionary senses (RD-17), covering ~522k answerable words.
 - **Word pages**: each result has a dedicated page at `/word/[word]` with related words (nearest neighbours in embedding space).
 - **Share**: copy link or share results directly to X.
 - **No auth, no rate limiting**: search is fully anonymous and unthrottled. There is no userbase — no sign-in, saved words, credits, or leaderboard (removed 2026-08-26, see CLAUDE.md).
@@ -64,7 +64,12 @@ npx vercel env pull .env.local
 ```bash
 npx prisma db execute --file prisma/migrations/<migration>/migration.sql
 ```
-`postinstall` runs `prisma generate` automatically, and you don't need this step at all against a database that already has the schema applied. The vector tables are **data seeds**, not something a migration or `npm install` generates for you: `GlossEmbedding` (117,791 synset rows — what search reads) is rebuilt with `npx tsx scripts/build-gloss-index.ts`, while `VocabEmbedding` (141,854 bare-lemma rows — word pages and the search rollback path) predates it. See CLAUDE.md if you need to rebuild either.
+`postinstall` runs `prisma generate` automatically, and you don't need this step at all against a database that already has the schema applied. The vector tables are **data seeds**, not something a migration or `npm install` generates for you: `GlossEmbedding` (693,325 sense rows — what search reads) is rebuilt with `npx tsx scripts/build-gloss-index.ts` for the WordNet half and `npm run supplement:cell` + `npm run supplement:index` for the Wiktionary half, while `VocabEmbedding` (141,854 bare-lemma rows — related-word lookups and the search rollback path) predates both. See CLAUDE.md if you need to rebuild either.
+
+### Data sources and licences
+
+- **Princeton WordNet 3.0** (via `wordnet-db`) — the WordNet licence, attribution.
+- **English Wiktionary**, through the [Kaikki.org](https://kaikki.org) `wiktextract` extraction — **CC BY-SA 4.0 / GFDL**. 575,534 sense definitions are indexed and shown on `/explain`, so **both attribution and share-alike apply** to this index and to anything derived from it. Provenance, filter version and the exact source hash are recorded in `eval/data/supplement-manifest.json`.
 
 4. Run the development server:
 ```bash

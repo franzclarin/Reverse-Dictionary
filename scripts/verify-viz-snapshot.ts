@@ -253,10 +253,41 @@ async function main() {
     }
   }
 
-  console.log("\n6 · retrieved synsets project onto their snapshot coordinates");
+  // Sampled synsets, fetched directly. The loop above only sees a projection to
+  // check when a probe query happens to retrieve a synset that is also in the
+  // cloud, and RD-17 made that coincidence rare: the sample is 6,028 rows of
+  // 693,325 (0.9%) where it used to be 6,200 of 117,791 (5.3%). The property
+  // under test has not changed — a stored vector must project onto its stored
+  // coordinate — so it is now sourced deterministically instead of by luck.
+  // The opportunistic check above is kept because it additionally proves the
+  // *serving* path hands back the same vector the snapshot was built from.
+  const sampledKeys = (snap.keys as string[]).filter((_, i) => i % 601 === 0).slice(0, 25);
+  const sampledRows = await prisma.$queryRawUnsafe<{ synsetKey: string; vector: string }[]>(
+    `SELECT "synsetKey", embedding::text AS vector FROM "${GLOSS_INDEX}" WHERE "synsetKey" = ANY($1::text[])`,
+    sampledKeys
+  );
+  for (const row of sampledRows) {
+    const at = index.get(row.synsetKey);
+    if (at === undefined) continue;
+    const p = project(parseVectorLiteral(row.vector), snap.basis, snap.mean);
+    worstDelta = Math.max(
+      worstDelta,
+      Math.abs(p.x - snap.x[at]),
+      Math.abs(p.y - snap.y[at]),
+      Math.abs(p.z - snap.z[at])
+    );
+    projectionsChecked++;
+  }
+  check(
+    `${sampledRows.length} sampled synsets still exist in the index`,
+    sampledRows.length === sampledKeys.length,
+    `${sampledKeys.length} probed — a miss means the snapshot is stale; run npm run build-viz`
+  );
+
+  console.log("\n6 · stored synsets project onto their snapshot coordinates");
   if (projectionsChecked === 0) {
-    check("at least one retrieved synset was in the sampled cloud", false,
-      "none overlapped — widen the probe queries");
+    check("at least one synset was available to project", false,
+      "no overlap and no sampled rows — the snapshot does not match this index");
   } else {
     // The snapshot rounds coordinates to 4dp, so 1e-4 is the floor.
     check(

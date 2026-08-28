@@ -1178,3 +1178,298 @@ expensive than the ones it has already decided. That is RD-10.
   would mis-encode them, and matching them would mean changing how the harness
   encodes *queries* too. That exclusion is a scope decision, not a judgement on
   those models.
+
+## 15. RD-17 — expanding the vocabulary beyond WordNet 3.0 (2026-08-28)
+
+§13 and §14 are two measurements of the same thing: how to put the right word
+*first*. This section is about a different failure — the right word not being a
+candidate at all. `GlossEmbedding` was built from Princeton WordNet 3.0, frozen
+in 2006, and a word that is not a lemma of one of its synsets cannot be returned
+at any `probes` setting under any reranking scheme. 23 of the 312 authored rows
+score zero by construction because of it.
+
+**This one shipped**, which makes it the first section since §12 that describes a
+production change rather than a rejected premise.
+
+### 15a. Four facts checked before anything was built
+
+| claim as documented | measured 2026-08-28 |
+|---|---|
+| Neon caps the project at **512 MB**, database at ~460 MB | `SHOW neon.max_cluster_size` = **16TB**; `pg_database_size` = **673 MB** |
+| Open English WordNet is "probably not" enough | 120,630 synsets / 152,286 lemmas, **+5,307 / −1,003** against PWN 3.0 — and **2** of the 23 targets |
+| the headline metric punishes success here | it does not: `meta.reachable` is stored truth in a **frozen** file, so the 287-row denominator cannot move |
+| 25 rows are unreachable | **23** — `capsize` and `loiter` were repaired by RD-02 and the flags are stale |
+
+The storage figure is the one worth dwelling on. It had been wrong *and*
+conservative since RD-01 upgraded the plan without re-checking the cap, and
+conservative-wrong is the expensive direction: it produces a confident "this
+cannot fit" from someone who never runs the query. Two of this ticket's own
+storage levers — converting `VocabEmbedding` to `halfvec`, or dropping it
+outright — existed only to buy room that was never scarce. Neither was done.
+
+**OEWN was measured and not adopted.** It uses its own synset identifiers
+(`oewn-08242255-n`, not `pos:offset`), so adopting it re-keys the whole index and
+orphans every committed run, and it buys `cryptocurrency` and `crowdfunding`.
+`scripts/probe-oewn-delta.ts` reproduces the delta; `scripts/lib/oewn.ts` is a
+reader, deliberately not a build input.
+
+### 15b. The filter, and the two arms
+
+The source is the Kaikki.org `wiktextract` extraction of English Wiktionary —
+3.2 GB, one JSON object per (word, pos, etymology), each with a `senses[]` array
+whose entries already carry a one-line gloss. That is the same shape a
+`GlossEmbedding` row has, so the mapping is direct and all the work is in
+deciding *which* of roughly a million senses to index
+(`scripts/lib/wiktionary.ts`, `FILTER_VERSION = "rd17.2"`).
+
+Two rules are worth stating because both are refusals:
+
+- **No frequency gate.** `eval/data/zipf-en.tsv` is the obvious way to keep the
+  list small and it contains none of `petrichor`, `sonder`, `hangry`, `umami`,
+  `saudade`, `doomscrolling`, `gaslighting` or `limerence`. It removes precisely
+  the payload.
+- **No register gate.** `slang`, `informal`, `colloquial`, `Internet` and
+  `neologism` are kept. Those tags carry `hangry`, `doomscrolling`,
+  `enshittification` and `mansplaining`. Dropping them would look like quality
+  control and would delete the ticket.
+
+What *is* dropped: non-content parts of speech, inflected and abbreviated forms
+(structurally via `form_of`/`alt_of` and by tag), obsolete/archaic/dated/dialectal
+senses, cross-reference glosses, glosses under 20 characters, and the surface
+junk `junkPredicate()` already rejects. Per-rule kill counts are recorded in
+`eval/data/supplement-manifest.json`, which is committed; the filtered rows are
+not, since they are regenerable from the manifest's URL and filter version.
+
+|  | `wikt_new` | `wikt_all` |
+|---|---|---|
+| rule | headword **not already answerable** | every surviving sense |
+| rows | 421,665 | **575,534** |
+| distinct words | 371,811 | 443,645 |
+| of the 23 targets | 22 | 22 |
+
+`corpsing` is the one target neither arm reaches, and correctly: Wiktionary has it
+only as the present participle of the verb `corpse`, which the filter drops as an
+inflected form. The verb itself is indexed with the right gloss ("to laugh
+uncontrollably during a performance"); the eval row asks for the string
+`corpsing` and has no `acceptable[]`, so it stays a miss. That is a limitation of
+the answer key, not of the vocabulary.
+
+### 15c. Cells composed, not rebuilt
+
+Both cells copy rows 0–117,790 **verbatim** out of `full_gloss_ft.vec` — §14's
+verified control — and append the supplement after them. `wikt_new`'s rows are a
+verified strict subset of `wikt_all`'s (0 rows differ), so the superset was
+embedded once at 307 rows/s and the narrow arm is a *selection* out of those same
+vectors.
+
+The point is attribution, not speed. A delta is interpretable only if everything
+except the thing under test is bit-identical, and "we re-encoded it with the same
+model so it must be the same" is an assumption. `verify-supplement-cell.ts`
+checks it: input hash over the sidecar manifest, **byte-comparison of the first
+117,791 × 384 floats against the control**, and self-retrieval sampled from
+*both* halves separately — a build that misaligned only the appended half would
+pass a sample drawn from the front. Both cells: hash OK, prefix identical, 29/30
+and 30/30.
+
+One defect this caught before it reached Postgres: the first filter numbered
+senses *within* an entry, and English Wiktionary splits homographs into one entry
+per etymology — `cat` the animal, `cat` the Unix command, `cat` the drug — so
+5,925 keys collided. In a cell that is untidy. Through `ON CONFLICT ("synsetKey")
+DO UPDATE` it is silent data loss, and the table would have come back 5,925 rows
+short of the index the numbers describe. Keys are now numbered across entries and
+the builder throws on a collision.
+
+### 15d. The result, and it is the opposite of the prediction
+
+Authored reachable, n=287, exact scan, paired McNemar against the control.
+
+| cell | rows | lenient R@1 | strict | R@10 | MRR | echo | Δ lenient | verdict |
+|---|---|---|---|---|---|---|---|---|
+| **`rd17_control`** | 117,791 | **25.4** | 21.6 | 51.6 | 0.304 | 14.6% | — | — |
+| `rd17_wikt_new` | 539,456 | 17.1 | 15.0 | 41.5 | 0.221 | 17.6% | **−8.4** | **significant regression** (24/0, p < 0.00001) |
+| **`rd17_wikt_all`** | 693,325 | **25.1** | 20.6 | **55.7** | 0.307 | 17.3% | −0.3 | **no difference** (23/22, p = 1.00) |
+
+Coverage slice, n=23 reachable-false rows, reported separately and never folded in:
+
+| cell | R@1 | R@3 | R@10 | retrieved within 100 |
+|---|---|---|---|---|
+| `rd17_control` | 0.0% | 0.0% | 0.0% | 0 of 25 |
+| `rd17_wikt_new` | 36.0% | 48.0% | 64.0% | 19 of 25 |
+| `rd17_wikt_all` | 32.0% | 48.0% | 64.0% | 20 of 25 |
+
+**The narrow arm — the one designed to be safe — is the one that failed, and it
+failed with 24 regressions and zero wins.** That shape is diagnostic. A change
+that only ever makes things worse is not trading anything; it is pure loss.
+
+The mechanism is in the arm definition. `wikt_new` indexes a Wiktionary sense
+only when WordNet cannot already answer with that headword — so for every query
+whose answer WordNet *does* cover, which is every query on the reachable slice,
+the added rows can only be **distractors**. It is a clean measurement of the
+distractor cost in isolation, and that cost is **−8.4 points**.
+
+`wikt_all` adds those same distractors and, in addition, Wiktionary's senses for
+words WordNet already has. Those are not distractors: they are **second surfaces
+for correct answers**, often phrased more plainly than a 2006 lexicographic
+gloss. The difference between the arms is +8.1 points, and it is entirely those
+extra senses paying off the distractors they arrive with.
+
+The paired wins show it directly — in each case the target's WordNet gloss lost
+and its Wiktionary gloss won:
+
+```
+"the spinning sensation you get when you look down from somewhere high"
+  want vertigo      control: dizziness (rank 4)     wikt_all: vertigo (rank 1)
+"the person on a ship or a plane whose job is working out which way to go"
+  want navigator    control: boarder (rank 19)      wikt_all: navigator (rank 1)
+"having a smell so sharp and strong that it stings your nose"
+  want pungent      control: pug-nosed (rank 91)    wikt_all: pungent (rank 1)
+"when the buyer and the seller argue back and forth over the price"
+  want haggle       control: surrebutter (rank 31)  wikt_all: haggle (rank 1)
+```
+
+and the regressions show the cost, which is obscure derivatives winning ties:
+
+```
+"something you did wrong without ever meaning to do it"
+  want mistake      control: mistake (rank 1)       wikt_all: self-wrong (rank 15)
+"what you believe is going to happen before it actually does"
+  want expectation  control: expectation (rank 1)   wikt_all: beforemath (rank 7)
+```
+
+**Depth is where the wide arm is unambiguously better.** Lenient recall by depth,
+same slice:
+
+| depth | 1 | 3 | 10 | 50 | 100 |
+|---|---|---|---|---|---|
+| `rd17_control` | 25.4% | 39.4% | 54.0% | 73.5% | 79.8% |
+| `rd17_wikt_all` | 25.1% | 41.8% | **59.9%** | **77.0%** | **83.6%** |
+
+Rank 1 is flat and everything below it improves. The never-retrieved share falls
+from 20.2% to 16.4% — that is the slice §13 identified as unreachable by
+reordering at any depth, and it is the only lever that has moved it.
+
+### 15e. Echo moved, and here is why
+
+Echo is a primary metric so that a recall claim cannot be read without it, and
+"recall flat, echo +3.0 points" is exactly the pattern that needs a mechanism.
+`scripts/probe-supplement-echo.ts`, over the same 287 queries:
+
+- Added words fill **38.7%** of top-10 slots and supply **46.9%** of the echo.
+- Echo rate **within** added words is **21.0%**; within WordNet words, **15.0%**.
+- Of the 23 queries that lost rank 1, **7** lost it to a word that echoes the query.
+
+So the rise is real and it is compositional: Wiktionary is far richer in
+transparent morphological derivatives than WordNet (`paintery`, `pseudopalindrome`,
+`self-wrong`), and those are echo by construction. It is not the copied WordNet
+half behaving differently, which it cannot — those vectors are byte-identical.
+And it is not the main displacement mechanism: two thirds of the lost rank-1s
+were lost to something that does not echo at all.
+
+### 15f. What shipped, and the ship gate it cleared
+
+`wikt_all`, on two conditions fixed before the runs:
+
+1. the 287-row lenient R@1 delta is not a significant regression — **−0.3pp,
+   p = 1.00, "no difference"**; and
+2. the coverage slice moves materially off zero — **0.0% → 32.0% at rank 1**.
+
+Migrated by `scripts/build-supplement-index.ts`, which reads the vectors **out of
+the cell that was measured** rather than re-embedding. A re-embed is a second
+embedding path in disguise: if anything differed, the table would hold vectors no
+run ever scored. INSERT only — the 117,791 WordNet rows are untouched, so
+rollback is `DELETE FROM "GlossEmbedding" WHERE "synsetKey" LIKE 'wikt:%'` and
+restores the pre-expansion index exactly.
+
+### 15g. On the live index
+
+The cells are exact brute-force scans; production is an approximate IVFFlat index,
+and `lists` had to be rebuilt because RD-17 grew the table 5.9×. A probe scans
+roughly `rows / lists` candidates, so leaving `lists = 115` would have made
+`probes = 40` mean something entirely different from the value it was swept to.
+Rebuilt at `lists = 833` (`round(sqrt(693,325))`) and re-swept on the frozen set:
+
+| probes | lenient R@1 | R@10 | lenient R@100 | db p50 |
+|---|---|---|---|---|
+| 10 | 25.4% | 51.9% | 78.0% | 579ms |
+| 40 | 24.7% | 54.7% | 81.9% | 568ms |
+| **100** | **25.1%** | **55.7%** | **83.6%** | 582ms |
+| 200 | 25.1% | 55.7% | 83.6% | 687ms |
+| *exact ceiling (cell)* | *25.1%* | *55.7%* | — | — |
+
+**100 is the knee and it sits exactly on the ceiling** — both figures reproduce
+the brute-force cell to the digit, and 200 buys nothing for ~100ms. `probes = 10`
+scores 0.3pp higher on R@1, which is one query in 287; taking it for that while
+giving up 3.8 points of R@10 would be fitting the benchmark rather than reading
+it. `GLOSS_PROBES` and `GLOSS_LISTS` in `lib/glossSearch.ts` carry the sweep.
+
+Live before-and-after, `prod_gloss_shipped` → the shipped index, paired:
+
+| run | lenient R@1 | strict | R@10 | lenient R@100 | echo | coverage R@1 |
+|---|---|---|---|---|---|---|
+| `prod_gloss_shipped` (pre-expansion) | 24.0% | 20.6% | 49.8% | 77.0% | 14.5% | 0.0% |
+| **shipped** (693,325 rows, probes=100) | **25.1%** | 20.6% | **55.7%** | **83.6%** | 17.5% | **32.0%** |
+
+**+1.0pp lenient R@1 (25 wins / 22 regressions, p = 0.77) — a null result on the
+headline, and that is the honest read.** What moved is everything else: R@10
++5.9pp, R@100 +6.6pp, and a coverage slice that was structurally zero.
+
+`GlossEmbedding` is now **1,295 MB** against a 16TB cap. One operational note
+worth keeping: the IVFFlat rebuild fails outright on Neon's default 64 MB
+`maintenance_work_mem` (it needs 169 MB), and because `prisma db execute --file`
+runs the file as one transaction the failed `CREATE` rolls its `DROP` back with
+it — the serving index survives and the migration is safe to retry rather than a
+window of unindexed production. Verified against `pg_indexes` after the first
+attempt failed.
+
+### 15h. The bug this uncovered, which predated it
+
+`getWordData()` decided whether `/word/<slug>` was a real page by asking
+`VocabEmbedding` — the table the RD-02 cutover demoted to the rollback path.
+Search has answered out of `GlossEmbedding` since that cutover, and the two
+disagree: **8,005 lemmas** were answerable by search and absent from the lemma
+table, so search returned `capsize` and `/word/capsize` returned 404. No metric
+in this repo could see it, because every metric here scores retrieval and none of
+them opens a page.
+
+RD-17 would have made it far worse — the gap is now **379,633** — so it shipped
+in the same change. Existence is read from the index search actually queries
+(backed by a new GIN index on `lemmas`); neighbours still come from the lemma
+table, so no page that worked before behaves differently, and words with no lemma
+vector fall back to a sense neighbourhood over the gloss index.
+
+A second defect surfaced with it: 47 of the 475 `Word` rows are Claude-era
+profiles with no vector in *either* table (`petrichor` was one — a real
+definition, in no index). `embedding <=> (SELECT ... WHERE word = $1)` against a
+subquery matching nothing is not an error in Postgres. The subquery is `NULL`,
+every distance is `NULL`, the `ORDER BY` ranks nothing, and the page rendered
+**twelve arbitrary words presented as semantic neighbours**. That was pre-existing
+and not caused by the two-table split; a word with no vector now gets no
+neighbour list.
+
+**The generalisable part:** when a system switches which store is authoritative,
+the thing to audit is not the query that moved but every *other* reader of the
+store it left behind.
+
+### 15i. Method notes worth keeping
+
+- **The denominator trap in RD-17's own ticket does not exist in this harness**,
+  and that is worth stating rather than assuming. Because `meta.reachable` lives
+  in a frozen file, the headline slice is 287 rows before and after; the ticket's
+  warning that a strictly better app scores 1.7 points worse describes a
+  denominator that *moves with the index*, which this one cannot. `eval.ts` now
+  also **scores** the coverage slice rather than merely counting it — the count
+  could not distinguish "indexed" from "indexed and findable", which is the whole
+  question.
+- **A safe-looking arm can be the informative one.** `wikt_new` was designed to
+  minimise risk and was the arm that failed; it is retained in the record not as a
+  candidate but as the isolated measurement of what distractors cost. Building
+  both was the only way to learn that the extra senses are what pay for them.
+- **Absolute recall across vocabularies is not comparable**, and the tooling now
+  refuses to table it as if it were. `CellMeta.vocabulary` is a *separate* axis
+  from `scale` — two cells can both be "full" and hold different candidate sets —
+  and `report.ts` flags the pair, saying which of the two numbers beside it is the
+  regression test and which is the capability.
+- **Two of the 23 targets are still not retrieved within 100** despite now being
+  indexed (`doomscrolling`, `gaslighting`, `hangry`). Coverage converted them from
+  an impossibility into a ranking failure. That is progress and it is also the
+  honest ceiling: RD-17 buys candidacy, not rank.

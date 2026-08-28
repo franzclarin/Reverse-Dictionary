@@ -61,6 +61,10 @@ eval/runs/*
 # describes the ROLLBACK path, so without this there is no committed reference
 # for what search actually does today.
 !eval/runs/prod_gloss_shipped.json
+# RD-17: the current production path. `prod_gloss_shipped` above is now the
+# PRE-EXPANSION baseline — kept so "versus what we replaced" stays answerable —
+# and `npm run eval:prod` writes this tag instead of overwriting it.
+!eval/runs/prod_wikt_shipped.json
 # RD-12: full candidate shortlists with gloss text, written beside each rerank
 # run. Reproducibility detail only an audit or a re-scoring reads, and large —
 # the compact form (synsetKey + cosine + cross-encoder score) is inside the run
@@ -71,3 +75,11 @@ eval/data/pool-manifest.json
 eval/audit/
 # Timestamped backups written by apply-acceptable-recommendations.ts
 eval/sets/*.bak-*
+
+# RD-17: the vocabulary-expansion manifest IS committed (eval/data/supplement-manifest.json)
+# — it is the filter's recorded output: row counts, per-rule kill counts, source
+# sha256 and the licence. The 3.2 GB Kaikki extraction, the filtered JSONL rows and
+# the composed cells are not: all three are regenerable from that manifest's URL plus
+# `scripts/lib/wiktionary.ts`, and they live outside the repo anyway (RD_SOURCE_DIR,
+# EVAL_CELL_DIR). Committing a cache is not the same as committing a record.
+eval/runs/*.manifest.jsonl

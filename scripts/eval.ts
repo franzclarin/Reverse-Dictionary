@@ -76,6 +76,7 @@ import {
   searchLocal,
   searchLocalSynsets,
   scaleOf,
+  vocabularyOf,
   type LocalIndex,
 } from "./lib/localIndex";
 import { contentTokens, echoesQuery } from "./lib/probes";
@@ -365,6 +366,28 @@ function compare(fileA: string, fileB: string): void {
 
   testRank1("lenient", (r) => r.lenientRank, true);
   const { wins, regressions } = testRank1("strict", (r) => r.rank, false);
+
+  // RD-17: the coverage slice, paired and on its own denominator.
+  //
+  // Kept out of the McNemar above on purpose. These rows are flagged
+  // `reachable: false` precisely because no vocabulary could answer them, so
+  // including them in the headline test would mix "did ranking improve?" with
+  // "did the candidate set grow?" — two different questions whose answers can
+  // point opposite ways. Carried beside recall the way echo is, never inside it.
+  const coverage = paired.filter((q) => q.ra.meta.reachable === false);
+  if (coverage.length) {
+    const found = (rows: QueryResult[]) => rows.filter((r) => r.lenientRank === 1).length;
+    const a1 = found(coverage.map((q) => q.ra));
+    const b1 = found(coverage.map((q) => q.rb));
+    console.log(
+      `\n  coverage slice (reachable:false, n=${coverage.length}) — reported separately, ` +
+        `never folded into the numbers above`
+    );
+    console.log(`    ${a.tag}: ${a1} at rank 1     ${b.tag}: ${b1} at rank 1`);
+    console.log(`${METRICS_HEADER}`);
+    console.log(metricsLine(a.tag, score(coverage.map((q) => q.ra))));
+    console.log(metricsLine(b.tag, score(coverage.map((q) => q.rb))));
+  }
   if (scoped.length !== paired.length) {
     console.log(
       `\n  (the metrics table above is all ${paired.length} paired rows; the tests above are the ` +
@@ -535,6 +558,35 @@ function rerankOrder(
     .sort((a, b) => b.score - a.score || a.at - b.at);
 
   return [...head.map((h) => h.hit), ...hits.slice(depth)];
+}
+
+/**
+ * Which candidate set a Postgres index holds, READ FROM THE INDEX (RD-17).
+ *
+ * A cell states its vocabulary in its metadata; a live table has to be asked.
+ * Assuming it from the table name would be exactly the kind of label that goes
+ * stale the moment someone runs a migration, and the failure would be silent —
+ * two runs against genuinely different candidate sets, tabled side by side as if
+ * their absolute recall meant the same thing.
+ *
+ * The supplement is namespaced (`wikt:<word>:<pos>:<n>`), so one indexed
+ * existence check answers it. Undefined for the lemma index, which has no
+ * `synsetKey` and no supplement to hold.
+ */
+async function postgresVocabulary(
+  index: string
+): Promise<"wordnet" | "wordnet+wiktionary" | undefined> {
+  if (index !== GLOSS_INDEX) return undefined;
+  try {
+    const [row] = await prisma.$queryRawUnsafe<{ has: boolean }[]>(
+      `SELECT EXISTS(SELECT 1 FROM "${GLOSS_INDEX}" WHERE "synsetKey" LIKE 'wikt:%') AS has`
+    );
+    return row?.has ? "wordnet+wiktionary" : "wordnet";
+  } catch {
+    // A probe that cannot run must not take the run down with it — the field is
+    // provenance, not a measurement.
+    return undefined;
+  }
 }
 
 // ----------------------------------------------------------------- the run
@@ -709,6 +761,14 @@ async function run(): Promise<void> {
     // `report.ts` can flag a cross-scale comparison instead of tabling it as
     // if the two numbers meant the same thing.
     poolScale: local ? scaleOf(local.meta) : undefined,
+    // RD-17: which dictionary the candidates came from. A separate axis from
+    // scale — two cells can both be "full" and still hold different candidate
+    // sets, and absolute recall across those is no more comparable than across
+    // scales. `report.ts` reads this to say which of the two numbers beside it
+    // is the regression test and which is the capability.
+    vocabulary: local ? vocabularyOf(local.meta) : await postgresVocabulary(index),
+    supplementArm: local?.meta.supplementArm,
+    filterVersion: local?.meta.filterVersion,
     poolWords: local?.meta.poolWords,
     cellVariant: local?.meta.variant,
     cellPrecision: local?.meta.precision ?? (local ? "float32" : undefined),
@@ -940,9 +1000,22 @@ async function run(): Promise<void> {
   if (unreachable.length) {
     const found = unreachable.filter((r) => r.rank !== null).length;
     console.log(
-      `\n  coverage slice: ${unreachable.length} targets absent from the vocabulary; ` +
-        `${found} unexpectedly retrieved`
+      `\n  coverage slice: ${unreachable.length} targets flagged absent from the vocabulary; ` +
+        `${found} retrieved within rank depth`
     );
+    // Scored in full since RD-17, not just counted. Vocabulary expansion is the
+    // one change that moves this slice, and a bare count cannot say whether a
+    // newly-indexed word RANKS — which is the whole question, since a word that
+    // is present but never surfaces has not been added in any useful sense.
+    //
+    // Reported HERE, beside headline recall and never folded into it. The
+    // headline slice is `reachable !== false`, and `meta.reachable` is stored
+    // truth inside a frozen file, so adding vocabulary cannot move that
+    // denominator. That is what keeps the comparison honest: RD-17's warning
+    // that "a strictly better app can score 1.7 points worse" describes a trap
+    // this harness does not fall into, and this line is why it stays that way.
+    console.log(METRICS_HEADER);
+    console.log(metricsLine("coverage (unreachable)", score(unreachable)));
   }
 
   // --------------------------------------------------------------- slices

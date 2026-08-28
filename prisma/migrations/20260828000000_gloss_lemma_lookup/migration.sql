@@ -1,0 +1,22 @@
+-- RD-17: make "which words can this index answer with?" a lookup rather than a scan.
+--
+-- WHY. `getWordData()` decides whether /word/<slug> is a real page by asking
+-- whether the model knows the word, and it asked "VocabEmbedding" — the LEMMA
+-- table, which the RD-02 cutover demoted to the rollback path. Search has
+-- answered out of "GlossEmbedding" since that cutover, and the two lemma sets
+-- are not the same: 8,005 words were answerable by search and absent from
+-- "VocabEmbedding", so search returns them and their page 404s. `capsize` is
+-- one. Every word a vocabulary expansion adds would land in the same hole.
+--
+-- The fix reads `lemmas`, which is a text[] with no index, so the membership
+-- test would be a sequential scan over 117,791 rows on every word-page render.
+-- GIN over the array makes `$1 = ANY(lemmas)` — planned as `lemmas @> ARRAY[$1]`
+-- — an index lookup.
+--
+-- Costs a few MB and no behaviour: an index cannot change a query's results.
+-- CONCURRENTLY is deliberately NOT used; this runs via `prisma db execute
+-- --file` outside a transaction block on a table nothing is writing to, and
+-- Neon's pooled connections are what break `prisma migrate deploy`'s advisory
+-- lock in the first place (see CLAUDE.md, "Migrations").
+CREATE INDEX IF NOT EXISTS "GlossEmbedding_lemmas_gin_idx"
+  ON "GlossEmbedding" USING gin ("lemmas");

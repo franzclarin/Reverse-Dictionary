@@ -31,7 +31,7 @@ Neon's pooled connection breaks `prisma migrate deploy`'s advisory lock. Apply m
 npx prisma db execute --file prisma/migrations/<migration-folder>/migration.sql
 ```
 
-The vector tables are data seeds, not something any migration or `npm install` step generates: `GlossEmbedding` (117,791 synset rows — the table search actually reads) and `VocabEmbedding` (141,854 bare-lemma rows — word pages plus the search rollback path). See CLAUDE.md if you're standing this app up against a fresh database.
+The vector tables are data seeds, not something any migration or `npm install` step generates: `GlossEmbedding` (693,325 sense rows — the table search actually reads: 117,791 WordNet synsets plus 575,534 Wiktionary senses added by RD-17) and `VocabEmbedding` (141,854 bare-lemma rows — related-word lookups plus the search rollback path). See CLAUDE.md if you're standing this app up against a fresh database.
 
 ### Step 4 — The build fetches the embedding model
 
@@ -94,5 +94,6 @@ Vercel deploys automatically on push to `main`.
 
 ## Scaling Considerations
 
-- **Storage**: the database sits at **~673MB** — `VocabEmbedding` ~451MB plus `GlossEmbedding` ~213MB, both fully indexed. This exceeds the old 512MB free-tier ceiling and only fits because the Neon plan was upgraded during RD-01; the originally-planned `DROP INDEX` on `VocabEmbedding` was skipped as a result, which is why both indexes coexist. **The upgraded plan's actual cap has never been verified programmatically** (no `neonctl` available, and `vercel usage` 404s for this project) — confirm 673MB is comfortably inside it before adding a third vector index.
+- **Storage**: the cap **is now verified** — `SHOW neon.max_cluster_size` returns **16TB** (RD-17, 2026-08-28), so the "512MB free-tier ceiling" that shaped RD-01 and RD-02 has not applied for some time. The database sits at **~1.8GB** after RD-17's vocabulary expansion: `GlossEmbedding` ~1,295MB (693,325 rows) plus `VocabEmbedding` ~451MB, both fully indexed. The originally-planned `DROP INDEX` on `VocabEmbedding` was skipped during RD-01 and there is no longer a space argument for revisiting it. **Storage is not the binding constraint on this project; cost and retrieval quality are.**
+- **Rebuilding the gloss IVFFlat index needs `SET maintenance_work_mem = '512MB'` in the migration** — Neon's default is 64MB and the build over 693,325 `halfvec(384)` rows at `lists = 833` needs 169MB, failing with `memory required is 169 MB`. `prisma db execute --file` runs the file as one transaction, so a failed `CREATE INDEX` rolls its `DROP INDEX` back and the serving index survives; the failure is safe to retry. The rebuild takes ~76s.
 - **No rate limiting** — search is fully anonymous and unthrottled. If traffic ever warrants it, this is new infrastructure to add, not a config flip (Upstash/Clerk were removed 2026-08-26, see CLAUDE.md).

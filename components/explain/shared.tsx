@@ -198,6 +198,21 @@ export function ApproximationNotes({
           </li>
         ))}
       </ul>
+      {/*
+        Attribution, permanently visible for the same reason the caveats above
+        are: the glosses this page displays are somebody else's work. WordNet
+        3.0 supplies 117,791 of the senses; the rest come from English
+        Wiktionary via the Kaikki.org wiktextract extraction (RD-17), which is
+        CC BY-SA — attribution AND share-alike, an obligation WordNet's licence
+        does not impose and which travels with anything derived from this index.
+      */}
+      <p
+        className="font-mono"
+        style={{ fontSize: 10.5, lineHeight: 1.5, color: muted, marginTop: 10 }}
+      >
+        Sense definitions: Princeton WordNet 3.0, and English Wiktionary via
+        Kaikki.org (CC BY-SA 4.0).
+      </p>
     </div>
   );
 }

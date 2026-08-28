@@ -99,6 +99,14 @@
       </div>
 
       <div class="term">
+        <div class="term-name">supplement</div>
+        <div class="term-def">
+          <p>Words and meanings added <i>alongside</i> WordNet rather than replacing it. RD-17 takes them from Wiktionary, where each meaning already comes with its own one-line definition — the same shape the index already stores, so a supplement row and a WordNet row are indistinguishable to search.</p>
+          <p>The hard part is not fetching them, it is <b>deciding which ones</b>. Wiktionary has roughly a million English meanings, most of which nobody would ever describe to a reverse dictionary: plurals, past tenses, abbreviations, and senses marked obsolete. The rules that decide are written as code (<code>scripts/lib/wiktionary.ts</code>) rather than described in prose, because they set both the storage bill and the number of new wrong answers to compete with.</p>
+        </div>
+      </div>
+
+      <div class="term">
         <div class="term-name">POS</div>
         <div class="term-def">
           <p>Part of speech — noun, verb, adjective, adverb. Used to check that a change helps all kinds of word equally rather than only nouns.</p>
@@ -245,6 +253,23 @@
         <div class="term-def">
           <p>Whether the right answer even exists in the app's vocabulary. Unreachable questions are kept in the test set but excluded from headline scores — dropping them entirely would flatter the numbers by deleting the questions the app cannot possibly answer.</p>
           <p><b>The catch:</b> fixing coverage moves those questions <i>into</i> the scored slice, so a strictly better app can score worse. Compare on a fixed denominator and report coverage as its own number (RD-17).</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">coverage slice</div>
+        <div class="term-def">
+          <p>The excluded questions, scored on their own and reported beside the headline rather than inside it — the same way <b>echo</b> is carried beside recall. 25 of the 405 rows, and until RD-17 they were only <i>counted</i>, never scored.</p>
+          <p><b>Why it has to be separate.</b> The headline slice is "the questions the app can currently answer", so adding vocabulary would grow its denominator and a genuine improvement could read as a fall. Keeping the flag frozen keeps the headline a fair before-and-after; the coverage slice carries the thing that actually changed. Two numbers, because they answer two questions.</p>
+          <span class="eg">the danger it removes: fixing 23 unanswerable questions would have shown as <b>24.0% → 22.3%</b> if they had simply been folded in</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">composed cell</div>
+        <div class="term-def">
+          <p>A test index built by <i>copying</i> an existing one and appending to it, rather than rebuilding it from scratch. RD-17's expanded indexes reuse the exact numbers from the WordNet-only index, byte for byte, and add the new words after them.</p>
+          <p>The point is attribution. If the shared half were recomputed it might come out microscopically different, and then a change in the score could be the new words <i>or</i> could be the recomputation — unanswerable after the fact. Copying makes every difference the new words, by construction, and a check compares the bytes rather than trusting that.</p>
         </div>
       </div>
 

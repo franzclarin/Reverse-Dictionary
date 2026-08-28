@@ -45,6 +45,21 @@ export type CellMeta = {
    * is a strictly easier task — and the tooling flags rather than merges them.
    */
   scale?: "sampled" | "full";
+  /**
+   * Which dictionary the rows come from (RD-17). Deliberately a SEPARATE axis
+   * from `scale`: a wordnet-only cell and a wordnet+wiktionary cell are both
+   * "full", and both cover every synset production searches, but they hold
+   * different candidate sets — so their absolute recall is no more comparable
+   * than a sampled cell's is to a full one. `scale`'s union is not widened
+   * because `scaleOf()` is typed against it and every existing cell would have
+   * to be re-stamped; a new field means old cells read as `undefined`, which
+   * `vocabularyOf()` correctly treats as wordnet-only.
+   */
+  vocabulary?: "wordnet" | "wordnet+wiktionary";
+  /** RD-17 arm that produced the supplement half, if there is one. */
+  supplementArm?: string;
+  /** `FILTER_VERSION` from `scripts/lib/wiktionary.ts`, if a supplement is present. */
+  filterVersion?: string;
   poolWords?: number;
   /**
    * SHA256 of the ordered input text list this cell was built from, and of the
@@ -81,6 +96,16 @@ export type CellMeta = {
 
 export function scaleOf(meta: CellMeta): "sampled" | "full" {
   return meta.scale ?? "sampled";
+}
+
+/**
+ * Which candidate set a cell holds.
+ *
+ * Cells written before RD-17 carry no `vocabulary` field and are wordnet-only
+ * by construction, so the default is the honest reading rather than a guess.
+ */
+export function vocabularyOf(meta: CellMeta): "wordnet" | "wordnet+wiktionary" {
+  return meta.vocabulary ?? "wordnet";
 }
 
 export type LocalIndex = {

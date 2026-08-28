@@ -45,7 +45,7 @@
 
       <p><b>What is next.</b> RD-10 — a second, independently written test set. Every number on this page comes from 287 queries written blind by one person in one sitting. That was enough to decide RD-02, to reject RD-12 and to hold RD-09, and it is now the limiting factor: the cheap improvements are measured and gone, so anything left is an expensive bet, and betting means trusting the ruler more than it has earned.</p>
 
-      <p><b>The one that is not about ranking.</b> RD-17. Everything above is an argument about putting the right word <i>first</i>. But the app cannot return <code>petrichor</code> at all — the dictionary it was built from was frozen in 2006, and <code>selfie</code>, <code>umami</code>, <code>gaslighting</code> and <code>deepfake</code> are not in it either. That is <b>8% of the test set scoring zero no matter what</b>, and it has been recorded in the test file since the day it was written. Adding a modern word source is the only remaining idea whose mechanism is not in doubt.</p>
+      <p><b>The one that was not about ranking, and it worked.</b> <a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a>. Everything above is an argument about putting the right word <i>first</i>. But the app could not return <code>petrichor</code> at all — the dictionary it was built from was frozen in 2006, and <code>selfie</code>, <code>umami</code>, <code>gaslighting</code> and <code>deepfake</code> were not in it either. That was <b>8% of the test set scoring zero no matter what</b>, sitting in the test file since the day it was written. Adding a filtered slice of Wiktionary took the index from 118k meanings to <b>693k</b> and that slice from <b>0% to 32%</b> answered first, without moving the score on anything that already worked. The lesson was not the one expected: the <i>careful</i> version, which added only words the dictionary lacked, was <b>much worse than doing nothing</b>. New meanings of words already covered are what made the new words affordable.</p>
 
       <p><b>The one you can watch.</b> Everything above is prose about a machine nobody can see. <a href="18-pipeline-visualization.html">RD-18</a> built <code>/explain</code>: type a phrase and the pipeline runs in front of you — the words break into sub-words, each sub-word becomes a real block of 384 numbers, those blocks average into one, and that one lands among the nearest meanings. Every score on it comes from the live index, and every place the picture simplifies is labelled on the picture. If one page is going to make <a href="glossary.html">echo</a> obvious, it is that one.</p>
     </div>
@@ -60,7 +60,7 @@
           <li><a href="16-training-data-bottleneck.html">RD-16</a> — the move after that, and why it was not needed</li>
           <li><a href="13-rerank-serving-path.html">RD-13</a> — how RD-12 would have reached users, and why it never did</li>
           <li><a href="10-real-phrasing-eval-set.html">RD-10</a> — whether any of these numbers can be trusted</li>
-          <li><a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> — the failure that is not a ranking failure at all</li>
+          <li><a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> — the failure that was not a ranking failure at all, and the fix that shipped</li>
           <li><a href="18-pipeline-visualization.html">RD-18</a> — the whole pipeline, animated; the fastest way in if you would rather see it than read it</li>
         </ol>
         <p>The rest are infrastructure, cleanup and polish, and can be read in any order or not at all.</p>
@@ -166,9 +166,9 @@
           <circle cx="335" cy="300" r="9" fill="var(--p3)"/>
           <text x="335" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p3)">RD-15</text>
 
-          <circle cx="565" cy="85" r="10" fill="var(--p1)"/>
-          <text x="565" y="65" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-17</text>
-          <text x="565" y="107" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(adds capability, not ranking)</text>
+          <circle cx="565" cy="85" r="10" fill="var(--p1)" opacity="0.55"/>
+          <text x="565" y="65" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-17 ✓</text>
+          <text x="565" y="107" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(shipped &mdash; coverage 0% &rarr; 32%)</text>
 
           <circle cx="470" cy="318" r="9" fill="var(--p2)" opacity="0.55"/>
           <text x="470" y="300" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p2)">RD-18 ✓</text>
@@ -350,10 +350,10 @@
         <a class="row" href="17-expand-vocabulary-beyond-wordnet.html">
           <div class="row-top">
             <span class="row-title">RD-17 &middot; Expand the vocabulary beyond WordNet 3.0</span>
-            <span class="badge badge-p1">P1</span>
+            <span class="badge badge-done">&check; Done</span>
           </div>
-          <p class="row-sub">The app cannot return <code>petrichor</code> &mdash; not because it ranks it badly, but because the dictionary it was built from was frozen in <b>2006</b>. <code>selfie</code>, <code>umami</code>, <code>hangry</code>, <code>gaslighting</code> and <code>deepfake</code> are missing too. Already recorded in the frozen set as <b>25 <code>reachable: false</code> rows &mdash; 8.0% of the benchmark scoring zero by construction</b>. Found while filing: two of those 25 (<code>capsize</code>, <code>loiter</code>) were quietly fixed by RD-02, and the headline metric would <i>fall</i> 24.0% &rarr; 22.3% on a successful fix unless the denominator is held fixed.</p>
-          <div class="row-tags"><span>data engineering</span><span>size: M/L</span><span>impact: high (7.4% currently unanswerable)</span></div>
+          <p class="row-sub">Done 2026-08-28 &mdash; <b>shipped</b>, and the first change since RD-02 that adds a capability rather than a ranking. The index went from 117,791 WordNet senses to <b>693,325</b>, adding 575,534 filtered Wiktionary senses over 443,645 words, and the app can now return <code>petrichor</code>, <code>selfie</code>, <code>hangry</code> and <code>enshittification</code>. Scored on the 287 questions it could already answer it is <b>unchanged</b> (&minus;0.3pp, 23 wins to 22 losses, p = 1.00) while first-page recall rose <b>54% &rarr; 60%</b>; on the 25 it could never answer it went <b>0% &rarr; 32%</b> first-place. The surprise: the <i>cautious</i> arm &mdash; add only words WordNet lacks &mdash; lost <b>8.4 points with 24 regressions and zero wins</b>, because on those questions its rows can only be wrong answers. Adding the extra meanings of words already covered is what paid for them.</p>
+          <div class="row-tags"><span>data engineering</span><span>size: M/L</span><span>impact: high (coverage 0% &rarr; 32%, R@10 +5.9pp)</span></div>
         </a>
       </li>
       <li>

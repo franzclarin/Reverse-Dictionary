@@ -95,6 +95,10 @@ type RunConfig = {
   exactByConstruction?: boolean;
   poolScope?: string;
   poolScale?: "sampled" | "full";
+  /** RD-17: which dictionary the candidate set came from. */
+  vocabulary?: "wordnet" | "wordnet+wiktionary";
+  supplementArm?: string;
+  filterVersion?: string;
   poolWords?: number;
   cellVariant?: string;
   /** Synset cells only: how a retrieved synset was expanded into member words. */
@@ -668,9 +672,18 @@ function slicesSection(runs: Run[], prereg: string): string {
     const unreachable = unreachableOf(r);
     if (unreachable.length) {
       const found = unreachable.filter((q) => q.rank !== null).length;
+      const first = unreachable.filter((q) => q.lenientRank === 1).length;
+      // Scored, not just counted (RD-17). "Unexpectedly retrieved" was the right
+      // wording while the vocabulary was fixed and any hit was an anomaly; once a
+      // change can deliberately add these words, the count has to say whether they
+      // RANK, because a word that is present and never surfaces has not been added
+      // in any sense a user would notice. Still excluded from every headline
+      // figure — the flag is stored truth in a frozen file, so the headline
+      // denominator cannot move, which is what keeps before/after comparable.
       out.push(
-        `**Coverage slice:** ${unreachable.length} targets absent from the vocabulary; ` +
-          `${found} unexpectedly retrieved. Excluded from every headline figure.`,
+        `**Coverage slice:** ${unreachable.length} targets flagged absent from the vocabulary; ` +
+          `**${first} at rank 1**, ${found} retrieved at all. Reported here and excluded from ` +
+          `every headline figure.`,
         ""
       );
     }
@@ -790,6 +803,18 @@ function comparisonsSection(runs: Run[]): string {
       b.config.poolScale !== undefined &&
       a.config.poolScale !== b.config.poolScale;
 
+    // RD-17: a candidate-set change, which is NOT the same kind of problem as a
+    // cross-scale one and must not be flagged with the same words. A sampled
+    // pool is an easier version of the same task, so its delta means nothing. A
+    // larger *vocabulary* is a different task in one direction only: the
+    // reachable slice is answerable by both runs and its delta IS the regression
+    // test, while the coverage slice is answerable by one of them and is the
+    // capability. Both are real; the mistake would be adding them together.
+    const crossVocabulary =
+      a.config.vocabulary !== undefined &&
+      b.config.vocabulary !== undefined &&
+      a.config.vocabulary !== b.config.vocabulary;
+
     // A synset cell was long flagged here as "cross-surface", on the theory that
     // expanding one row into several words consumes top-k slots a per-sense cell
     // would spend on distinct results. That theory was MEASURED AND FALSIFIED:
@@ -851,6 +876,20 @@ function comparisonsSection(runs: Run[]): string {
         "> effect with a tie-break-policy effect, and on tied queries the policy is the whole",
         "> of it. An earlier version of this report called such a pair \"cross-surface\" and",
         "> refused to interpret it; that was measured and falsified (METHODS.md §10, §12).",
+        ""
+      );
+    }
+    if (crossVocabulary) {
+      detail.push(
+        `> **Different candidate sets.** \`${a.tag}\` searched a ${a.config.vocabulary} index and`,
+        `> \`${b.tag}\` a ${b.config.vocabulary} one` +
+          (b.config.supplementArm ? ` (arm \`${b.config.supplementArm}\`, filter \`${b.config.filterVersion ?? "?"}\`)` : "") +
+          ".",
+        "> The delta on the authored-reachable slice below IS interpretable and is the regression",
+        "> test: both runs can answer those queries, and `meta.reachable` is stored truth in a",
+        "> frozen set, so the denominator cannot move. What is NOT interpretable is comparing",
+        "> overall recall across the two as a single quality number — the coverage slice is a",
+        "> capability the smaller index does not have, and it is reported on its own.",
         ""
       );
     }

@@ -5,7 +5,7 @@ import type { Token } from "@/lib/viz/wordpiece";
 export type Snapshot = {
   builtAt: string;
   dim: number;
-  /** Rows in the live index — 117,791. The cloud is a sample of it, not all of it. */
+  /** Rows in the live index (693,325 since RD-17). The cloud is a sample of it, not all of it. */
   indexRows: number;
   sampled: number;
   /** Share of 384-d variance the three drawn components carry. MUST be displayed. */
