@@ -43,6 +43,8 @@
 
       <p><b>What was tried after that, and also did not work.</b> RD-16. The remaining ideas were all "train the model on better data", so before spending weeks on it we checked the assumption and tried five ready-made models on the same job. The assumption had already been fixed by RD-02 without anyone noticing. And none of the five beat the model we have — including one trained on 215 million question-and-answer pairs, which came in <b>seven points worse</b>.</p>
 
+      <p><b>The cheapest thing left.</b> <a href="19-show-the-stored-definition.html">RD-19</a>. Every word page tells you what a word is <i>near</i> and none tells you what it <i>means</i> — while the meaning sits one column away in the same table, because it is the sentence search matched your query against. 332 of 477 pages currently say nothing. No new content, no model, no migration: read the column and render it.</p>
+
       <p><b>What is next.</b> RD-10 — a second, independently written test set. Every number on this page comes from 287 queries written blind by one person in one sitting. That was enough to decide RD-02, to reject RD-12 and to hold RD-09, and it is now the limiting factor: the cheap improvements are measured and gone, so anything left is an expensive bet, and betting means trusting the ruler more than it has earned.</p>
 
       <p><b>The one that was not about ranking, and it worked.</b> <a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a>. Everything above is an argument about putting the right word <i>first</i>. But the app could not return <code>petrichor</code> at all — the dictionary it was built from was frozen in 2006, and <code>selfie</code>, <code>umami</code>, <code>gaslighting</code> and <code>deepfake</code> were not in it either. That was <b>8% of the test set scoring zero no matter what</b>, sitting in the test file since the day it was written. Adding a filtered slice of Wiktionary took the index from 118k meanings to <b>693k</b> and that slice from <b>0% to 32%</b> answered first, without moving the score on anything that already worked. The lesson was not the one expected: the <i>careful</i> version, which added only words the dictionary lacked, was <b>much worse than doing nothing</b>. New meanings of words already covered are what made the new words affordable.</p>
@@ -62,6 +64,7 @@
           <li><a href="10-real-phrasing-eval-set.html">RD-10</a> — whether any of these numbers can be trusted</li>
           <li><a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> — the failure that was not a ranking failure at all, and the fix that shipped</li>
           <li><a href="18-pipeline-visualization.html">RD-18</a> — the whole pipeline, animated; the fastest way in if you would rather see it than read it</li>
+          <li><a href="19-show-the-stored-definition.html">RD-19</a> — the text the app already has and does not show</li>
         </ol>
         <p>The rest are infrastructure, cleanup and polish, and can be read in any order or not at all.</p>
       </div>
@@ -165,6 +168,14 @@
 
           <circle cx="335" cy="300" r="9" fill="var(--p3)"/>
           <text x="335" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p3)">RD-15</text>
+
+          <circle cx="150" cy="95" r="9" fill="var(--p1)"/>
+          <text x="150" y="75" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-19</text>
+          <text x="150" y="117" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(the text is already there)</text>
+
+          <circle cx="175" cy="288" r="9" fill="var(--p2)"/>
+          <text x="175" y="308" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p2)">RD-20</text>
+          <text x="175" y="322" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(measure before fixing)</text>
 
           <circle cx="565" cy="85" r="10" fill="var(--p1)" opacity="0.55"/>
           <text x="565" y="65" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-17 ✓</text>
@@ -364,6 +375,26 @@
           </div>
           <p class="row-sub">Done 2026-08-28 — shipped at <code>/explain</code>, and it moved no metric, which was the point. A page at <code>/explain</code> where you type a phrase and watch it happen: the sentence split into pieces, those pieces becoming one point in a cloud of meanings, the nearest meanings lighting up, and a ranked list with the real scores. Ships nothing into the search path and moves no metric &mdash; it exists so the mechanism is <i>visible</i>. Found while filing: the diagram anyone would draw from memory is wrong twice over. This pipeline has <b>no reranking stage</b> (RD-12 rejected it) and it ranks <b>synsets, not words</b>, which then expand into several words at <i>identical</i> scores. Found en route: the first query after Neon auto-suspends died on Prisma's 2s transaction default — a real serving bug the eval harness had always warmed away.</p>
           <div class="row-tags"><span>documentation</span><span>size: M</span><span>impact: communication (no retrieval change)</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="19-show-the-stored-definition.html">
+          <div class="row-top">
+            <span class="row-title">RD-19 &middot; Show the definition the database already has</span>
+            <span class="badge badge-p1">P1</span>
+          </div>
+          <p class="row-sub">Every word page says what a word is <i>near</i> and none says what it <i>means</i> &mdash; while the meaning sits one column away in the same table. <b>332 of the 477</b> word rows have an empty definition; <b>all 519,793</b> answerable words have a gloss in <code>GlossEmbedding</code>, because that gloss is the sentence search matched the query against. Not content to acquire or generate: content the app fetches, ranks on, and discards before rendering. <a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> multiplied it six-fold without anyone noticing it was there. Found while filing: <code>petrichor</code> still displays a sentence written by a generative model removed from the project in August, beside a sourced one it ignores.</p>
+          <div class="row-tags"><span>product</span><span>size: S</span><span>impact: high (332 of 477 pages say nothing)</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="20-cold-cache-retrieval-latency.html">
+          <div class="row-top">
+            <span class="row-title">RD-20 &middot; Cold-cache retrieval latency after the index grew 5.9&times;</span>
+            <span class="badge badge-p2">P2</span>
+          </div>
+          <p class="row-sub">Search now has six times more to look through and every recorded number says that cost nothing &mdash; measured under conditions no visitor experiences. The <a href="glossary.html">eval</a> harness warms the database and fires 405 queries back to back; a real visitor arrives alone at a compute that has been asleep. Measured server-side: warm scan <b>61 ms</b>, which is fine; the same query cold took <b>2,678 ms</b>. The harness cannot see the difference by construction, and its <code>p95</code> actually <i>improved</i> after the index grew. Measure it from production before deciding whether it needs fixing &mdash; it may not.</p>
+          <div class="row-tags"><span>performance</span><span>size: S to measure</span><span>impact: the one number users feel</span></div>
         </a>
       </li>
     </ul>

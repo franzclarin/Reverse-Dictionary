@@ -1,0 +1,104 @@
+<meta charset="utf-8">
+<title>RD-19 · Show the definition the database already has</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-19</div>
+
+  <div class="ticket-head">
+    <h1>Show the definition the database already has</h1>
+    <span class="badge badge-p1">P1 · product</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Every word page says what the word is <i>near</i>. None of them says what it <i>means</i> — even though the meaning is sitting in the same database, one column away.</p>
+    <p><b>Today —</b> <code>/word/selfie</code> renders a heading, a list of related words, and no definition. Meanwhile <code>GlossEmbedding</code> holds <i>"A photographic self-portrait, especially one taken manually with a smartphone"</i> for that exact word, because that sentence is what search matched the query against in the first place.</p>
+    <p><b>Do —</b> read the gloss the retrieval already used and put it on the page.</p>
+    <p><b>Why it matters —</b> this is not new content to acquire, generate or pay for. It is content the app fetches, ranks on, and then throws away before rendering. <a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> multiplied it by six without anyone noticing it was there.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Depends on:</b> nothing — <a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> made it much more valuable but it was already true</span>
+    <span><b>Touches:</b> <code>lib/wordData.ts</code>, <code>app/word/[word]/page.tsx</code>, <code>prisma/schema.prisma</code> (maybe)</span>
+    <span><b>Risk:</b> low on retrieval (it changes nothing in the search path) — the real questions are sense selection and licensing</span>
+    <span><b>Est:</b> S — a day, most of it deciding <i>which</i> sense to show</span>
+  </div>
+
+  <p class="lede">Measured on the live database, 2026-08-28: <b>332 of the 477 rows in <code>Word</code> have an empty <code>definition</code></b>, and <b>all 519,793 answerable lemmas have a gloss</b> in <code>GlossEmbedding</code>. The app has never had more text about words than it does right now, and it displays none of it.</p>
+
+  <div class="callout">
+    <span class="callout-label">The gap, on four real words</span>
+    <table>
+      <tr><th>word</th><th><code>Word.definition</code> (what the page shows)</th><th><code>GlossEmbedding.gloss</code> (what search matched)</th></tr>
+      <tr><td><code>selfie</code></td><td><i>empty</i></td><td>A photographic self-portrait, especially one taken manually…</td></tr>
+      <tr><td><code>enshittification</code></td><td><i>empty</i></td><td>The phenomenon of online platforms gradually degrading the q…</td></tr>
+      <tr><td><code>capsize</code></td><td><i>empty</i></td><td>overturn accidentally</td></tr>
+      <tr class="highlight"><td><code>petrichor</code></td><td>A pleasant smell that freque… <i>(a Claude-era leftover)</i></td><td>The distinctive scent, caused by geosmin, which accompanies…</td></tr>
+    </table>
+    <p><code>petrichor</code> is the instructive one: it carries a definition written by a generative model that was <a href="glossary.html">removed from the project in 2026-08</a>, while a sourced, attributable definition for the same word now sits unused beside it.</p>
+  </div>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — S</div>
+      <div class="stat-value">One query that already runs, plus a decision</div>
+      <div class="stat-note"><code>getRelatedWords()</code>'s gloss fallback already fetches the row. The work is not plumbing; it is choosing which sense of a polysemous word to lead with, and saying so on the page.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — high, and it is the page's whole purpose</div>
+      <div class="stat-value">332 of 477 pages currently say nothing</div>
+      <div class="stat-note">A reverse dictionary that hands you a word and cannot tell you what it means has finished half the job. This is the cheapest remaining improvement to what a user actually sees.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Read the gloss, do not store a copy.</b> <code>GlossEmbedding.gloss</code> is the text retrieval scored against, so displaying it means the page shows the <i>reason</i> the word was returned. Copying it into <code>Word.definition</code> would create a second source that can drift from the index — and <code>Word</code> already has 332 empty rows demonstrating how that goes.</li>
+      <li><b>Decide which sense leads, and make the rule visible.</b> A polysemous word has several rows. Two defensible options: WordNet's own sense order (a familiarity prior, the same policy <code>expandSynsets()</code> already uses for tie-breaks), or the sense whose vector is nearest the query that brought the user here. The second is better and needs the query, which the page only has via <code>?alternatives=</code> — decide deliberately rather than taking whichever <code>ORDER BY id</code> returns.</li>
+      <li><b>Show more than one sense where they exist.</b> <code>capsize</code> has one gloss; <code>cat</code> has many. Showing a single arbitrary one is worse than showing three labelled ones.</li>
+      <li><b>Attribute per source, because they differ.</b> WordNet 3.0 senses (<code>&lt;pos&gt;:&lt;offset&gt;</code> keys) need attribution. Wiktionary senses (<code>wikt:</code> keys) are <b>CC BY-SA</b> — attribution <i>and</i> share-alike. The key already says which, so the page can label each gloss correctly rather than carrying one vague footer. <code>/explain</code> already does this; word pages do not.</li>
+      <li><b>Revisit the empty-row design while you are here.</b> <code>getWordData()</code> upserts a minimal <code>Word</code> row on every visit to an answerable word. That was a bounded oddity at 141k answerable words; it is a different proposition at <b>519,793</b>. If the definition now comes from <code>GlossEmbedding</code>, ask whether the <code>Word</code> row needs to exist at all for a word with nothing else on it.</li>
+      <li><b>Do not touch the search path.</b> This is a rendering change. Nothing here should alter what <code>/api/lookup</code> returns, and no eval number should move. If one does, something was wired wrong.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>Why the page is empty, which is not an oversight</h3>
+    <p>Claude was removed from this project in 2026-08, and word pages were rebuilt around the embedding model alone. <code>CLAUDE.md</code> is emphatic and correct that <b>an embedding model has no decoder and cannot produce a definition</b>. That reasoning is about <i>generating</i> text. It has been quietly read as "the app cannot show definitions", which is a different claim and is no longer true: <a href="02-embedding-cutover.html">RD-02</a> put a human-written definition behind every sense in the index, and <a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> added half a million more. Reading stored text is not generation.</p>
+
+    <h3>The gotcha that is already written down and now matters more</h3>
+    <p><code>getWordData()</code> creates rows with <code>definition: ""</code> that are <b>indistinguishable from a real profile by presence alone</b>. <code>CLAUDE.md</code> already warns that any future generative source must regenerate on <code>definition === ""</code>, not on row-absence. That warning applies to this ticket too, in reverse: if a page falls back to <code>Word.definition</code> when present, then <code>petrichor</code> keeps showing the model-written sentence forever and never shows the sourced one. <b>Decide which source wins, explicitly.</b></p>
+
+    <h3>What this is not</h3>
+    <p>Not etymology, pronunciation, or example sentences — none of those are in the database and none can be derived from a vector. The scope is exactly the text that already exists.</p>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>CLAUDE.md</code> §"Word pages — no generative API", particularly the empty-row gotcha</li>
+      <li><code>lib/wordData.ts</code> — <code>relatedByGloss()</code> already fetches the row this ticket wants to render</li>
+      <li><a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> §"Found en route" — the last time a word-page assumption went stale after a search-path change</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A correct constraint outlived the situation that made it true.</b> "The model cannot write a definition" is right, was load-bearing when the generative dependency was removed, and got compressed into "the app has no definitions" — which stopped being true the moment search started matching against sense definitions. The index has held this text since <a href="02-embedding-cutover.html">RD-02</a>. Nobody looked, because the constraint sounded settled.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Showing the gloss shows the reason.</b> The text this ticket renders is not merely <i>a</i> definition — it is the exact string the query was scored against. A user who sees it can tell whether the match was sensible, which is the same argument <a href="18-pipeline-visualization.html">RD-18</a> makes for <code>/explain</code>, available on every result page for the cost of one column.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li>Word pages render the stored gloss for any answerable word, read from <code>GlossEmbedding</code> rather than copied into <code>Word</code></li>
+      <li>Sense-selection rule chosen deliberately, stated in code comments, and visible to the reader when a word has several senses</li>
+      <li>Per-source attribution on the page — WordNet and Wiktionary labelled separately, with CC BY-SA share-alike named for the latter</li>
+      <li>Precedence between <code>Word.definition</code> and the stored gloss decided explicitly, with the 145 Claude-era rows considered by name</li>
+      <li>The empty-<code>Word</code>-row design revisited against 519,793 answerable words, and either justified or changed</li>
+      <li>No change to <code>/api/lookup</code> and no movement in any eval number — verified by a run, not by inspection</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-19 · reverse-dictionary</footer>
+</div>

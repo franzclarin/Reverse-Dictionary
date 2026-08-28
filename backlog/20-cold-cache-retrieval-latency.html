@@ -1,0 +1,109 @@
+<meta charset="utf-8">
+<title>RD-20 · Cold-cache retrieval latency after the index grew 5.9×</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-20</div>
+
+  <div class="ticket-head">
+    <h1>Cold-cache retrieval latency after the index grew 5.9&times;</h1>
+    <span class="badge badge-p2">P2 · performance</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Search got six times more to look through, and every number this project records says that cost nothing. Those numbers are all measured under conditions no real user experiences.</p>
+    <p><b>Today —</b> the <a href="glossary.html">eval</a> harness warms the database and then fires 405 queries back to back, so the index is in memory by the second query. A real visitor arrives alone, at a database that has been asleep, against an index that is now <b>1,295 MB</b> instead of 213 MB.</p>
+    <p><b>Measured —</b> once warm, a search scans in <b>61 ms</b>, which is fine. Cold, the same query took <b>2,678 ms</b>. The harness cannot see that difference by construction.</p>
+    <p><b>Do —</b> measure what a first visitor actually waits, from production, and decide whether it needs fixing. It may not. But right now nobody knows, and the instrument that looks like it knows is pointed elsewhere.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Caused by:</b> <a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> — 117,791 rows &rarr; 693,325, index 213 MB &rarr; 1,295 MB</span>
+    <span><b>Touches:</b> measurement first; then possibly <code>lib/glossSearch.ts</code> (<code>GLOSS_PROBES</code>), the Neon compute setting, or nothing at all</span>
+    <span><b>Risk of not doing it:</b> a real regression in the one number users feel, invisible to every instrument the repo has</span>
+    <span><b>Est:</b> S to measure. Unknown to fix, and it may need no fix.</span>
+  </div>
+
+  <p class="lede">Server-side <code>EXPLAIN ANALYZE</code> against the live index, 2026-08-28 — network excluded, so this is scan cost alone.</p>
+
+  <table>
+    <tr><th class="num">probes</th><th class="num">warm median</th><th class="num">warm min</th><th class="num">cold (max observed)</th></tr>
+    <tr><td class="num">10</td><td class="num">6 ms</td><td class="num">6 ms</td><td class="num">498 ms</td></tr>
+    <tr><td class="num">40</td><td class="num">25 ms</td><td class="num">20 ms</td><td class="num">1,278 ms</td></tr>
+    <tr class="highlight"><td class="num"><b>100</b> (shipped)</td><td class="num"><b>61 ms</b></td><td class="num">50 ms</td><td class="num"><b>2,678 ms</b></td></tr>
+  </table>
+
+  <div class="callout">
+    <span class="callout-label">Why the eval harness reports no regression, and is not wrong to</span>
+    <p>Recorded <code>dbMs</code> across the two committed production runs — the numbers that would normally settle this:</p>
+    <table>
+      <tr><th>run</th><th class="num">p50</th><th class="num">p90</th><th class="num">p95</th><th class="num">p99</th><th class="num">max</th></tr>
+      <tr><td><code>prod_gloss_shipped</code> (117,791 rows)</td><td class="num">592</td><td class="num">906</td><td class="num">1,050</td><td class="num">1,833</td><td class="num">6,606</td></tr>
+      <tr><td><code>prod_wikt_shipped</code> (693,325 rows)</td><td class="num">589</td><td class="num">821</td><td class="num">913</td><td class="num">1,222</td><td class="num">2,004</td></tr>
+    </table>
+    <p>The bigger index looks <i>faster</i> at every percentile. Both facts are true and they are not in conflict: <b>~450 ms of each figure is a laptop-to-Neon round trip</b> (<code>CLAUDE.md</code> says so explicitly), and a 405-query sequential run keeps the working set hot throughout. The harness measures a warm index over a sustained burst. Production is a low-traffic app against an <b>auto-suspending</b> compute, so the cold path is the <i>common</i> case, not the tail.</p>
+    <p>This is not a defect in the harness. It is a question the harness was never built to answer, stated so the next person does not read <code>p95 = 913 ms</code> as an answer to it.</p>
+  </div>
+
+  <div class="stat-row cols-2">
+    <div class="stat">
+      <div class="stat-label">Size — S to measure</div>
+      <div class="stat-value">Production timings, not local ones</div>
+      <div class="stat-note">The route already returns <code>timingMs</code> and already logs by subsystem. What is missing is a reading taken from <code>iad1</code>, on a compute that has been idle, on the first request.</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Impact — the one number users feel</div>
+      <div class="stat-value">Warm 61 ms is fine; cold is unmeasured</div>
+      <div class="stat-note">Warm scan roughly doubled (~29 ms &rarr; 61 ms), which is exactly what a 5.9&times; table at a finer partition predicts and is not a problem. The cold-page cost is what changed shape, and it is the case most visitors get.</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Measure from production before changing anything.</b> Local <code>EXPLAIN ANALYZE</code> establishes that a cold/warm gap exists and roughly how large; it says nothing about how often a real request lands on the cold side. Sample <code>timingMs</code> and the <code>[lookup]</code> logs from <code>iad1</code>, split by time since the previous request.</li>
+      <li><b>Separate the three things inside a slow response.</b> Neon compute wake-up (already known, already why <code>searchGlossSynsets()</code> waits 15 s for a transaction), index pages being read from storage, and the scan itself. They have different fixes and only the third is affected by <code>probes</code>.</li>
+      <li><b>Re-read the probes sweep against a cold cache.</b> <code>probes = 100</code> was chosen on recall — it sits exactly on the exact-scan ceiling, and <code>probes = 10</code> costs 3.8 points of R@10 for 0.3 points of R@1. If cold cost scales with probes as the table above suggests (498 ms &rarr; 2,678 ms), that trade deserves re-reading with a latency term in it. <b>Do not quietly retune on latency alone</b> — the recall sweep is recorded in <code>GLOSS_PROBES</code> and any change has to argue against it.</li>
+      <li><b>Consider the levers in cost order.</b> Keeping the compute warm; a larger Neon compute so more of the 1,295 MB stays resident; lowering <code>probes</code>; or accepting it. The last is a legitimate outcome for an app with no traffic and no SLA — but it should be a decision with a number behind it.</li>
+      <li><b>If nothing changes, write down the measurement anyway.</b> The value here is mostly in knowing.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>Neon auto-suspends, and this project has already been bitten</h3>
+    <p><a href="18-pipeline-visualization.html">RD-18</a> found the first query after an idle period dying with <code>P2028</code> because Prisma's 2-second transaction default is shorter than Neon's wake-up. The fix was to wait longer (<code>maxWait: 15 s</code>), which makes the request survive rather than fast. A bigger index makes the post-wake-up request slower still, because more has to be paged in before the first scan completes.</p>
+
+    <h3>Why warm cost roughly doubled, and why that is the expected half</h3>
+    <p>A probe scans about <code>rows / lists</code> candidates. Before: 40 probes over 115 lists across 117,791 rows &asymp; 41,000 rows. Now: 100 probes over 833 lists across 693,325 rows &asymp; 83,000 rows. Twice the work, and 61 ms of it — entirely unremarkable. The interesting change is not the arithmetic, it is that the <i>resident set</i> needed to serve a query grew with the table.</p>
+
+    <h3>The numbers in this ticket, and their limits</h3>
+    <p>Measured with <code>EXPLAIN (ANALYZE)</code> from a laptop against the live database, three queries &times; three rounds per setting. Warm medians are stable and trustworthy. The "cold" column is a <b>maximum observed</b>, not a distribution — it is evidence that a large cold cost exists, not a measurement of how large it typically is. Producing that distribution is step 1.</p>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>CLAUDE.md</code> §"Gotchas that cost real time" — <i>"Latency here is not production latency"</i>, written before this ticket had a reason to cite it</li>
+      <li><code>lib/glossSearch.ts</code> — <code>GLOSS_PROBES</code>, the recorded recall sweep, and <code>TRANSACTION_OPTIONS</code></li>
+      <li><a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> §15g — the index rebuild and where these row counts come from</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A benchmark that warms up cannot measure a system that never does.</b> The harness warms the database deliberately and correctly — without it, ONNX and Neon cold starts land on query #1 and destroy the percentiles it exists to report. That same warm-up makes it structurally blind to the cost a first visitor pays, and the blindness is invisible because the output is a plausible latency table. <b>When a change makes the working set bigger, the benchmark's warm-up is doing more work for it than before</b>, and the reported number improves for a reason that has nothing to do with users.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>"No measurable cost" is a claim about the thing that was measured.</b> RD-17's regression test was about <i>recall</i>, and on recall it holds. Latency was checked with the same instrument and came back better, which was true and not the answer. Two different questions, one table.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li>Production latency sampled from <code>iad1</code>, split by cold vs warm, with the share of requests landing cold recorded</li>
+      <li>The three components of a slow response — compute wake-up, page reads, scan — separated rather than reported as one figure</li>
+      <li>The <code>probes</code> choice re-read with a latency term, and either kept with a stated reason or changed with a recorded sweep that argues against the recall one</li>
+      <li>An explicit decision on the levers, including "accept it" as a legitimate outcome</li>
+      <li><code>CLAUDE.md</code>'s latency guidance updated to say what the harness's <code>dbMs</code> does and does not describe</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-20 · reverse-dictionary</footer>
+</div>
