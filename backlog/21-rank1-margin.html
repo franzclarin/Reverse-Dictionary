@@ -1,0 +1,115 @@
+<meta charset="utf-8">
+<title>RD-21 · The headroom is not near-misses</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-21</div>
+
+  <div class="ticket-head">
+    <h1>The headroom is not near-misses</h1>
+    <span class="badge badge-p1">P1 · evaluation</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p>Every ticket since <a href="12-cross-encoder-reranker.html">RD-12</a> has cited the same encouraging fact: the right answer is usually <i>somewhere</i> in the first hundred results, just not first. The implication everyone has drawn is that a smarter re-ordering step would collect it.</p>
+    <p><b>Measured —</b> in <b>74% of those cases the right answer is not narrowly behind. It is decisively behind</b>, by more than the entire gap that <a href="02-embedding-cutover.html">RD-02</a> was built to close. The search is not undecided between the right answer and a wrong one. It is confident, and wrong.</p>
+    <p><b>Why it matters —</b> two shortlists produce the identical "headroom" number: one where the answer lost by a whisker, and one where it lost by a mile. Only the first is a re-ordering problem. The number everyone has been quoting cannot tell them apart, and this is the first time anyone has looked.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Status:</b> the measurement is <b>done</b> (<code>npm run probe:margin</code>); what is open is what to do about it</span>
+    <span><b>Supersedes for the gloss index:</b> <code>probe-margins.ts</code>'s +0.134/+0.094 figures, which describe the <i>lemma</i> index and two cutovers ago</span>
+    <span><b>Bears on:</b> <a href="13-rerank-serving-path.html">RD-13</a>, <a href="09-expand-embedding-training-data.html">RD-09</a>, <a href="14-synthetic-query-training-pairs.html">RD-14</a>, <a href="15-hard-negative-mining.html">RD-15</a>, <a href="10-real-phrasing-eval-set.html">RD-10</a></span>
+    <span><b>Risk of ignoring:</b> funding a reranker against a number that overstates what one can reach</span>
+  </div>
+
+  <p class="lede">Run down the live serving path at depth 100, over the frozen set's 287 authored reachable queries, lenient ranks throughout.</p>
+
+  <table>
+    <tr><th>outcome</th><th class="num">queries</th><th class="num">share</th></tr>
+    <tr><td>target at rank 1</td><td class="num">72</td><td class="num">25.1%</td></tr>
+    <tr class="highlight"><td><b>in top 100 but not rank 1</b> — the headroom</td><td class="num"><b>168</b></td><td class="num"><b>58.5%</b></td></tr>
+    <tr><td>never retrieved — out of reach at any depth</td><td class="num">47</td><td class="num">16.4%</td></tr>
+  </table>
+
+  <p>And the part nobody had measured — how far below rank 1 the target actually sits:</p>
+
+  <table>
+    <tr><th>cosine gap, rank 1 → target</th><th class="num">queries</th><th class="num">share of headroom</th></tr>
+    <tr><td>&lt; 0.01 — effectively a tie</td><td class="num">21</td><td class="num">12.5%</td></tr>
+    <tr><td>0.01 – 0.03</td><td class="num">23</td><td class="num">13.7%</td></tr>
+    <tr><td>0.03 – 0.08</td><td class="num">66</td><td class="num">39.3%</td></tr>
+    <tr class="highlight"><td><b>&gt; 0.08 — structural</b></td><td class="num"><b>58</b></td><td class="num"><b>34.5%</b></td></tr>
+  </table>
+
+  <p>Median gap <b>0.061</b>. Mean winner similarity <b>0.736</b> against a mean target of <b>0.667</b>. <b>Near-ties are only 26.2% of the headroom; 73.8% is a confident margin.</b> The winner shares a stem with the query in 25.6% of cases — so <a href="glossary.html">echo</a> is part of this, and only a quarter of it.</p>
+
+  <div class="callout">
+    <span class="callout-label">Scale check — the gap is as large as the problem RD-02 existed to fix</span>
+    <p>The lemma index's recorded margins were <b>+0.134</b> for echo results and <b>+0.094</b> for non-echo ones, and those numbers were the case for a representation change rather than a reranker. The gloss index roughly <i>halved</i> that to <b>+0.070</b> — a real improvement, consistent with RD-02's +13.9pp — and did not close it. <b>A third of the headroom is still a gap wider than the entire margin that justified rewriting the index.</b></p>
+  </div>
+
+  <div class="callout">
+    <span class="callout-label">Where the encoder is most confidently wrong — and a warning about reading it</span>
+    <table>
+      <tr><th class="num">gap</th><th>want</th><th>got</th><th>query</th></tr>
+      <tr><td class="num">0.247</td><td><code>procrastination</code></td><td><code>lastminutitis</code></td><td>the habit of putting things off until the very last minute</td></tr>
+      <tr><td class="num">0.227</td><td><code>immorality</code></td><td><code>abnormality</code></td><td>behaviour that breaks the accepted rules about right and wrong</td></tr>
+      <tr><td class="num">0.197</td><td><code>consent</code></td><td><code>consenting</code></td><td>agreeing to let something be done to you</td></tr>
+      <tr><td class="num">0.192</td><td><code>mountain gorilla</code></td><td><code>gorilla</code></td><td>the big endangered ape living in the cloud forests of central africa</td></tr>
+      <tr><td class="num">0.191</td><td><code>thumbprint</code></td><td><code>fingerprint</code></td><td>the pattern of ridges you leave behind when you press down with your thumb</td></tr>
+      <tr class="highlight"><td class="num">0.188</td><td><code>merriness</code></td><td><code>cheerfulness</code></td><td>the state of being cheerful and full of fun</td></tr>
+    </table>
+    <p><b>Several of these are the answer key being wrong, not the model.</b> <code>cheerfulness</code> is a defensible answer to that query and is simply absent from the row's <code>acceptable[]</code>; <code>gorilla</code> and <code>fingerprint</code> are the right concept at the wrong specificity; <code>consenting</code> is an inflection of the target. Only <b>133 of 312</b> authored rows carry an <code>acceptable[]</code> at all, so on the other 179 a correct synonym scores as a confident error.</p>
+    <p><b>So 73.8% is an upper bound on the model's fault, not a measurement of it.</b> Quantifying that split is step 1 below, and it is the difference between "the encoder needs retraining" and "the benchmark needs finishing".</p>
+  </div>
+
+  <section>
+    <h2>Task</h2>
+    <ol>
+      <li><b>Classify the wide-gap band before drawing any conclusion from it.</b> Sample the 58 queries past 0.08 and label each: <i>legitimate synonym missing from <code>acceptable[]</code></i>, <i>hypernym/specificity mismatch</i>, <i>inflection</i>, or <i>genuinely wrong</i>. That single count decides whether this ticket is evidence for retraining or evidence for <a href="10-real-phrasing-eval-set.html">RD-10</a> and <a href="05-audit-doc-and-eval-set-followups.html">RD-05</a>. Do not skip it — the temptation is to read the table above as a model verdict, and it is not one yet.</li>
+      <li><b>Re-read RD-13's gate against the classified number.</b> <a href="13-rerank-serving-path.html">RD-13</a> is blocked on <a href="12-cross-encoder-reranker.html">RD-12</a> producing a reranker worth serving. This measurement says the job is harder than "reorder near-ties" — an off-the-shelf model was never going to overturn a 0.07 margin, which is a second, independent reason RD-12 failed alongside the training-relation mismatch it already recorded.</li>
+      <li><b>Report the margin distribution beside the recall ladder, not instead of it.</b> The ladder in <code>eval.ts</code> tells you a perfect reranker's ceiling; this tells you what it would have to overturn to get there. Neither is complete alone. Consider folding a compact version into the harness so every future run carries it.</li>
+      <li><b>Re-run it after any representation change.</b> The margin, not the recall delta, is the direct measure of whether an encoder has learned to discriminate. It halved across RD-02 and that is the clearest single number describing what the cutover bought.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+
+    <h3>Why the headroom framing took hold, and why it is not wrong</h3>
+    <p>It is arithmetically exact: a perfect reranker over a depth-<i>D</i> shortlist lands lenient R@1 at the depth-<i>D</i> figure. <code>eval.ts</code> prints the ladder and says so. The framing is sound; what it omits is that <i>perfect</i> is doing a great deal of work in that sentence. Two shortlists with identical recall-by-depth curves can present completely different problems to the model asked to reorder them, and nothing in the harness distinguished them until now.</p>
+
+    <h3>This is the third independent reading of the same finding</h3>
+    <p><a href="12-cross-encoder-reranker.html">RD-12</a> found MS MARCO cross-encoders ranking by term overlap. <a href="16-training-data-bottleneck.html">RD-16</a> found a QA-pretrained bi-encoder losing 7 points. Both concluded that what transfers is the <i>relation</i> a model was trained on, not its size. This adds the margin: the fine-tune was trained on <code>(gloss, lemma)</code> triplets and is served <code>description → gloss</code>, so it has never seen the pairing it performs — and it places the right answer 0.07 below a wrong one, consistently, rather than hesitating between them.</p>
+
+    <h3>What the number is, precisely</h3>
+    <p>Cosine between the query and the stored sense vector, via the production path (<code>searchGlossSynsets</code> + <code>expandSynsets</code>), depth 100, lenient ranks. Not a reimplementation: a margin measured off a lookalike would describe a lookalike. It is a property of the <b>bi-encoder's</b> score surface — a cross-encoder rescores from scratch and does not inherit these margins, so this bounds what <i>reordering these scores</i> can do, not what any reranker can do.</p>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>scripts/probe-rank1-margin.ts</code> — the probe, and why it is not <code>probe-margins.ts</code></li>
+      <li><code>CLAUDE.md</code> §"Established facts" — the lemma-era +0.134/+0.094 margins this supersedes for the gloss index</li>
+      <li><code>eval/METHODS.md</code> §13a — the ceiling this qualifies</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A metric can be exactly right and still be read as the wrong claim.</b> "77% of targets are in the top 100 and 24% at rank 1" is true, was checked, and has been repeated across four tickets. It licenses "there is 53 points of headroom". It does not license "a reranker is 53 points away", which is what everyone heard — including the ticket that went and built one. <b>When a number is quoted often enough to become a premise, measure the thing it silently assumes.</b></p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The margin is the honest measure of a representation change; recall is the noisy one.</b> RD-02 moved lenient R@1 by 13.9 points and halved the margin from ~0.094 to 0.070. The recall figure depends on the answer key, the tie-break policy and the shortlist depth; the margin depends on the vectors. It is also far cheaper to compute than a paired eval run.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Ask what a benchmark failure means before believing it.</b> The widest gap in the set is <code>merriness</code> losing to <code>cheerfulness</code> on "the state of being cheerful and full of fun" — where the model is arguably right and the answer key is incomplete. With only 133 of 312 rows carrying <code>acceptable[]</code>, an unknown share of the "confident errors" are the instrument, not the subject. The measurement is real; the interpretation is not finished.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li>The 58 wide-gap queries classified into synonym / specificity / inflection / genuinely-wrong, with counts recorded</li>
+      <li>A stated share of the headroom that is genuinely the model's fault, replacing the 73.8% upper bound</li>
+      <li>RD-13's gate re-read against that number, and the reranking prior updated in <code>METHODS.md</code> either way</li>
+      <li>The margin distribution reported alongside the recall ladder wherever the ladder is cited</li>
+      <li>Any <code>acceptable[]</code> additions the classification turns up handed to <a href="05-audit-doc-and-eval-set-followups.html">RD-05</a> as a new set version — never edited in place</li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-21 · reverse-dictionary</footer>
+</div>

@@ -24,6 +24,7 @@
     "supplement:index": "tsx scripts/build-supplement-index.ts",
     "probe:reachability": "tsx scripts/probe-reachability.ts",
     "probe:oewn": "tsx scripts/probe-oewn-delta.ts",
+    "probe:margin": "tsx scripts/probe-rank1-margin.ts",
     "eval:compare": "tsx scripts/eval.ts --compare",
     "eval:report": "tsx scripts/report.ts"
   },

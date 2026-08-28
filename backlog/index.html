@@ -43,6 +43,8 @@
 
       <p><b>What was tried after that, and also did not work.</b> RD-16. The remaining ideas were all "train the model on better data", so before spending weeks on it we checked the assumption and tried five ready-made models on the same job. The assumption had already been fixed by RD-02 without anyone noticing. And none of the five beat the model we have — including one trained on 215 million question-and-answer pairs, which came in <b>seven points worse</b>.</p>
 
+      <p><b>The premise worth rechecking.</b> <a href="21-rank1-margin.html">RD-21</a>. Four tickets rest on the same sentence: the answer is usually in the top hundred, so a better re-ordering step would find it. It is arithmetically true. What nobody measured until now is <i>how far</i> down the answer sits &mdash; and three quarters of the time it is not a near-miss, it is a confident error. That does not kill reranking, but it does mean the job was never &ldquo;break some ties&rdquo;, which is a second reason <a href="12-cross-encoder-reranker.html">RD-12</a> failed.</p>
+
       <p><b>The cheapest thing left.</b> <a href="19-show-the-stored-definition.html">RD-19</a>. Every word page tells you what a word is <i>near</i> and none tells you what it <i>means</i> — while the meaning sits one column away in the same table, because it is the sentence search matched your query against. 332 of 477 pages currently say nothing. No new content, no model, no migration: read the column and render it.</p>
 
       <p><b>What is next.</b> RD-10 — a second, independently written test set. Every number on this page comes from 287 queries written blind by one person in one sitting. That was enough to decide RD-02, to reject RD-12 and to hold RD-09, and it is now the limiting factor: the cheap improvements are measured and gone, so anything left is an expensive bet, and betting means trusting the ruler more than it has earned.</p>
@@ -65,6 +67,7 @@
           <li><a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> — the failure that was not a ranking failure at all, and the fix that shipped</li>
           <li><a href="18-pipeline-visualization.html">RD-18</a> — the whole pipeline, animated; the fastest way in if you would rather see it than read it</li>
           <li><a href="19-show-the-stored-definition.html">RD-19</a> — the text the app already has and does not show</li>
+          <li><a href="21-rank1-margin.html">RD-21</a> — why the headroom every other ticket cites is harder than it looks</li>
         </ol>
         <p>The rest are infrastructure, cleanup and polish, and can be read in any order or not at all.</p>
       </div>
@@ -168,6 +171,10 @@
 
           <circle cx="335" cy="300" r="9" fill="var(--p3)"/>
           <text x="335" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p3)">RD-15</text>
+
+          <circle cx="255" cy="60" r="9" fill="var(--p1)"/>
+          <text x="255" y="42" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-21</text>
+          <text x="255" y="80" text-anchor="middle" font-size="9" fill="var(--ink-soft)">(corrects a shared premise)</text>
 
           <circle cx="150" cy="95" r="9" fill="var(--p1)"/>
           <text x="150" y="75" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--p1)">RD-19</text>
@@ -395,6 +402,16 @@
           </div>
           <p class="row-sub">Search now has six times more to look through and every recorded number says that cost nothing &mdash; measured under conditions no visitor experiences. The <a href="glossary.html">eval</a> harness warms the database and fires 405 queries back to back; a real visitor arrives alone at a compute that has been asleep. Measured server-side: warm scan <b>61 ms</b>, which is fine; the same query cold took <b>2,678 ms</b>. The harness cannot see the difference by construction, and its <code>p95</code> actually <i>improved</i> after the index grew. Measure it from production before deciding whether it needs fixing &mdash; it may not.</p>
           <div class="row-tags"><span>performance</span><span>size: S to measure</span><span>impact: the one number users feel</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="21-rank1-margin.html">
+          <div class="row-top">
+            <span class="row-title">RD-21 &middot; The headroom is not near-misses</span>
+            <span class="badge badge-p1">P1</span>
+          </div>
+          <p class="row-sub">Every ticket since <a href="12-cross-encoder-reranker.html">RD-12</a> cites the same encouraging fact &mdash; the right answer is usually somewhere in the first hundred results, just not first &mdash; and everyone reads it as &ldquo;a re-ordering step away&rdquo;. Measured for the first time: in <b>74% of those cases the answer is not narrowly behind but decisively behind</b>, by a margin wider than the entire gap <a href="02-embedding-cutover.html">RD-02</a> existed to close. Median gap <b>0.061</b>; the winner scores <b>0.736</b> against the target&rsquo;s <b>0.667</b>. Two shortlists give the identical headroom number and pose completely different problems. Found while filing: the widest gap in the set is <code>merriness</code> losing to <code>cheerfulness</code>, where the model is arguably right and the <a href="glossary.html">answer key</a> is incomplete &mdash; so 74% is an upper bound on the model&rsquo;s fault, and classifying it is step 1.</p>
+          <div class="row-tags"><span>evaluation</span><span>size: S</span><span>impact: corrects a premise four tickets share</span></div>
         </a>
       </li>
     </ul>

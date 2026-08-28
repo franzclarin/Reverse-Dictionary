@@ -1473,3 +1473,102 @@ store it left behind.
   indexed (`doomscrolling`, `gaslighting`, `hangry`). Coverage converted them from
   an impossibility into a ranking failure. That is progress and it is also the
   honest ceiling: RD-17 buys candidacy, not rank.
+
+## 16. RD-21 — the headroom is not near-misses (2026-08-28)
+
+§13a established the ceiling a reranker could reach and every section since has
+cited it. This is the measurement that says what reaching it would cost.
+
+### 16a. What was never measured
+
+A perfect reranker over a depth-D shortlist lands lenient R@1 at the depth-D
+figure. That is arithmetic and it is exact. What it omits is that **two
+shortlists with identical recall-by-depth curves can pose completely different
+problems**: one where the target lost by 0.001 and one where it lost by 0.15
+produce the same headroom number, and only the first is a reordering problem.
+
+Nothing in the harness distinguished them. `probe-margins.ts` measures margins,
+but it is Phase A3 — 25 hand-picked queries, top 10, against `VocabEmbedding` —
+and its +0.134 / +0.094 figures describe the lemma index, two cutovers ago.
+
+### 16b. The measurement
+
+`scripts/probe-rank1-margin.ts`, live serving path (`searchGlossSynsets` +
+`expandSynsets`, not a reimplementation), depth 100, lenient ranks, n=287:
+
+| outcome | queries | share |
+|---|---|---|
+| target at rank 1 | 72 | 25.1% |
+| **in top 100, not rank 1** | **168** | **58.5%** |
+| never retrieved | 47 | 16.4% |
+
+| cosine gap, rank 1 → target | queries | share of headroom |
+|---|---|---|
+| < 0.01 (effectively a tie) | 21 | 12.5% |
+| 0.01 – 0.03 | 23 | 13.7% |
+| 0.03 – 0.08 | 66 | 39.3% |
+| **> 0.08 (structural)** | **58** | **34.5%** |
+
+Median gap **0.061**. Mean winner **0.7363**, mean target **0.6667**, gap
+**0.0695**. **Near-ties are 26.2% of the headroom; 73.8% is a confident margin.**
+The rank-1 winner echoes the query in 25.6% of cases — echo is part of this and
+only a quarter of it.
+
+### 16c. Scale, and what RD-02 actually bought
+
+The lemma index's margins were +0.134 (echo) and +0.094 (non-echo), and that
+size was the case for a representation change rather than a reranker. The gloss
+index is at **+0.070** — roughly halved, consistent with RD-02's +13.9pp, and not
+closed. **A third of the headroom is still a gap wider than the entire margin
+that justified rewriting the index.**
+
+This is the clearest single number describing what the cutover bought, and it is
+far cheaper to compute than a paired run. Recall depends on the answer key, the
+tie-break policy and the shortlist depth; the margin depends on the vectors.
+
+### 16d. Why this is a second reason RD-12 failed
+
+§13 attributed the reranker's failure to the training relation: MS MARCO teaches
+web-passage term overlap, the task needs description-to-definition paraphrase.
+That stands. This adds an independent one: **the job was never "reorder
+near-ties".** An off-the-shelf model was being asked to overturn a 0.07 margin
+produced by an encoder that is confident, not hesitant. Both reasons point the
+same way and neither depends on the other.
+
+The margin is a property of the **bi-encoder's** score surface. A cross-encoder
+rescores from scratch and does not inherit it, so this bounds what *reordering
+these scores* can achieve — not what any reranker can. §13's ceiling is not
+withdrawn; it is priced.
+
+### 16e. The caveat that must travel with the number
+
+The widest gaps are not all model errors:
+
+```
+0.247  want procrastination — got lastminutitis
+0.227  want immorality      — got abnormality
+0.197  want consent         — got consenting        (an inflection of the target)
+0.192  want mountain gorilla— got gorilla           (right concept, wrong specificity)
+0.191  want thumbprint      — got fingerprint       (right concept, wrong specificity)
+0.188  want merriness       — got cheerfulness      (a defensible answer)
+```
+
+`cheerfulness` for "the state of being cheerful and full of fun" is arguably
+correct and is simply absent from that row's `acceptable[]`. Only **133 of 312**
+authored rows carry one, so on the other 179 a correct synonym scores as a
+confident error (§8.6).
+
+**73.8% is therefore an upper bound on the model's fault, not a measurement of
+it.** Classifying the 58 wide-gap queries — synonym / specificity / inflection /
+genuinely wrong — is RD-21's first task, and it decides whether this section is
+evidence for retraining or evidence for RD-10 and RD-05. Recorded now, before
+that classification, so the bound cannot later be quoted as the finding.
+
+### 16f. The general lesson
+
+**When a number is quoted often enough to become a premise, measure the thing it
+silently assumes.** "77% in the top 100, 24% at rank 1" was checked, correct, and
+repeated across four tickets — and it was heard as "a reranker is 53 points
+away", which is a claim it never made. One of those tickets went and built the
+reranker.
+
