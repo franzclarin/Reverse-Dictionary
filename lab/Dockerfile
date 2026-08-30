@@ -21,6 +21,17 @@ WORKDIR /workspace
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
+# ENV PATH does not survive a login shell: `bash -l` re-sources /etc/profile and
+# resets PATH, so `docker compose exec lab bash -l` would silently get the base
+# image's python and fail to import torch. Many IDE and terminal integrations
+# open a login shell by default.
+RUN printf 'export PATH=/opt/venv/bin:$PATH\n' > /etc/profile.d/10-venv.sh
+
+# Register the kernel under the SAME name the host uses, so a committed notebook
+# opens without a "select kernel" prompt on either surface.
+RUN python -m ipykernel install --name reverse-dictionary-lab \
+        --display-name "reverse-dictionary-lab" --prefix /opt/venv
+
 EXPOSE 8888
 
 # --ServerApp.token='' is safe only because the port is published to

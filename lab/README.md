@@ -34,9 +34,18 @@ roughly 5–10× slower for anything that touches the GPU. Embedding a full
 ~10 min against ~40–80.
 
 Both surfaces are built from the same `uv.lock`, so package *versions* cannot
-drift. One thing does differ and is worth remembering: the torch wheel is
-`linux-aarch64` in the image and `macos-arm64` on the host. **"It worked in the
-container" is not proof it works natively, and vice versa.**
+drift. Three things still differ, and they are worth remembering:
+
+- **The torch build.** `2.13.0` (macOS arm64, MPS) on the host;
+  `2.13.0+cpu` (linux aarch64) in the image. PyPI's default linux wheel is the
+  **CUDA** build, which drags ~2.9 GB of `nvidia/*` libraries that can never
+  execute here — `[tool.uv.sources]` in `pyproject.toml` pins the CPU index for
+  linux only, which took the image from **18.8 GB to 5.31 GB** and changes
+  nothing on the host.
+- **The Python patch version** — 3.12.14 host, 3.12.12 in the image (the base
+  image ships its own).
+- Therefore: **"it worked in the container" is not proof it works natively, and
+  vice versa.**
 
 ### Host
 
@@ -68,6 +77,16 @@ docker compose up --build     # -> http://localhost:8888
 
 The port is bound to `127.0.0.1` because the Jupyter server runs with no token.
 Do not publish it to a network.
+
+The `reverse-dictionary-lab` kernel is registered inside the image under the
+same name the host uses, so a committed notebook opens on either surface
+without a "select kernel" prompt.
+
+One trap the container will spring if you undo it: `ENV PATH` does **not**
+survive a login shell — `bash -l` re-sources `/etc/profile` and resets PATH, so
+`docker compose exec lab bash -l` would get the base image's python and fail to
+import torch. The Dockerfile writes `/etc/profile.d/10-venv.sh` to prevent
+this.
 
 ## Data
 

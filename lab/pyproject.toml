@@ -51,6 +51,19 @@ dependencies = [
 [tool.uv]
 package = false
 
+# torch on macOS arm64 comes from PyPI with MPS built in. On linux — i.e. inside
+# the container — PyPI's default wheel is the CUDA build, which drags ~2.9 GB of
+# nvidia/* libraries that can never execute here (Docker on macOS has no GPU at
+# all, let alone an NVIDIA one). Pinning the CPU index for linux only took the
+# image from 18.8 GB to a fraction of that and changes nothing on the host.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
