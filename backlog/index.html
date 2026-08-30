@@ -68,6 +68,7 @@
           <li><a href="18-pipeline-visualization.html">RD-18</a> — the whole pipeline, animated; the fastest way in if you would rather see it than read it</li>
           <li><a href="19-show-the-stored-definition.html">RD-19</a> — the text the app already has and does not show</li>
           <li><a href="21-rank1-margin.html">RD-21</a> — why the headroom every other ticket cites is harder than it looks</li>
+          <li><a href="22-python-training-notebooks.html">RD-22</a> — how to actually train one of these models, and why the numbers it prints can be trusted</li>
         </ol>
         <p>The rest are infrastructure, cleanup and polish, and can be read in any order or not at all.</p>
       </div>
@@ -412,6 +413,16 @@
           </div>
           <p class="row-sub">Every ticket since <a href="12-cross-encoder-reranker.html">RD-12</a> cites the same encouraging fact &mdash; the right answer is usually somewhere in the first hundred results, just not first &mdash; and everyone reads it as &ldquo;a re-ordering step away&rdquo;. Measured for the first time: in <b>74% of those cases the answer is not narrowly behind but decisively behind</b>, by a margin wider than the entire gap <a href="02-embedding-cutover.html">RD-02</a> existed to close. Median gap <b>0.061</b>; the winner scores <b>0.736</b> against the target&rsquo;s <b>0.667</b>. Two shortlists give the identical headroom number and pose completely different problems. Found while filing: the widest gap in the set is <code>merriness</code> losing to <code>cheerfulness</code>, where the model is arguably right and the <a href="glossary.html">answer key</a> is incomplete &mdash; so 74% is an upper bound on the model&rsquo;s fault, and classifying it is step 1.</p>
           <div class="row-tags"><span>evaluation</span><span>size: S</span><span>impact: corrects a premise four tickets share</span></div>
+        </a>
+      </li>
+      <li>
+        <a class="row" href="22-python-training-notebooks.html">
+          <div class="row-top">
+            <span class="row-title">RD-22 &middot; A Python surface for training and experiments</span>
+            <span class="badge badge-done">&check; Done</span>
+          </div>
+          <p class="row-sub">This repo could <i>measure</i> models beautifully and could not <i>build</i> one: there was no training code in it at all, and the copy of the original model that the docs said was in the project folder had gone. Added <code>training/</code> &mdash; a Python library and five notebooks that fine-tune either model on the laptop and hand the result back to the existing harness. The risky part, a second scoring implementation, is pinned to the TypeScript one: <b>9/9 parity checks and 287/287 identical ranks</b> on a shared index.</p>
+          <div class="row-tags"><span>tooling</span><span>size: M</span><span>impact: unblocks every remaining &ldquo;train something&rdquo; ticket</span></div>
         </a>
       </li>
     </ul>

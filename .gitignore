@@ -83,3 +83,16 @@ eval/sets/*.bak-*
 # `scripts/lib/wiktionary.ts`, and they live outside the repo anyway (RD_SOURCE_DIR,
 # EVAL_CELL_DIR). Committing a cache is not the same as committing a record.
 eval/runs/*.manifest.jsonl
+
+# --- RD-22: the Python training surface (training/) -------------------------
+# Dev-only and never deployed. The venv and every derived artifact stay out;
+# the notebooks, rdlib/ and the lockfile are committed.
+training/.venv/
+training/**/__pycache__/
+training/**/*.egg-info/
+training/**/.ipynb_checkpoints/
+.ipynb_checkpoints/
+
+# Checkpoints, generated training pairs, ONNX exports, pre-registrations.
+# Regenerate from the notebooks; a checkpoint is a cache, not a record.
+training/artifacts/

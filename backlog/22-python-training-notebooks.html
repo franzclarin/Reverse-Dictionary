@@ -1,0 +1,128 @@
+<meta charset="utf-8">
+<title>RD-22 · A Python surface for training and experiments</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-22</div>
+
+  <div class="ticket-head">
+    <h1>A Python surface for training and experiments</h1>
+    <span class="badge badge-done">✓ Done</span>
+    <span class="badge badge-p2">P2 · tooling</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p><b>Today —</b> this repo could <i>measure</i> models beautifully and could not <i>build</i> one at all. There was no training code in it: no Python, no notebooks, nothing. The model that powers the whole app was trained once, in a Colab notebook that was never checked in, and the copy of it that used to sit in the project folder is gone.</p>
+    <p><b>Done —</b> added <code>training/</code>: a Python library and five notebooks that can fine-tune either model, score the result, and hand it back to the existing harness. Fine-tuning now runs on the laptop.</p>
+    <p><b>Why it matters —</b> every remaining idea in this backlog is "train something". Until now that meant leaving the repo, losing the eval harness, and coming back with a number nobody could reproduce.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Status:</b> <b>done</b> 2026-08-30 — parity gate passes 9/9, round-trip is 287/287 identical</span>
+    <span><b>Unblocks:</b> <a href="09-expand-embedding-training-data.html">RD-09</a>, <a href="12-cross-encoder-reranker.html">RD-12</a>/<a href="13-rerank-serving-path.html">RD-13</a>, <a href="14-synthetic-query-training-pairs.html">RD-14</a>, <a href="15-hard-negative-mining.html">RD-15</a></span>
+    <span><b>Touches:</b> <code>training/</code> only — no application code, no runtime dependency, no change to the serving path</span>
+    <span><b>Risk carried:</b> a second scoring implementation, deliberately accepted and pinned</span>
+  </div>
+
+  <p class="lede">The evaluation half of this project is careful to a fault. The training half did not exist. This closes that gap without spending the first half to buy the second.</p>
+
+  <section>
+    <h2>What was actually missing</h2>
+    <p>A survey of the repo before this ticket: zero <code>.py</code> files, zero notebooks, no <code>torch</code>, no <code>sentence-transformers</code>. <code>reverse_dict_model.zip</code> — which <code>CLAUDE.md</code> described as sitting at the repo root and holding <code>model.safetensors</code> — <b>was not on disk</b>.</p>
+    <p>The recovery turned out to be free. The Hugging Face repo <code>franzclarin/ReverseDictionary</code> ships <code>model.safetensors</code> alongside the full sentence-transformers layout (<code>1_Pooling/config.json</code>, <code>modules.json</code>, <code>sentence_bert_config.json</code>), so <code>SentenceTransformer("franzclarin/ReverseDictionary")</code> loads it as a trainable PyTorch model with the correct <code>Transformer → Pooling → Normalize</code> stack. <b>The lost zip does not matter.</b></p>
+  </section>
+
+  <section>
+    <h2>The decision that shaped it</h2>
+    <p><code>METHODS.md</code> is explicit that a second embedding path "would make every number fiction", and the harness is built around that: <code>scripts/lib/retrieval.ts</code> <i>mirrors</i> the route, and <code>eval.ts</code> imports <code>embed</code> from <code>lib/embedder.ts</code> rather than reimplementing it.</p>
+    <p>A self-contained Python loop was chosen anyway, for iteration speed — and then pinned, which is what this repo does with every other second implementation:</p>
+    <table>
+      <tr><th>existing precedent</th><th>what it pins</th></tr>
+      <tr><td><code>npm run verify-viz</code></td><td>the browser's reimplemented WordPiece tokenizer against the real <code>AutoTokenizer</code>, 415/415</td></tr>
+      <tr><td><code>rd17_control</code></td><td>had to reproduce RD-16's <code>full_gloss_ft</code> to the digit before either arm could be read</td></tr>
+      <tr><td><code>exact</code> vs <code>cell_lemma_ft</code></td><td>pgvector against local brute force, 99.0% top-1 agreement</td></tr>
+    </table>
+    <p><code>rdlib.parity</code> is the same move. It re-derives the published figures from the committed runs, re-derives the paired McNemar tests, recomputes <a href="glossary.html">echo</a> from scratch rather than trusting the stored field, and compares the PyTorch encoder against the ONNX artifact that actually serves <code>/api/lookup</code>. It raises on failure.</p>
+  </section>
+
+  <section>
+    <h2>What the gate measured</h2>
+    <table>
+      <tr><th>check</th><th>result</th></tr>
+      <tr><td>frozen set sha256 + shape</td><td>405 rows, 287 authored-reachable</td></tr>
+      <tr><td>WordNet parser</td><td>117,791 synsets, <b>identical gloss <code>inputsSha256</code></b> to the TypeScript parser</td></tr>
+      <tr><td><code>prod_wikt_shipped</code></td><td>lenient 25.1 / strict 20.6 / R@10 55.7 / MRR 0.307 — all exact</td></tr>
+      <tr><td>McNemar, gloss → wikt</td><td>25W/22R, p = 0.77 — matches the published pair</td></tr>
+      <tr><td>McNemar, baseline → gloss</td><td>55W/15R, p &lt; 0.0001 — matches</td></tr>
+      <tr><td>echo rule, recomputed</td><td>stored 17.4% vs recomputed 17.4%, worst per-row delta <b>0.0000</b></td></tr>
+      <tr class="highlight"><td><b>encoder parity, PyTorch vs served ONNX</b></td><td><b>min cos 1.000000000, max abs diff 1.6e-07</b></td></tr>
+    </table>
+    <p>And the strongest check available — a cell built in Python, scored by <i>both</i> scorers, compared query by query:</p>
+    <table>
+      <tr><th>axis</th><th class="num">agreement</th></tr>
+      <tr class="highlight"><td>identical deep rank</td><td class="num"><b>287/287</b></td></tr>
+      <tr class="highlight"><td>identical top-1</td><td class="num"><b>287/287</b></td></tr>
+      <tr class="highlight"><td>identical top-10 order</td><td class="num"><b>287/287</b></td></tr>
+    </table>
+    <p>That cell also reproduced RD-16's <code>full_gloss_ft</code> control exactly — <b>25.4 / 21.6 / 51.6 / 0.304 / 14.6%</b> — from an independently built index, in a different language, through a different runtime.</p>
+  </section>
+
+  <section>
+    <h2>The rule this establishes</h2>
+    <div class="callout">
+      <p><b>Python numbers are for iteration. Any number that would change a decision gets confirmed through <code>npx tsx scripts/eval.ts</code> before it is written down.</b></p>
+      <p>The gate proves the two agree on everything checkable. It does <i>not</i> prove that a local exact scan matches the live IVFFlat index — those are different retrieval methods and differ by ~0.3 points by design. A cell scan is the right instrument for "is this representation better" and the wrong one for "what will users get".</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What it costs to run an experiment now</h2>
+    <table>
+      <tr><th>step</th><th class="num">time</th></tr>
+      <tr><td>Build a full 117,791-synset cell (M5, MPS, ~4,200 gloss/s)</td><td class="num">~30 s</td></tr>
+      <tr><td>Score it in Python, exact scan to depth 100</td><td class="num">~20 s</td></tr>
+      <tr><td>Score it with <code>eval.ts</code></td><td class="num">~2 min</td></tr>
+      <tr><td>Fine-tune 1 epoch over ~35k pairs</td><td class="num">~10 min</td></tr>
+    </table>
+    <p>RD-16's six cells were an overnight job. A representation experiment is now a coffee break — which matters, because the cheapest lever in this repo is still <a href="02-embedding-cutover.html">changing what gets indexed</a>, and that needs no GPU at all.</p>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <h3>The gate that is not optional</h3>
+    <p><code>evalset.assert_disjoint()</code> raises if a training pair uses an eval query or an eval target. <b>It fires on any raw WordNet slice</b>, because the eval targets are ordinary English words drawn from the same dictionary — that is the gate working. The notebook documents the two legitimate responses and requires the choice to be recorded, because the original fine-tune was trained with <code>eval_on_start: False</code> and <code>prediction_loss_only: True</code>: no evaluator, no held-out split, and a recorded 10.9% that describes memorisation and cannot be cited.</p>
+
+    <h3>Traps that are silent</h3>
+    <ul>
+      <li><b>WordNet files are <code>latin1</code>.</b> Reading them as UTF-8 mangles accented headwords and breaks <code>inputsSha256</code> parity.</li>
+      <li><b><code>percentile</code> does not interpolate.</b> <code>metrics.ts</code> floor-indexes; <code>np.percentile</code> interpolates.</li>
+      <li><b>Mean pooling, no prefix.</b> Correct for the fine-tune, MiniLM and <code>gte</code>. Silently wrong for BGE (CLS pooling) and E5 (<code>"query: "</code> prefix) — those produce plausible vectors that are not what the model was trained to emit.</li>
+      <li><b>384 dimensions to ship.</b> <code>GlossEmbedding</code> is <code>halfvec(384)</code> — one of three independent reasons <code>all-mpnet-base-v2</code> was rejected at +2.8pp.</li>
+    </ul>
+
+    <h3>What was deliberately not ported</h3>
+    <p><code>rdlib.wiktionary</code> reads the Kaikki dump for <i>training pairs only</i>. It is <b>not</b> a port of <code>scripts/lib/wiktionary.ts</code>, whose <code>FILTER_VERSION = "rd17.2"</code> produced the 575,534 senses currently in <code>GlossEmbedding</code> and whose per-rule kill counts are a committed artifact. A second implementation of <i>that</i> would be a live drift hazard against a production table; a reader that only emits <code>(word, pos, gloss)</code> cannot change what users search.</p>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The interop format was already language-neutral, and nobody had noticed.</b> A cell is raw little-endian float32 with a JSON sidecar — <code>np.fromfile</code> reads one and <code>ndarray.tofile</code> writes one. The entire Python↔TypeScript bridge is about forty lines. The expensive-looking part of this ticket was free because of a format decision made for an unrelated reason two tickets earlier.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>A second implementation is only dangerous if it is unchecked.</b> <code>METHODS</code> warns against one, and the warning is right — but the repo's own answer everywhere else is a parity check, not abstinence. Pinning the port cost one module and caught nothing, which is the outcome a gate is supposed to have; what it buys is that the <i>next</i> change to <code>metrics.py</code> cannot silently drift.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>The documentation described an artifact that was not there.</b> <code>CLAUDE.md</code> named <code>reverse_dict_model.zip</code> at the repo root as the source of the original model; it is gone, and had it been the only copy, retraining from the current weights would have been impossible. The Hugging Face repo turned out to hold everything. <b>A gitignored file named in the docs is a claim nobody re-checks</b> — the same failure shape as the stale 512 MB storage ceiling RD-17 corrected.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>Fine-tuning this model was never the hard part.</b> A MiniLM is 22M parameters; the full WordNet index encodes in 28 seconds on a laptop. What made retraining expensive was never compute — it was the absence of a way to score the result against everything already measured.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li><s>Parity gate reproduces every published figure from the committed runs, and raises on failure</s></li>
+      <li><s>Paired McNemar tests re-derived and matching the recorded wins/regressions</s></li>
+      <li><s>The echo rule recomputed independently and matching the stored field</s></li>
+      <li><s>PyTorch and served-ONNX encoders shown to agree within float32 rounding</s></li>
+      <li><s>A Python-built cell readable by <code>eval.ts</code>, scoring identically per query</s></li>
+      <li><s>Disjointness gate that raises, demonstrated firing on real data</s></li>
+      <li><s>No application code, runtime dependency, or serving-path change</s></li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-22 · reverse-dictionary</footer>
+</div>

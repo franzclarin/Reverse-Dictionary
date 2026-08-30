@@ -1,0 +1,45 @@
+[project]
+name = "reverse-dictionary-training"
+version = "0.1.0"
+description = "RD-22 — Python experimentation surface for the Reverse Dictionary retrieval models."
+requires-python = ">=3.12,<3.13"
+
+# Dev-only. Nothing here is imported by the Next.js app, and nothing here is
+# installed on Vercel: the serving path loads ONNX through Transformers.js and
+# has no Python in it at all. See training/README.md.
+dependencies = [
+    # --- training ------------------------------------------------------------
+    "torch>=2.4",
+    "sentence-transformers>=3.0",
+    "transformers>=4.44",
+    "datasets>=2.20",
+    "accelerate>=0.33",
+
+    # --- analysis ------------------------------------------------------------
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "scipy>=1.13",
+    "matplotlib>=3.9",
+
+    # --- data sources --------------------------------------------------------
+    # psycopg is only for pulling GlossEmbedding vectors out of Neon for a local
+    # exact scan. The notebooks never write to the database.
+    "psycopg[binary]>=3.2",
+    "python-dotenv>=1.0",
+
+    # --- export --------------------------------------------------------------
+    # optimum's ONNX exporter is what turns a fine-tuned PyTorch model back into
+    # the `onnx/model.onnx` artifact lib/embedder.ts loads.
+    "optimum[exporters]>=1.21",
+    "onnx>=1.16",
+    "onnxruntime>=1.18",
+
+    # --- notebooks -----------------------------------------------------------
+    "ipykernel>=6.29",
+    "jupyter>=1.1",
+]
+
+[tool.uv]
+# torch on macOS arm64 comes from PyPI with MPS support built in; no index
+# juggling is needed here the way it would be for CUDA.
+package = false
