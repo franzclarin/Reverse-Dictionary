@@ -1,0 +1,7 @@
+.venv/
+artifacts/
+**/__pycache__/
+**/.ipynb_checkpoints/
+**/.DS_Store
+notebooks/
+README.md
