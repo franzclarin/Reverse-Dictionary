@@ -99,7 +99,17 @@
       "Bash(awk -F'\\\\t' 'NR>1 && \\($4==\"very_common\"||$4==\"common\"\\){print $4\"\\\\t\"$1}' eval/sets/v1-draft.tsv)",
       "Bash(awk -F'\\\\t' 'NR==1||NR==2||NR==40||NR==120||NR==200||NR==291||NR==314{printf \"%-18s | %-62s | %-13s | %-11s | %s\\\\n\", $1,$2,$3,$4,$6}' eval/sets/v1-draft.tsv)",
       "Bash(awk 'END{print NR-1\" data rows\"}' eval/sets/v1-draft.tsv)",
-      "Bash(awk -F'\\\\t' 'NR>26 && \\(NR==27||NR==60||NR==150||NR==290||NR==312\\){printf \"%-16s|%-52s|%6s|%-11s|%-6s|%-11s|%s\\\\n\",$1,substr\\($2,1,52\\),$4,$5,$6,$8,$9}' eval/sets/v1-draft.tsv)"
+      "Bash(awk -F'\\\\t' 'NR>26 && \\(NR==27||NR==60||NR==150||NR==290||NR==312\\){printf \"%-16s|%-52s|%6s|%-11s|%-6s|%-11s|%s\\\\n\",$1,substr\\($2,1,52\\),$4,$5,$6,$8,$9}' eval/sets/v1-draft.tsv)",
+      "Bash(git fetch *)",
+      "Bash(command -v nvm)",
+      "Read(//Users/franzclarin/**)",
+      "Bash(command -v brew)",
+      "Bash(brew --version)",
+      "Read(//usr/local/bin/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(xcode-select -p)",
+      "Bash(git apply *)",
+      "Bash(gh auth *)"
     ]
   }
 }
