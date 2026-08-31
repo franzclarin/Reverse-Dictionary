@@ -96,3 +96,12 @@ training/**/.ipynb_checkpoints/
 # Checkpoints, generated training pairs, ONNX exports, pre-registrations.
 # Regenerate from the notebooks; a checkpoint is a cache, not a record.
 training/artifacts/
+
+# --- lab/ — the from-scratch rebuild (branch lab-from-scratch) --------------
+# Same posture as training/: the source and the lockfile are committed, the
+# environment and every derived artifact are not.
+lab/.venv/
+lab/artifacts/
+lab/**/__pycache__/
+lab/**/*.egg-info/
+lab/**/.ipynb_checkpoints/

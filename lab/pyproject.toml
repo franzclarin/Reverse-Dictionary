@@ -1,0 +1,69 @@
+[project]
+name = "reverse-dictionary-lab"
+version = "0.1.0"
+description = "A from-scratch reverse-dictionary build. Independent of training/rdlib by design."
+requires-python = ">=3.12,<3.13"
+
+# Dev-only, like training/. Nothing here is imported by the Next.js app and
+# nothing here is installed on Vercel.
+#
+# This workspace deliberately does NOT depend on training/rdlib. rdlib already
+# implements scoring, retrieval, the echo metric and the paired significance
+# test; importing it would hand back exactly the parts this rebuild exists to
+# understand. The frozen eval set is the only thing shared with the old work,
+# because it is the only thing that makes the two comparable.
+dependencies = [
+    # --- notebook ------------------------------------------------------------
+    "jupyterlab>=4.2",
+    "ipykernel>=6.29",
+    "ipywidgets>=8.1",
+
+    # --- model ---------------------------------------------------------------
+    # torch on macOS arm64 comes from PyPI with MPS support built in; no index
+    # juggling is needed here the way it would be for CUDA.
+    "torch>=2.4",
+    "transformers>=4.44",
+    "sentence-transformers>=3.0",
+    "datasets>=2.20",
+    "accelerate>=0.33",
+    "safetensors>=0.4",
+
+    # --- data ----------------------------------------------------------------
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "polars>=1.0",
+    "duckdb>=1.0",
+    "pyarrow>=17.0",
+    "scikit-learn>=1.5",
+    "scipy>=1.13",
+
+    # --- viz -----------------------------------------------------------------
+    "matplotlib>=3.9",
+    "plotly>=5.23",
+
+    # --- tooling -------------------------------------------------------------
+    "ruff>=0.6",
+    "tqdm>=4.66",
+    "rich>=13.7",
+    "python-dotenv>=1.0",
+]
+
+[tool.uv]
+package = false
+
+# torch on macOS arm64 comes from PyPI with MPS built in. On linux — i.e. inside
+# the container — PyPI's default wheel is the CUDA build, which drags ~2.9 GB of
+# nvidia/* libraries that can never execute here (Docker on macOS has no GPU at
+# all, let alone an NVIDIA one). Pinning the CPU index for linux only took the
+# image from 18.8 GB to a fraction of that and changes nothing on the host.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
