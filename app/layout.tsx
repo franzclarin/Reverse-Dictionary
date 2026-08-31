@@ -3,6 +3,7 @@ import "./globals.css";
 import Navbar from "@/components/Navbar";
 import { LoadingProvider } from "@/context/LoadingContext";
 import { SoundProvider } from "@/context/SoundContext";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: "Reverse Dictionary - Find Words from Descriptions",
@@ -49,6 +50,7 @@ export default function RootLayout({
             </footer>
           </LoadingProvider>
         </SoundProvider>
+        <Analytics />
       </body>
     </html>
   );
