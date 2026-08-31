@@ -142,6 +142,19 @@ npm run eval:report       # Regenerate eval/REPORT.md
 | Build fails | `npm install`, then `rm -rf .next && npm run build` |
 | `next dev` exits instantly, no server | Check if the repo is under OneDrive or similar cloud sync — see CLAUDE.md's "Repo hygiene" |
 
+## Running it in Docker
+
+One image carries the whole project — the Next.js app, the bundled ONNX model, and
+both Python surfaces (`training/`, `lab/`):
+
+```bash
+docker compose up --build web     # the app       -> http://127.0.0.1:3000
+docker compose up --build lab     # JupyterLab    -> http://127.0.0.1:8888
+```
+
+`DATABASE_URL` still points at Neon — the 693,325-row vector index is not in the
+repo, so there is no local database to bring up. See **[DOCKER.md](DOCKER.md)**.
+
 ## Deployment
 
 **Deploy by pushing to `main`** — Vercel's Git integration is the only supported path. `vercel deploy --prod` uploads the working directory directly and ignores `.gitignore`, which sweeps in a ~1.5GB gitignored model artifact and blows Vercel's per-file cap. See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full walkthrough, production troubleshooting, and scaling notes.
@@ -151,6 +164,7 @@ npm run eval:report       # Regenerate eval/REPORT.md
 - **README.md** (this file) — overview, local setup, API reference
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, data flow, project structure
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** — deploying to Vercel, monitoring, troubleshooting production
+- **[DOCKER.md](DOCKER.md)** — the containerised surface: one image for the app and both Python environments
 - **[CLAUDE.md](CLAUDE.md)** — how retrieval actually works, its measured limitations, and the offline eval harness; the maintained source of truth for search internals
 
 ## License

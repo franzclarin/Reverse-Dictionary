@@ -1,0 +1,45 @@
+# The root build context. `lab/.dockerignore` is scoped to `lab/` and does not
+# apply here.
+#
+# Everything listed below is either regenerated inside the image or must never
+# enter a layer. node_modules alone is 1.7 GB and models/ is 87 MB — both are
+# rebuilt by the Dockerfile, so shipping them would cost minutes of upload to
+# produce a worse copy.
+
+# Regenerated in the image: `npm ci` and `npm run build`.
+node_modules
+.next
+out
+tsconfig.tsbuildinfo
+next-env.d.ts
+
+# RD-11's ONNX model. Fetched inside the image by scripts/fetch-model.mjs,
+# which verifies exact byte sizes — a copied-in model has no such check.
+models/
+
+# Python environments. The image builds its own from the lockfiles; a macOS
+# arm64 venv cannot run on linux anyway.
+lab/.venv
+training/.venv
+**/__pycache__
+**/*.egg-info
+**/.ipynb_checkpoints
+training/artifacts
+
+# Secrets. A build context is copied into the daemon and can end up in a layer;
+# DATABASE_URL is supplied at RUN time, never at build time.
+.env
+.env.*
+.vercel
+
+# Not needed to build or run.
+.git
+.github
+.claude
+.agents
+**/.DS_Store
+npm-debug.log*
+
+# Reproducibility detail large enough to matter (~5.8 MB per rerank run) and
+# gitignored already.
+eval/runs/*.shortlist.jsonl

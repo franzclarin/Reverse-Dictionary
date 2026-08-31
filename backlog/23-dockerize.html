@@ -1,0 +1,120 @@
+<meta charset="utf-8">
+<title>RD-23 · One image for the whole project</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-23</div>
+
+  <div class="ticket-head">
+    <h1>One image for the whole project</h1>
+    <span class="badge badge-done">✓ Done</span>
+    <span class="badge badge-p2">P2 · tooling</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p><b>Today —</b> the project ran in exactly two places: this laptop, set up by hand, and Vercel. There <i>was</i> a container, but it covered only the notebook half of <code>lab/</code> — not the app, not the model, not the training environment. Handing the whole thing to someone else meant a page of instructions and hoping.</p>
+    <p><b>Done —</b> one <code>Dockerfile</code> that carries everything: the app, the 87 MB model it serves, and both Python environments. <code>docker compose up web</code> gives you the running site; <code>docker compose up lab</code> gives you the notebooks.</p>
+    <p><b>Why it matters —</b> reproducibility, mostly. But it also found a real defect that only a linux build could find: the training environment had been quietly resolving a GPU build of PyTorch it can never run.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Status:</b> <b>done</b> 2026-08-31 — image builds, <code>/api/lookup</code> answers from it, both kernels serve</span>
+    <span><b>Touches:</b> new <code>Dockerfile</code>, <code>compose.yaml</code>, <code>.dockerignore</code>, <code>DOCKER.md</code>, plus a lockfile pin in <code>training/</code></span>
+    <span><b>Does not touch:</b> <code>next.config.js</code>, <code>package.json</code>, <code>lib/</code>, <code>app/</code>, <code>vercel.json</code> — the serving path and the deploy path are unchanged</span>
+    <span><b>Risk carried:</b> the container is CPU-only, and its torch <i>build</i> differs from the host's</span>
+  </div>
+
+  <p class="lede">The repo already had a container. It covered the smallest surface and skipped the one that ships.</p>
+
+  <section>
+    <h2>What the image had to carry</h2>
+    <p>Not obvious from the outside, because the app's dependencies are not all in <code>package.json</code>:</p>
+    <table>
+      <tr><th>piece</th><th>why it cannot be left out</th></tr>
+      <tr><td>the 87 MB ONNX model</td><td><code>lib/embedder.ts</code> loads it from disk with <code>allowRemoteModels = false</code> (RD-11). A container without it is a hard 500 on <code>/api/lookup</code>, not a slow fallback.</td></tr>
+      <tr><td>dev dependencies</td><td><code>npm ci --omit=dev</code> cannot even complete: <code>postinstall</code> runs <code>prisma generate</code> and the <code>prisma</code> CLI is a devDependency. And <code>tsx</code> must be present, or the harness every Python number is confirmed through cannot run inside the container.</td></tr>
+      <tr><td><code>prisma/</code>, copied <i>with</i> the manifests</td><td>same <code>postinstall</code>: it reads <code>prisma/schema.prisma</code>, so copying only <code>package*.json</code> before <code>npm ci</code> fails the build.</td></tr>
+      <tr><td>a dummy <code>DATABASE_URL</code> at build time</td><td><code>app/sitemap.ts</code> constructs a <code>PrismaClient</code> at module scope. It already swallows query failures; it cannot swallow a missing environment variable.</td></tr>
+      <tr><td><code>node_modules/wordnet-db/dict</code></td><td>WordNet 3.0 arrives as an npm package, and <code>rdlib.paths.WORDNET_DICT_DIR</code> reads exactly those bytes. It is in the image already — which is why <code>compose.yaml</code> mounts no WordNet at all.</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>The defect it found</h2>
+    <p><code>training/uv.lock</code> resolved <code>torch</code> to the <b>CUDA</b> build on linux — <code>nvidia-cublas</code>, <code>nvidia-cudnn</code>, <code>nvidia-nccl</code>, <code>triton</code> and fourteen more. Roughly 2.9 GB of libraries that can never execute, because Docker on macOS has no GPU at all, let alone an NVIDIA one.</p>
+    <p>Nothing was wrong on the host, and nothing ever would have been: the lock was correct for darwin and had simply never been resolved for linux. <code>lab/</code> hit the identical trap when it was containerised and fixed it with a platform-scoped index pin; <code>training/</code> got the same pin, verbatim:</p>
+    <pre><code>[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]</code></pre>
+    <table>
+      <tr><th>after re-locking</th><th class="num"></th></tr>
+      <tr class="highlight"><td><code>nvidia</code> references in <code>training/uv.lock</code></td><td class="num"><b>18 → 0</b></td></tr>
+      <tr><td>packages removed</td><td class="num">18</td></tr>
+      <tr><td>packages whose <i>version</i> changed</td><td class="num"><b>0</b></td></tr>
+      <tr><td>host (darwin) torch</td><td class="num"><code>2.13.0</code>, unchanged, MPS</td></tr>
+      <tr><td>container (linux) torch</td><td class="num"><code>2.13.0+cpu</code></td></tr>
+    </table>
+    <p>Verified by extracting every <code>name</code>/<code>version</code> pair from the lockfile before and after and diffing them, rather than by reading the summary uv printed. One lockfile still serves both surfaces.</p>
+  </section>
+
+  <section>
+    <h2>Decisions</h2>
+    <h3>No database in the compose file</h3>
+    <p>The obvious shape — app plus a <code>pgvector</code> service — is wrong here. <code>GlossEmbedding</code> is <b>693,325 rows</b> and is not in the repo; a local Postgres would come up with the schema and zero rows, so <code>/api/lookup</code> would return an empty list and every number measured against it would be fiction. Rebuilding the index is an embedding job over 693k senses, not a seed script. The container connects to the same Neon database local dev does, and inherits the same cold-start behaviour (61 ms warm, 2,678 ms cold).</p>
+
+    <h3>No <code>output: 'standalone'</code></h3>
+    <p>The conventional Next.js Docker recipe would have meant editing <code>next.config.js</code> — the file that carries RD-11's <code>outputFileTracingIncludes</code> for the model and the counterweight excludes for <code>onnxruntime-node</code>'s per-platform binaries. Slimming the image is not worth touching the config the Vercel build depends on, in a repo where the deploy path is already documented as fragile. Copying the built app wholesale costs layer size and nothing else.</p>
+
+    <h3>Two Python environments, not one</h3>
+    <p><code>lab/</code> deliberately does not import <code>training/rdlib</code>, because <code>rdlib</code> already implements the scoring, retrieval, echo metric and paired significance test that the from-scratch rebuild exists to reimplement. Merging them into one venv would have made that rule a matter of etiquette. <code>/opt/venv-training</code> and <code>/opt/venv-lab</code> make it a property of the filesystem. Both kernels are registered system-wide, so one JupyterLab server still offers both.</p>
+  </section>
+
+  <section>
+    <h2>What was verified in the running container</h2>
+    <table>
+      <tr><th>check</th><th>result</th></tr>
+      <tr class="highlight"><td><code>/api/lookup</code>, "the smell of rain on dry earth"</td><td><b><code>petrichor</code> at rank 2</b>, behind <code>rain man</code> &mdash; the shipped index&rsquo;s own answer, reproduced exactly. 9.6 s cold (Neon wake-up), <b>~0.5 s warm</b></td></tr>
+      <tr><td>model loaded from the bundle, not the CDN</td><td><b><code>--network none</code></b>: <code>[embedder] model loaded root=/app/models ms=102</code>, unit-norm 384-d vector out</td></tr>
+      <tr><td><code>npm run verify-viz</code> — RD-18's honesty gate</td><td><b>all 6 sections pass</b>, incl. byte-identical serving SQL and <b>415/415</b> tokenizations</td></tr>
+      <tr><td><code>npx tsc --noEmit</code></td><td>clean, exit 0 &mdash; and <code>npm run lint</code> clean</td></tr>
+      <tr><td><code>rdlib.parity.report()</code> from <code>/opt/venv-training</code></td><td><b>9/9 checks pass</b> (encoder parity min cos 0.999999881, max abs diff 1.90e-07)</td></tr>
+      <tr><td>torch, from a <b>login</b> shell</td><td><code>sys.prefix=/opt/venv-lab</code>, <code>2.13.0+cpu</code>, real 2048&times;2048 matmul executed</td></tr>
+      <tr><td>Jupyter kernels available</td><td><code>reverse-dictionary</code> and <code>reverse-dictionary-lab</code>, both listed by the server&rsquo;s own API</td></tr>
+      <tr><td><code>eval/</code> writable from the container?</td><td><code>touch: Read-only file system</code> &mdash; <b>refused</b>, as intended</td></tr>
+      <tr><td>frozen set sha256 across the mount</td><td><code>cc03e134&hellip;c0ccc8</code>, identical to the host</td></tr>
+      <tr class="highlight"><td><b>the full harness, in the container</b> &mdash; <code>eval.ts</code> against the live gloss index</td><td><b>lenient 25.1 / strict 20.6 / R@10 55.7 / MRR 0.307 / echo 17.4%</b> &mdash; <code>prod_wikt_shipped</code> reproduced to the digit</td></tr>
+      <tr><td>image size</td><td><b>7.36 GB</b> &mdash; 2.0 GB training venv, 2.1 GB lab venv, 854 MB <code>node_modules</code>, 87 MB model, 37 MB <code>.next</code></td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <ul>
+      <li><b><code>ENV PATH</code> does not survive a login shell.</b> <code>bash -l</code> re-sources <code>/etc/profile</code> and resets <code>PATH</code>, so <code>docker compose exec … bash -l</code> silently gets the base image's python and fails to import torch. <code>/etc/profile.d/10-venv.sh</code> re-prepends <code>${RD_VENV}</code>. <code>lab/</code> found this; this image inherits the fix and the reason.</li>
+      <li><b>Kernel names are load-bearing.</b> The committed notebooks declare <code>reverse-dictionary</code> and <code>reverse-dictionary-lab</code>; an image that registers only <code>python3</code> prompts for a kernel on every open.</li>
+      <li><b>The build needs network</b>, because <code>scripts/fetch-model.mjs</code> runs inside it. That script verifies exact byte sizes, so a truncated download or an HTML error page served with a 200 fails the build — which is the correct outcome given <code>allowRemoteModels = false</code>.</li>
+      <li><b>The container is CPU-only.</b> Docker on macOS runs a Linux VM with no Metal passthrough. Do real training on the host; use the image for portability.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A lockfile is only checked for the platforms it has been built on.</b> <code>training/uv.lock</code> had been correct and complete for a year of macOS use while carrying 2.9 GB of CUDA for a platform nobody had ever resolved it against. The container did not <i>cause</i> that problem; it was the first thing to <i>ask</i>. Same shape as the stale 512 MB storage ceiling RD-17 corrected and the missing zip RD-22 found — a claim nobody had re-checked, because nothing forced the question.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The second container was cheaper than the first because the first had already been debugged.</b> Three of this image's non-obvious decisions — the CPU index pin, <code>/etc/profile.d</code>, the kernel names — are <code>lab/</code>'s learnings applied without re-discovering them. Writing those down as commit-message prose, rather than as a fixed Dockerfile alone, is what made them portable.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The parity gate travelled, and told the truth about the difference.</b> RD-22's nine checks pass inside the container, including the PyTorch-vs-served-ONNX comparison — but at <b>max abs diff 1.90e-07</b> against the host's 1.6e-07, because the encoder is running on a different torch build. Both are float32 rounding and both pass. It is a small, concrete instance of the rule the README already states: the container is a reproducible environment, not a bit-identical one.</p></div>
+    <div class="learning"><div class="learning-mark">✓</div><p><b>The right shape for this compose file has one service missing.</b> Adding a <code>pgvector</code> service would have looked more complete and produced a container that returns nothing for every query. The index is 693,325 rows of derived data and belongs where it is; a database service here would have been a convincing prop.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li><s>One image builds and carries the app, the model, and both Python environments</s></li>
+      <li><s><code>/api/lookup</code> answers correctly from the container, against Neon</s></li>
+      <li><s>The model is served from inside the image, provably without network</s></li>
+      <li><s>No CUDA in the linux resolution, and no version drift on the host</s></li>
+      <li><s>Both Jupyter kernels present under the names the committed notebooks declare</s></li>
+      <li><s>The frozen eval set is read-only across the mount</s></li>
+      <li><s>No change to <code>next.config.js</code>, the serving path, or the Vercel deploy path</s></li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-23 · reverse-dictionary</footer>
+</div>

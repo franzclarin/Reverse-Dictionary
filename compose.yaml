@@ -1,0 +1,99 @@
+# Two services, ONE image (see Dockerfile). `web` serves the Next.js app; `lab`
+# serves JupyterLab over both Python surfaces. They are the same layers with a
+# different command, so building either builds both.
+#
+#   docker compose up web     ->  http://127.0.0.1:3000
+#   docker compose up lab     ->  http://127.0.0.1:8888
+#
+# The database is NOT here. DATABASE_URL points at Neon, exactly as local dev
+# and Vercel do — GlossEmbedding is 693,325 rows and is not in the repo, so a
+# local Postgres would come up empty and /api/lookup would return nothing.
+#
+# `lab/compose.yaml` still exists and still works; it is the standalone,
+# Python-only container. This file is the whole project.
+
+name: reverse-dictionary
+
+services:
+  web:
+    build: .
+    image: reverse-dictionary:latest
+    container_name: rd-web
+    env_file:
+      # DATABASE_URL. Not required at build time (the Dockerfile builds against
+      # a dummy), but the app is useless without it at run time.
+      - path: .env.local
+        required: false
+    environment:
+      NODE_ENV: production
+    ports:
+      # Loopback: the app has no auth and no rate limiting by design (RD-06).
+      # Publish it wider only deliberately.
+      - "127.0.0.1:3000:3000"
+
+  lab:
+    build: .
+    image: reverse-dictionary:latest
+    container_name: rd-notebooks
+    # `rd-lab` is lab/compose.yaml's container. Different name here so both can
+    # run at once.
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      # Which venv a login shell gets. /etc/profile.d/10-venv.sh reads this,
+      # because `bash -l` resets PATH and would otherwise hand back the base
+      # image's python with no torch in it.
+      RD_VENV: /opt/venv-lab
+      JUPYTER_PLATFORM_DIRS: "1"
+      HF_HOME: /app/training/artifacts/hf
+      EVAL_CELL_DIR: /app/data/cells
+      RD_SOURCE_DIR: /app/data/sources
+    ports:
+      # Loopback, and not negotiable: the server runs with no token (see the
+      # command below). Do not publish this to a network.
+      - "127.0.0.1:8888:8888"
+    # The image's HEALTHCHECK probes :3000, which only `web` serves. Inherited
+    # here it would mark a perfectly healthy notebook server unhealthy.
+    healthcheck:
+      disable: true
+    volumes:
+      # Notebooks and artifacts are the work — they must outlive the container.
+      - ./training/notebooks:/app/training/notebooks
+      - ./training/artifacts:/app/training/artifacts
+      - ./lab/notebooks:/app/lab/notebooks
+      - ./lab/artifacts:/app/lab/artifacts
+
+      # --- read-only, and that is the point ---------------------------------
+      # The frozen 405-row benchmark (sha256 cc03e134…c0ccc8) plus the committed
+      # reference runs. It is only a valid benchmark for as long as nothing can
+      # rewrite it, so nothing here can.
+      - ./eval:/app/eval:ro
+
+      # NOTE: WordNet 3.0 is NOT mounted. wordnet-db ships inside the image's
+      # node_modules, which is where rdlib.paths.WORDNET_DICT_DIR already looks.
+      # (The files are latin1, not UTF-8 — reading them as UTF-8 silently
+      # mangles headwords.)
+
+      # The 3.2 GB Kaikki Wiktionary extraction and OEWN. Read-only: the filter
+      # reads these, and RD-17's committed manifest is the record of what it did.
+      - ${RD_SOURCE_DIR:-${HOME}/rd_sources}:/app/data/sources:ro
+
+      # Vector cells, ~170 MB each. Writable, and outside the image on purpose —
+      # the darwin default lives under os.tmpdir() and gets reaped.
+      - ${EVAL_CELL_DIR:-${HOME}/rd_eval_cells}:/app/data/cells
+
+    # Absolute path, not `jupyter`: this server is the lab surface, and naming
+    # the interpreter removes any question of which venv PATH resolved to. Both
+    # kernels — `reverse-dictionary` (training/) and `reverse-dictionary-lab` —
+    # are registered system-wide, so this one server offers both.
+    command:
+      - /opt/venv-lab/bin/jupyter
+      - lab
+      - --ip=0.0.0.0
+      - --port=8888
+      - --no-browser
+      - --allow-root
+      - --ServerApp.root_dir=/app
+      - --ServerApp.token=
+      - --ServerApp.password=

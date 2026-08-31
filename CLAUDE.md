@@ -378,11 +378,70 @@ export EVAL_CELL_DIR=~/rd_eval_cells    # the darwin default is under os.tmpdir(
 - **PyTorch and the served ONNX are the same encoder**: min cos `1.000000000`, max abs diff `1.6e-07`. So Python retrieval numbers describe production's representation, not a lookalike.
 - **The rule: Python numbers are for iteration. Anything that would change a decision is confirmed through `npx tsx scripts/eval.ts` first.** The gate does *not* prove a local exact scan matches the live IVFFlat index — those differ by ~0.3pp by design.
 - **`evalset.assert_disjoint()` raises** if a training pair uses an eval query or target, and **it fires on any raw WordNet slice** because the eval targets are ordinary dictionary words. That is the gate working. The original run had `eval_on_start: False` and no held-out split at all, which is why its 10.9% cannot be cited.
+- **The lockfile carries two torch resolutions, on purpose (RD-23).** `[tool.uv.sources]` pins the CPU index for `sys_platform == 'linux'` only, so the host still gets `torch 2.13.0` from PyPI with MPS while a linux/container sync gets `2.13.0+cpu`. Before that pin, a linux resolution pulled the **CUDA** build — 18 `nvidia-*`/`triton` packages, ~2.9 GB that can never execute. Nothing about the host changed; re-locking altered no other package's version.
 - **`rdlib/wiktionary.py` is deliberately NOT a port of `scripts/lib/wiktionary.ts`.** That filter (`FILTER_VERSION = "rd17.2"`) built the 575,534 senses in `GlossEmbedding` and its kill counts are a committed artifact; a second implementation would be a live drift hazard. The Python reader only emits `(word, pos, gloss)` for training pairs and decides nothing about what is indexed.
 - **Traps that are silent**: WordNet files are **`latin1`** (UTF-8 mangles headwords and breaks `inputsSha256` parity); `metrics.percentile` floor-indexes while `np.percentile` interpolates; mean-pooling-no-prefix is correct for the fine-tune/MiniLM/`gte` and **wrong for BGE (CLS) and E5 (`"query: "`)**; **384 dims or it cannot ship** (`halfvec(384)`).
 - **Cost on an M5 (MPS, ~4,200 gloss/s)**: a full 117,791-synset cell in **~30s**, Python scoring in ~20s, `eval.ts` in ~2min, one fine-tune epoch over ~35k pairs in ~10min. RD-16's six cells were an overnight job.
 
 Notebooks, in order: `00_setup_and_parity` (**run first**), `01_explore_the_evidence` (reads committed runs, no training), `02_biencoder_finetune` (RD-09), `03_crossencoder_finetune` (RD-12/RD-13), `04_export_and_ship_gate` (ONNX export + reconciliation). Full detail in `training/README.md`.
+
+## Docker (`Dockerfile`, `compose.yaml`) — one image, everything (RD-23)
+
+**One image carries the app, the 87 MB ONNX model and BOTH Python surfaces.** It is an
+*additional* surface: Vercel still deploys by pushing to `main`, and `next.config.js` is
+deliberately untouched. `lab/Dockerfile` still exists as the standalone Python-only
+container.
+
+```bash
+docker compose up --build web     # next start      -> http://127.0.0.1:3000
+docker compose up --build lab     # JupyterLab      -> http://127.0.0.1:8888
+```
+
+- **There is no database service, and adding one would be a prop.** `GlossEmbedding` is
+  693,325 rows and is not in the repo; a local `pgvector` would come up with the schema and
+  **zero rows**, so `/api/lookup` would return `[]`. The container reads `DATABASE_URL` from
+  `.env.local` and talks to the same Neon database local dev does — including the same
+  cold-start behaviour (61ms warm, 2,678ms cold).
+- **`prisma/` is copied WITH `package.json`, before `npm ci`.** `postinstall` runs
+  `prisma generate`, which reads `prisma/schema.prisma`; copy only the manifests and the
+  install dies. For the same reason the install is **not** `--omit=dev`: the `prisma` CLI is
+  a devDependency, and `tsx`/`wordnet-db` must be present or the eval harness can't run in
+  the container.
+- **`next build` runs against a dummy `DATABASE_URL` (a build ARG).** `app/sitemap.ts`
+  constructs a `PrismaClient` at module scope and Prisma raises on a missing env var; the
+  sitemap already swallows *query* failures. The real URL arrives at run time and never
+  enters a layer.
+- **RD-11's invariant holds in the container, and was proven, not assumed.** `npm run build`
+  runs `scripts/fetch-model.mjs` inside the image, so the model is on disk at `/app/models`.
+  Measured under **`docker run --network none`**: `[embedder] model loaded root=/app/models
+  ms=102`, unit-norm 384-d vector out. The build itself needs network for that fetch.
+- **Two venvs, `/opt/venv-training` and `/opt/venv-lab`, deliberately not merged.** `lab/`
+  does not import `training/rdlib`; separate environments make that a filesystem property
+  rather than etiquette. Both Jupyter kernels are registered **system-wide**, under the names
+  the committed notebooks declare (`reverse-dictionary`, `reverse-dictionary-lab`), so one
+  server offers both and nothing prompts for a kernel.
+- **`ENV PATH` does not survive a login shell.** `bash -l` re-sources `/etc/profile` and
+  resets `PATH`, which silently hands back the base image's python with no torch.
+  `/etc/profile.d/10-venv.sh` re-prepends `${RD_VENV:-/opt/venv-training}`; `compose.yaml`
+  sets `RD_VENV=/opt/venv-lab` on the `lab` service. Inherited from `lab/Dockerfile`.
+- **`training/uv.lock` was resolving the CUDA torch build for linux** — 18 `nvidia-*`/
+  `triton`/`cuda-*` packages, ~2.9 GB that can never execute (Docker on macOS has no GPU).
+  Nothing was wrong on the host; the lock had simply never been resolved for linux.
+  `training/pyproject.toml` now carries the same `[tool.uv.sources]` CPU-index pin `lab/`
+  added, with a **linux-only marker**, so the host still resolves `torch 2.13.0` with MPS.
+  Re-locking removed 18 packages and **changed no other package's version** — verified by
+  diffing every `name`/`version` pair, not by reading uv's summary.
+- **The container is CPU-only** (no Metal passthrough) and its torch *build* differs from the
+  host's, so "it worked in the container" is not proof it works natively. Concretely: the
+  RD-22 parity gate passes 9/9 inside the image, but encoder parity reads **max abs diff
+  1.90e-07** against the host's 1.6e-07. Reproducible environment, not a bit-identical one.
+- `eval/` is mounted **read-only** — `touch` fails, and the frozen set's sha256 is unchanged
+  across the mount. Cells (`EVAL_CELL_DIR`) and the 3.2 GB Kaikki extraction
+  (`RD_SOURCE_DIR`) are mounted from outside the image; WordNet is **not** mounted, because
+  `wordnet-db` already ships inside the image's `node_modules` where `rdlib` looks for it.
+- **The container reproduces the production numbers exactly.** `npx tsx scripts/eval.ts --index GlossEmbedding` run inside it scores **lenient 25.1 / strict 20.6 / R@10 55.7 / MRR 0.307 / echo 17.4%** — `prod_wikt_shipped` to the digit. (The run is written inside the image, not to the host: `web` does not mount `eval/`.)
+- Image is **7.36 GB** (2.0 GB training venv, 2.1 GB lab venv, 854 MB `node_modules`, 87 MB
+  model). Full detail in **`DOCKER.md`**.
 
 ## Backlog (`backlog/`)
 
@@ -392,7 +451,7 @@ Tickets are static HTML, not an issue tracker: `backlog/index.html` lists them (
 - Use judgement on "big enough" — a typo or a one-line config tweak doesn't need a ticket; a data migration, a removed/added subsystem, anything that changes retrieval behavior, or anything future work would need context on, does.
 - Follow the existing badge (`badge-p0`…`badge-p3`, `badge-done`) and tag (`size:`, `impact:`) vocabulary already used in `index.html` — don't invent a new taxonomy per ticket.
 - **`backlog/glossary.html` is the vocabulary reference for the whole backlog**, and `index.html`'s "Start here" section is its entry point. Every ticket opens with an *In plain terms* callout above its `.meta-row` and links terms into the glossary rather than redefining them inline — follow both conventions in new tickets, and add an entry to the glossary rather than explaining a recurring term in a ticket body.
-- **RD-22 is done and is where model work now starts** — `training/` finally makes fine-tuning possible in-repo, with a parity gate tying its numbers to the harness; read "Training" above before proposing any retraining. **Open tickets worth knowing about before proposing retrieval work:** RD-10 (real-phrasing eval set) is the only one with a live case. **RD-17 is done and POSITIVE** — the vocabulary expansion shipped; read METHODS §15 before touching the candidate set again, particularly the finding that added senses are not purely distractors. **RD-21 (P1) corrects a premise RD-12/RD-13/RD-09/RD-10 all share** — read it before proposing reranking or retraining, and note its own caveat about the answer key. **RD-19 and RD-20 were filed out of RD-17 and are open:** RD-19 (P1) is that `GlossEmbedding.gloss` holds a human-written definition for all 519,793 answerable words while 332 of the 477 `Word` rows render empty — the app fetches the text, ranks on it, and discards it before display. RD-20 (P2) is that the eval harness's `dbMs` cannot see cold-cache latency by construction: it warms the database and runs 405 queries in sequence, so its p95 *improved* when the index grew 5.9×, while a server-side `EXPLAIN ANALYZE` measured the same scan at **61ms warm and 2,678ms cold**. **RD-09/RD-14/RD-15 are HELD, not open** — RD-16 measured their premises on 2026-08-28: RD-14's register gap is closed (+1.8pp), RD-09's corpus bet lost 7.0 points when run by proxy, and RD-15 depends on RD-14. Read METHODS §14 before proposing retraining again. **RD-12 is done and NEGATIVE** — off-the-shelf cross-encoder reranking was measured and rejected, so RD-13 (its serving path) stays blocked by its own gate; read METHODS §13 before proposing reranking again, because the 53pp ceiling it names is real and the tool that was supposed to reach it is not. "Build an eval harness" is already done — see "Evaluation" above; the open gap is RD-10's register coverage, not the harness itself.
+- **RD-23 is done** — the whole project (app + model + both Python venvs) builds as one Docker image; see "Docker" above, and note that containerising `training/` is what surfaced the CUDA lockfile defect. **RD-22 is done and is where model work now starts** — `training/` finally makes fine-tuning possible in-repo, with a parity gate tying its numbers to the harness; read "Training" above before proposing any retraining. **Open tickets worth knowing about before proposing retrieval work:** RD-10 (real-phrasing eval set) is the only one with a live case. **RD-17 is done and POSITIVE** — the vocabulary expansion shipped; read METHODS §15 before touching the candidate set again, particularly the finding that added senses are not purely distractors. **RD-21 (P1) corrects a premise RD-12/RD-13/RD-09/RD-10 all share** — read it before proposing reranking or retraining, and note its own caveat about the answer key. **RD-19 and RD-20 were filed out of RD-17 and are open:** RD-19 (P1) is that `GlossEmbedding.gloss` holds a human-written definition for all 519,793 answerable words while 332 of the 477 `Word` rows render empty — the app fetches the text, ranks on it, and discards it before display. RD-20 (P2) is that the eval harness's `dbMs` cannot see cold-cache latency by construction: it warms the database and runs 405 queries in sequence, so its p95 *improved* when the index grew 5.9×, while a server-side `EXPLAIN ANALYZE` measured the same scan at **61ms warm and 2,678ms cold**. **RD-09/RD-14/RD-15 are HELD, not open** — RD-16 measured their premises on 2026-08-28: RD-14's register gap is closed (+1.8pp), RD-09's corpus bet lost 7.0 points when run by proxy, and RD-15 depends on RD-14. Read METHODS §14 before proposing retraining again. **RD-12 is done and NEGATIVE** — off-the-shelf cross-encoder reranking was measured and rejected, so RD-13 (its serving path) stays blocked by its own gate; read METHODS §13 before proposing reranking again, because the 53pp ceiling it names is real and the tool that was supposed to reach it is not. "Build an eval harness" is already done — see "Evaluation" above; the open gap is RD-10's register coverage, not the harness itself.
 
 ## Commands
 
@@ -402,6 +461,9 @@ npm run build          # prod build
 npm run lint
 npx tsc --noEmit       # type-check (run before committing)
 npm run fetch-model    # download the ONNX model into models/ (idempotent; build runs it too)
+
+docker compose up --build web    # RD-23: the whole project in one image -> :3000
+docker compose up --build lab    # the same image, JupyterLab over both venvs -> :8888
 
 npm run build-viz      # rebuild /explain's two static assets (PCA snapshot + WordPiece vocab)
 npm run verify-viz     # RD-18's honesty gate — see below; run it after touching retrieval
@@ -461,4 +523,4 @@ npm run supplement:index -- --cell full_gloss_wikt_new --dry-run   # PAST THE GA
 - **Committed eval artifacts:** `eval/data/zipf-en.tsv` (1.7 MB), `eval/sets/*.tsv|jsonl`, and the reference runs `eval/runs/baseline.json` / `exact.json` / `filtered.json` / **`prod_gloss_shipped.json`**. **Rerank runs are not committed** — they carry a persisted shortlist and run ~5.8 MB, they describe a rejected experiment rather than a production path, and CLAUDE.md already cites uncommitted runs (`prod_gloss`, `prod_gloss_p100`) in its own tables. Regenerate with `npm run eval:rerank`; the `*.shortlist.jsonl` sidecars are gitignored. **`eval/runs/prod_wikt_shipped.json` is the current production path** and is what `npm run eval:prod` writes; `prod_gloss_shipped` is now the **pre-expansion** reference (RD-17 deliberately changed the `eval:prod` tag rather than let the script overwrite it), and `baseline`/`exact`/`filtered` describe the pre-cutover lemma index, which is the *rollback* path. Compare new runs against `prod_wikt_shipped` unless you specifically mean "versus what we replaced". Ignored: the rest of `eval/runs/`, `eval/audit/`, `eval/data/pool-manifest.json`. Vector cells (~230 MB) live outside the repo entirely — see `EVAL_CELL_DIR`.
 - **Don't pipe a loop's command through `tail`/`head` when you care whether it worked.** The pipeline reports the exit status of the *last* stage, so six consecutive failures reported success and wasted a 37-minute run. Check status per iteration, or use `PIPESTATUS`.
 - **`training/` commits the source and the lockfile, never the environment or the artifacts.** `training/.venv/`, `__pycache__/` and `training/artifacts/` (checkpoints, generated pairs, ONNX exports, pre-registrations) are gitignored; `training/rdlib/`, `training/notebooks/`, `training/tools/`, `pyproject.toml` and `uv.lock` are committed. **Notebooks are committed with outputs cleared** — a stored output is a number nobody can date. A checkpoint is a cache, not a record; the record is the pre-registration plus the run JSON.
-- Other docs: `README.md` (overview, local setup, API reference), `ARCHITECTURE.md` (system design), `DEPLOYMENT.md` (deploying to Vercel). Consolidated from five docs to three on 2026-08-26 — `SETUP.md` and `GETTING_STARTED.md` were near-duplicates of README's own setup section and were folded into it rather than kept as separate files.
+- Other docs: `README.md` (overview, local setup, API reference), `ARCHITECTURE.md` (system design), `DEPLOYMENT.md` (deploying to Vercel), `DOCKER.md` (the containerised surface, RD-23). Consolidated from five docs to three on 2026-08-26 — `SETUP.md` and `GETTING_STARTED.md` were near-duplicates of README's own setup section and were folded into it rather than kept as separate files.

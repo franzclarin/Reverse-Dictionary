@@ -425,8 +425,18 @@
           <div class="row-tags"><span>tooling</span><span>size: M</span><span>impact: unblocks every remaining &ldquo;train something&rdquo; ticket</span></div>
         </a>
       </li>
+      <li>
+        <a class="row" href="23-dockerize.html">
+          <div class="row-top">
+            <span class="row-title">RD-23 &middot; One image for the whole project</span>
+            <span class="badge badge-done">&check; Done</span>
+          </div>
+          <p class="row-sub">The repo had a container, and it covered the smallest surface: the notebooks, not the app, the model or the training environment. One <code>Dockerfile</code> now carries all of it &mdash; <code>docker compose up web</code> serves the site, <code>up lab</code> serves the notebooks, and the database stays in Neon because the 693,325-row index is not something a seed script can produce. Building it for linux found a real defect nobody could have seen on a Mac: <code>training/uv.lock</code> had been resolving a <b>CUDA</b> build of PyTorch, ~2.9 GB of libraries that can never execute there.</p>
+          <div class="row-tags"><span>tooling</span><span>size: M</span><span>impact: the whole project runs anywhere, and one lockfile got fixed</span></div>
+        </a>
+      </li>
     </ul>
   </section>
 
-  <footer class="done">18 tickets · generated from a live repo audit, 2026-08-26 · RD-12…RD-15 added 2026-08-27 · RD-12 and RD-16 closed as null results 2026-08-28 · RD-17 and RD-18 filed 2026-08-28 · RD-18 done 2026-08-28</footer>
+  <footer class="done">19 tickets · generated from a live repo audit, 2026-08-26 · RD-12…RD-15 added 2026-08-27 · RD-12 and RD-16 closed as null results 2026-08-28 · RD-17 and RD-18 filed 2026-08-28 · RD-18 done 2026-08-28 · RD-23 done 2026-08-31</footer>
 </div>
