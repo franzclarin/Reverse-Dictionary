@@ -7,15 +7,9 @@ export const metadata: Metadata = {
     "Type a description and watch the retrieval pipeline run: WordPiece tokens, one 384-dimensional vector, and the nearest word senses in the live index — with every approximation labelled.",
 };
 
-/**
- * RD-18's explainer.
- *
- * A server shell around one client component, the shape `app/search/page.tsx`
- * already uses. Nothing here loads the model: the page renders from the
- * committed snapshot under `public/viz/` and gets its numbers from
- * `/api/lookup`, so this route must NOT be given an
- * `outputFileTracingIncludes` entry for `models/**`.
- */
+/** The page that explains how search works. */
+// Nothing here loads the model — it draws from saved files and calls the API —
+// so never add this route to the model-bundling list in next.config.js.
 export default function ExplainPage() {
   return <ExplainClient />;
 }

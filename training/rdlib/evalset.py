@@ -1,17 +1,13 @@
 """
-The frozen evaluation set, and the gate that keeps it frozen.
+The frozen question set, and the gates that keep it honest.
 
-`eval/sets/v1.jsonl` is the benchmark every number in this project is measured
-against. It is frozen: a new version means a NEW FILENAME, never an in-place
-regeneration. An in-place edit is otherwise completely silent and invalidates
-every run already recorded, so `load_eval_set()` verifies the sha256 on every
-load and raises rather than warns.
+Every number in the project is measured against this. It never changes: a new
+version means a new filename. An edit in place is otherwise silent and
+invalidates every recorded run, so the fingerprint is checked on load.
 
-It also carries the training-side gate. Every query in this file was authored
-BLIND -- target word plus a one-word sense hint, no gloss, no dictionary -- and
-that blindness is the only thing making it worth anything against a model
-fine-tuned on WordNet glosses. `assert_disjoint()` is what stops a training run
-from quietly consuming it. Call it before every fit.
+Every question was written blind -- the word and a one-word hint, no dictionary
+open -- which is the only thing making it worth anything against a model trained
+on dictionary definitions. Call the disjointness check before every fit.
 """
 
 from __future__ import annotations
@@ -24,8 +20,7 @@ from pathlib import Path
 
 from .paths import FROZEN_SET
 
-# eval/sets/v1.jsonl, built 2026-08-19 from the reviewed v1-draft.tsv.
-# 405 rows: 312 authored (287 reachable + 25 coverage) and 93 gloss_tripwire.
+# The frozen set: 405 questions, 312 hand-written and 93 paraphrased.
 V1_SHA256 = "cc03e1347ff696fb253c92dfb8b9e7455c64b2122f711ed5c288f33b06c0ccc8"
 
 
@@ -44,11 +39,10 @@ class EvalRow:
     @property
     def acceptable(self) -> list[str]:
         """
-        Hand-authored synonyms that also count at rank 1.
+        Hand-written synonyms that also count as correct.
 
-        Only 133 of 312 authored rows carry one, so on the other 179 lenient
-        R@1 collapses to strict R@1 and the synonym-tie correction is only
-        partial. Deliberate MVP scope, not a bug -- METHODS 8.6.
+        Fewer than half the questions carry any, so for the rest the forgiving
+        score collapses into the strict one. A deliberate limit, not a bug.
         """
         return list(self.meta.get("acceptable") or [])
 
@@ -67,10 +61,10 @@ def load_eval_set(
     path: Path = FROZEN_SET, *, expect_sha256: str | None = V1_SHA256
 ) -> list[EvalRow]:
     """
-    Load the frozen set, verifying its hash.
+    Load the frozen set, checking its fingerprint.
 
-    Pass `expect_sha256=None` only for a genuinely new set file (v2), and record
-    the new hash the same way v1's is recorded here.
+    Skip the check only for a genuinely new set file, and record its fingerprint
+    the same way this one is recorded.
     """
     actual = sha256_file(path)
     if expect_sha256 is not None and actual != expect_sha256:
@@ -113,35 +107,31 @@ def authored(rows: list[EvalRow]) -> list[EvalRow]:
 
 def headline(rows: list[EvalRow]) -> list[EvalRow]:
     """
-    The 287-row authored-reachable slice -- every headline number in the project.
+    The hand-written, answerable questions -- every headline number.
 
-    Note the denominator deliberately stays 287 even though RD-17 found that
-    `capsize` and `loiter` have been answerable since RD-02: the set is frozen,
-    so the flags stay as recorded.
+    The total stays fixed even though two excluded words have since become
+    answerable: the set is frozen, so the flags stay as recorded.
     """
     return [r for r in authored(rows) if r.reachable]
 
 
 def coverage(rows: list[EvalRow]) -> list[EvalRow]:
     """
-    The 25 `reachable: false` rows -- a vocabulary-coverage probe.
+    The questions no dictionary we had could answer -- a coverage check.
 
-    Reported SEPARATELY and never folded into headline recall. Since RD-17 this
-    slice is scored rather than merely counted: a count cannot distinguish
-    "indexed" from "indexed and findable", which is the only question a
-    vocabulary change actually asks.
+    Reported separately, never folded into the headline, and scored rather than
+    counted: a count cannot tell "in the index" from "in the index and findable".
     """
     return [r for r in authored(rows) if not r.reachable]
 
 
 def tripwire(rows: list[EvalRow]) -> list[EvalRow]:
     """
-    93 pairs derived from `Word.definition`, carrying `meta.leakage`.
+    The 93 questions paraphrased from stored definitions.
 
-    CATASTROPHIC-REGRESSION DETECTOR ONLY -- never a headline number. These are
-    paraphrases of text the model was trained on, so recall here measures
-    memorisation. RD-16 used it legitimately for one thing: scoring it beside
-    the blind slice inside a single run to measure the register gap.
+    A detector for catastrophic breakage only, never a headline number -- these
+    paraphrase text the model was trained on, so a score here measures
+    memorisation. One legitimate use: measuring how much phrasing matters.
     """
     return [r for r in rows if r.source == "gloss_tripwire"]
 
@@ -162,26 +152,16 @@ def assert_disjoint(
     check_targets: bool = True,
 ) -> None:
     """
-    Refuse to let evaluation data into a training set.
+    Refuse to let test data into a training set.
 
-    `pairs` is whatever is about to be trained on, as (query_text, target_word).
+    The original model held nothing back, which is why its score cannot be
+    quoted. Repeating that is the easiest way to make every later number
+    worthless, so this raises rather than warns.
 
-    The original fine-tune was trained with `eval_on_start: False` and
-    `prediction_loss_only: True` -- 3 epochs, no evaluator, NO HELD-OUT SPLIT AT
-    ALL -- which is why its recorded 10.9% describes memorisation and cannot be
-    cited. Repeating that mistake is the single easiest way to make every number
-    downstream of a retrain worthless, so this raises rather than warns.
-
-    Two levels:
-      - query overlap is ALWAYS fatal. A verbatim eval query in training is
-        direct contamination.
-      - `check_targets` is fatal by default and is the stricter, more honest
-        setting: it also refuses any pair whose target word appears as an eval
-        target. Turning it off is defensible for a bi-encoder trained on the
-        full dictionary (the eval targets are ordinary English words and
-        excluding them biases the vocabulary), but it must be a DELIBERATE,
-        recorded choice -- pass `check_targets=False` explicitly and say why in
-        the notebook.
+    A test question appearing verbatim in training is always fatal. Checking the
+    answer words too is stricter and is the default; turning it off is
+    defensible for a model trained on the whole dictionary, but must be a
+    deliberate choice, made explicitly and explained.
     """
     if rows is None:
         rows = load_eval_set()

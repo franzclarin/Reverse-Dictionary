@@ -1,10 +1,9 @@
 """
-Reference vectors from the production embedder, for the encoder parity check.
+Numbers straight from the live model, for the parity check.
 
-Shells out to `training/tools/embed_reference.ts`, which imports the real
-`lib/embedder.ts`. Deliberately NOT a committed fixture: a stored vector file
-would keep passing after the served model changed, which is the one failure mode
-this check exists to catch.
+Runs the real serving code rather than reading a saved file. Deliberately not
+saved: a stored copy would keep passing after the served model changed, which is
+the one failure this check exists to catch.
 """
 
 from __future__ import annotations
@@ -22,11 +21,10 @@ TOOL = TRAINING_DIR / "tools" / "embed_reference.ts"
 
 def onnx_reference_vectors(texts: list[str] | None = None, timeout: int = 300) -> dict[str, list[float]]:
     """
-    Run the served ONNX embedder and return `{text: vector}`.
+    Run the live model and return its numbers for each text.
 
-    Requires `npx` and a populated `models/` directory -- run `npm run
-    fetch-model` at the repo root if the model is missing. The thrown error
-    names the command, matching how lib/embedder.ts reports the same problem.
+    Needs the model on disk -- run `npm run fetch-model` if it is missing. The
+    error names the command, the same way the app does.
     """
     if shutil.which("npx") is None:
         raise RuntimeError("npx not found on PATH; needed to run the TypeScript embedder")

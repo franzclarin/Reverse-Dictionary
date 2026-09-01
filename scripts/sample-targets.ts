@@ -1,15 +1,14 @@
 /**
- * Sample candidate eval targets, stratified by frequency band and token count.
+ * Pick candidate test words, spread across frequency and length.
  *
- * This produces a *candidate pool*, not the eval set. Random lemmas from
- * WordNet include a great deal no user would ever grope for ("ictodosaur",
- * "canulization"), so the pool is curated by hand afterwards — a query only
- * belongs in the benchmark if a real person could plausibly be reaching for
- * that word.
+ * This produces a candidate pool, not the question set. Random dictionary words
+ * include a great deal nobody would ever grope for, so the pool is curated by
+ * hand afterwards — a question only belongs in the benchmark if a real person
+ * could plausibly be reaching for that word.
  *
- * Deliberately emits the word and nothing else: no gloss, no definition, no
- * part of speech. The authoring protocol requires drafting blind, and a
- * sampler that printed glosses would break it before authoring started.
+ * Deliberately prints the word and nothing else: no definition, no part of
+ * speech. Questions must be written blind, and a sampler that printed
+ * definitions would break that before writing even started.
  *
  *   npx tsx scripts/sample-targets.ts > eval/audit/target-candidates.txt
  */
@@ -24,7 +23,7 @@ loadEnv();
 const prisma = new PrismaClient();
 const PER_CELL = 200;
 
-/** Mulberry32 — deterministic, so the candidate pool is reproducible. */
+/** A fixed random sequence, so the pool comes out the same every time. */
 function rng(seed: number): () => number {
   return () => {
     seed |= 0;
@@ -47,8 +46,8 @@ function shuffle<T>(items: T[], rand: () => number): T[] {
 async function main(): Promise<void> {
   const zipf = loadZipf();
 
-  // Lowercase entries only (the answerable pool), excluding the 93 words that
-  // back the gloss_tripwire slice so the two slices stay independent.
+    // Lowercase entries only, minus the words behind the leaked rows, so the two
+    // groups stay independent.
   const rows = await prisma.$queryRawUnsafe<{ word: string }[]>(
     `SELECT v.word
        FROM "VocabEmbedding" v

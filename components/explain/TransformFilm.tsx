@@ -4,38 +4,24 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Token } from "@/lib/viz/wordpiece";
 import type { ScreenRef } from "./PointCloud";
 
-/**
- * The transformation, performed rather than described (RD-18).
- *
- * A phrase splits into sub-words, each sub-word becomes a real block of 384
- * numbers, the blocks average into one, that one is scaled to unit length, and
- * it flies into the cloud. The intent is that watching it is enough — the prose
- * in the steps card explains the same thing again for anyone who wants it, but
- * the animation is not a decoration hanging off the text.
- *
- * EVERY NUMBER DRAWN HERE IS REAL. The tiles are `debug.tokenVectors` from
- * `/api/lookup`, which are the encoder's actual per-token output;
- * `scripts/verify-viz-snapshot.ts` asserts that their mean, normalised, is
- * exactly the query vector the database was searched with. Nothing is
- * synthesised to look like activity — which for this page is the whole point,
- * since a convincing picture of made-up data would be worse than no picture.
- *
- * Rendered on its own transparent canvas layered over `PointCloud`, sharing its
- * screen coordinates, so the hand-off at the end lands on the real projected
- * query position instead of somewhere that merely looks close.
- */
+// The animation: a phrase splits into pieces, each piece becomes a block of
+// numbers, the blocks average into one, and that one flies into the cloud.
+// Watching it should be enough on its own.
+//
+// Every number drawn here is real — they come from the same search the user
+// just ran, and a check proves the average shown is the one actually searched
+// with. A convincing picture of made-up data would be worse than no picture.
+//
+// Drawn on a clear canvas sitting exactly over the cloud, so the hand-off at
+// the end lands on the true position rather than near it.
 
 /** How long each pipeline stage holds, in ms. Index matches `STAGES`. */
 export const STAGE_DURATIONS = [1500, 2800, 3200, 2300, 1900, 2200, 2800, 3000];
 
-/**
- * Dwell per stage under `prefers-reduced-motion`.
- *
- * Reduced motion removes the MORPHS, not the sequence: each stage snaps to its
- * finished state and holds. Skipping the progression instead would leave the
- * film parked on stage one forever, which is not an accessible version of the
- * page, it is a broken one.
- */
+/** Timings for viewers who ask for less motion. */
+// They lose the movement between steps, not the steps themselves — each one
+// snaps to its finished state and waits. Dropping the sequence entirely would
+// leave the page stuck on step one, which is broken, not accessible.
 const REDUCED_STAGE_MS = 1200;
 
 /** The operation each stage performs, named. Index matches `STAGES`. */
@@ -88,13 +74,9 @@ function buildGroups(tokens: Token[]): Group[] {
   return groups;
 }
 
-/**
- * Pre-render each vector as a 16x24 image once, then scale it when drawing.
- *
- * At small tile sizes the individual cells are sub-pixel, and 384 tiny
- * fillRect calls per token per frame would both alias badly and cost more than
- * the rest of the frame put together.
- */
+/** Draw each block of numbers once as a small image, then just scale it. */
+// Drawing 384 separate cells every frame would look worse and cost more than
+// everything else on screen put together.
 function renderTile(vector: number[]): HTMLCanvasElement | null {
   if (typeof document === "undefined") return null;
   const canvas = document.createElement("canvas");
@@ -104,9 +86,8 @@ function renderTile(vector: number[]): HTMLCanvasElement | null {
   if (!ctx) return null;
 
   const image = ctx.createImageData(TILE_COLS, TILE_ROWS);
-  // Per-tile peak: normalisation only rescales a vector, so a shared scale would
-  // make the "set length to 1" beat invisible. The length change is told by the
-  // readout instead, and the pattern stays honestly comparable tile to tile.
+  // Each tile is scaled to its own brightest cell, so the patterns stay
+  // comparable. The change in length is reported in the readout instead.
   let peak = 0;
   for (const value of vector) peak = Math.max(peak, Math.abs(value));
   peak = peak || 1;
@@ -114,7 +95,7 @@ function renderTile(vector: number[]): HTMLCanvasElement | null {
   for (let i = 0; i < TILE_COLS * TILE_ROWS; i++) {
     const value = vector[i] ?? 0;
     const magnitude = Math.abs(value) / peak;
-    // Oxblood positive, ink negative — sign is real information.
+    // Red for positive, black for negative — the sign is real information.
     const [r, g, b] = value >= 0 ? [122, 46, 46] : [33, 29, 25];
     const alpha = 0.08 + magnitude * 0.92;
     const o = i * 4;
@@ -177,11 +158,8 @@ export default function TransformFilm({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const progress = useRef(0);
   const lastStage = useRef(stage);
-  /**
-   * Set the instant we ask for the next stage and cleared when it arrives.
-   * Without it the "progress is finished" branch fires on every frame between
-   * the request and React committing the new prop, skipping stages.
-   */
+  /** Marks that the next step has been asked for but has not arrived yet. */
+  // Without it, every frame in between re-asks and steps get skipped.
   const advanceRequested = useRef(false);
   const advanceRef = useRef(onAdvance);
   advanceRef.current = onAdvance;
@@ -214,8 +192,8 @@ export default function TransformFilm({
   const tiles = useMemo(() => tokenVectors.map(renderTile), [tokenVectors]);
   const meanTile = useMemo(() => (meanVector ? renderTile(meanVector) : null), [meanVector]);
   const finalTile = useMemo(
-    // Prefer the server's own vector so the last frame shows exactly what was
-    // searched with, not a client-side re-derivation of it.
+    // Use the server's own numbers, so the final frame shows exactly what was
+    // searched with rather than our own recalculation of it.
     () => (queryVector ? renderTile(queryVector) : normalisedVector ? renderTile(normalisedVector) : null),
     [queryVector, normalisedVector]
   );
@@ -418,9 +396,8 @@ export default function TransformFilm({
       context.stroke();
 
       // ---- the operation, named ---------------------------------------------
-      // Keyed off the stage, not the continuous timeline: scrubbing parks
-      // `progress` at 1, which pushes `t` onto the next stage's boundary and
-      // would name the operation after the one that has not started yet.
+      // Named from the step, not the clock: dragging the timeline parks the
+      // clock on the next boundary and would label the wrong operation.
       const operationLabel = OPERATION_LABELS[stage] ?? OPERATION_LABELS[OPERATION_LABELS.length - 1];
 
       context.globalAlpha = filmAlpha * (1 - flyMix);
@@ -442,8 +419,7 @@ export default function TransformFilm({
       context.textBaseline = "middle";
       placed.forEach((entry, i) => {
         const isSpecial = entry.token.special;
-        // Stagger the split left to right so you watch each word come apart
-        // rather than the whole line snapping at once.
+        // Stagger left to right, so you watch words come apart one at a time.
         const stagger = clamp01(
           (splitMix * (placed.length + 6) - entry.groupIndex) / 3
         );
@@ -515,8 +491,7 @@ export default function TransformFilm({
         context.imageSmoothingEnabled = false;
         context.drawImage(resultTile, x, y, tileSize * scale, tileH * scale);
 
-        // Length readout: the one thing normalisation visibly changes, since
-        // scaling a vector cannot change the pattern above it.
+        // The length is the only thing this step visibly changes.
         if (normMix > 0 && flyMix < 0.6) {
           const length = lerp(meanNorm, 1, normMix);
           context.globalAlpha = filmAlpha * normMix * (1 - flyMix);

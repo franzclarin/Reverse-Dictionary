@@ -1,11 +1,10 @@
 /**
- * The evaluation harness.
+ * The scoring harness.
  *
- * Measures the production retrieval path — `embed(query)` then pgvector top-k
- * over the index — against a frozen set of (description -> word) pairs. The
- * query is a mirror of `app/api/lookup/route.ts` via `lib/retrieval.ts`, and
- * the embedder is imported from `lib/embedder.ts` rather than reimplemented,
- * so the numbers describe production rather than a lookalike.
+ * Runs the real search — measure the question, then ask the database — against
+ * a fixed list of (description -> word) pairs. It calls the same search code
+ * and the same measuring code the live site uses, rather than its own copies,
+ * so the numbers describe production and not a lookalike.
  *
  *   npx tsx scripts/eval.ts --set eval/sets/v1.jsonl --tag baseline
  *   npx tsx scripts/eval.ts --set eval/sets/v1.jsonl --exact --tag exact
@@ -15,7 +14,7 @@
  *
  * Flags:
  *   --k <n>            results per query for the headline metrics (default 10)
- *   --probes <n>       ivfflat.probes (default 10, matching production)
+ *   --probes <n>       how hard to search (default 10, matching production)
  *   --exact            sequential scan — the true nearest-neighbour ceiling
  *   --filter-junk      restrict the pool with the Phase A junk predicate
  *   --index <table>    search an alternative index table in Postgres
@@ -23,24 +22,24 @@
  *                      exhaustive, so exact by construction)
  *   --per-sense        table has one row per (word, sense); dedupe by word
  *   --expansion-order <wordnet|zipf|index>
- *                      synset cells only: how to order the member words a
- *                      retrieved synset expands into.
+ *                      meaning-keyed files only: how to order the words a
+ *                      retrieved meaning expands into.
  *                      `wordnet` (default) uses WordNet's own sense-familiarity
  *                      order; `zipf` guesses the commonest mate first; `index`
  *                      keeps stored order
  *   --model <id>       embedding model override (for the base-model control)
  *   --rank-depth <n>   how deep to look for the target (default 100)
  *   --no-deep          skip the deep scan (headline metrics only)
- *   --rerank           RD-12: re-sort the retrieved shortlist with a cross-encoder
+ *   --rerank           re-sort the retrieved shortlist with a second model
  *                      before scoring. Gloss index only.
- *   --rerank-depth <n> how many synsets the cross-encoder re-sorts (default 50)
- *   --rerank-model <id>  cross-encoder to score with
- *   --rerank-quantized   load the int8 ONNX weights instead of fp32
- *   --rerank-input <gloss|lemma-gloss>
- *                      what text the cross-encoder sees per candidate
+ *   --rerank-depth <n> how many results the second model re-sorts (default 50)
+ *   --rerank-model <id>  which model to re-sort with
+ *   --rerank-quantized   load the smaller, faster weights
+ *   --rerank-input <gloss|lemma-gloss>   (definition, or word plus definition)
+ *                      what text the second model sees per candidate
  *   --rerank-sweep <a,b,c>
- *                      also report the metrics at these shallower rerank depths.
- *                      Free: a depth-D re-sort is a prefix of the depth-100 scores.
+ *                      also report the metrics at these shallower depths.
+ *                      Free: a shallow re-sort is a prefix of the deep one.
  *   --bands <n>        5 = fixed Zipf bands, 3 = data-driven terciles
  *   --freq <file>      Zipf table (default eval/data/zipf-en.tsv)
  *   --limit <n>        only score the first n rows (smoke testing)
@@ -98,11 +97,11 @@ const prisma = new PrismaClient();
 const RUNS_DIR = path.resolve(process.cwd(), "eval/runs");
 
 /**
- * Pre-registered, recorded in every run so it cannot be retrofitted:
- * 258 orphaned verbs out of 11,540 is 2.2% of the verb inventory — too small
- * to move a whole style slice. If `narrative` recall lands materially below
- * the other styles, the orphaned verbs are almost certainly NOT the
- * explanation, and the finding points back at the representation.
+ * Prediction written down before the numbers were seen, so it cannot be
+ * retrofitted: 258 stranded verbs out of 11,540 is far too small a share to
+ * move a whole category. So if narrative questions score clearly worse than the
+ * others, stranded verbs are almost certainly not the reason, and the finding
+ * points back at how words are represented.
  */
 const PREREGISTERED_NOTE =
   "Pre-registered (Phase A2/POS audit): orphaned verbs are 2.2% of the verb " +
@@ -133,15 +132,9 @@ function readSet(file: string): EvalRow[] {
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-/**
- * Hash of the eval set as it was when this run scored it.
- *
- * The set is frozen once built, so a run and its set are meant to be a matched
- * pair forever. Recording the hash *in the run* is what makes that checkable
- * later: `report.ts` compares it against the file on disk and shouts if they
- * have diverged, which is the only way an in-place edit would ever be caught.
- * Matches `build-eval-set.ts` — both hash the file's exact bytes.
- */
+/** Fingerprint of the question set as it was when this run scored it. */
+// The set never changes once built, so a run and its set are a matched pair
+// forever. Recording the fingerprint is what makes an edit to it detectable.
 function sha256File(file: string): string | null {
   try {
     return crypto
@@ -172,16 +165,10 @@ const METRICS_HEADER =
   `  ${"slice".padEnd(22)} ${"n".padStart(4)}  ${"R@1".padStart(6)} ${"R@3".padStart(6)} ${"R@10".padStart(6)}  ` +
   `${"MRR".padStart(5)}  ${"lenR@1".padStart(6)}  ${"echo".padStart(6)}`;
 
-/**
- * Lenient/strict recall at increasing depth — the reranker budget, stated.
- *
- * Read as: recall at depth D is the ceiling for a PERFECT reranker over a
- * D-deep shortlist, and `1 - R@maxDepth` is the share no reranker of any depth
- * can reach, because the target was never retrieved. Keeping the two apart is
- * the point; RD-12's ceiling is 77.0%, not 100%, and citing the wrong one
- * repeats the mistake of quoting a number measured under conditions that do
- * not hold.
- */
+/** How often the answer appears, looking further and further down the list. */
+// Read it as the best a perfect re-sorter could do at each depth. Whatever is
+// missing from the deepest column was never found at all, so no amount of
+// re-sorting reaches it. Keeping those two apart is the whole point.
 const LADDER_DEPTHS = [1, 3, 10, 50, 100];
 
 function recallLadder(results: QueryResult[], maxDepth: number): string[] {
@@ -225,7 +212,7 @@ function lengthBucket(query: string): string {
   return "17+ words";
 }
 
-/** Fixed Zipf bands, or data-driven terciles when the fixed ones are lopsided. */
+/** Fixed frequency bands, or even thirds when the fixed ones come out lopsided. */
 function bandLabeller(results: QueryResult[], bands: number): (r: QueryResult) => string | undefined {
   if (bands !== 3) return (r) => (r.meta.zipf === undefined ? "unknown" : bandOf(r.meta.zipf as number));
 
@@ -275,9 +262,8 @@ function compare(fileA: string, fileB: string): void {
   console.log(metricsLine(a.tag, score(paired.map((p) => p.ra))));
   console.log(metricsLine(b.tag, score(paired.map((p) => p.rb))));
 
-  // The reranker budget for each run, side by side: how much of the gap between
-  // R@1 and the deepest column is reordering work, and how much is never
-  // retrieved and so out of a reranker's reach entirely.
+    // Side by side: how much of the gap is work a re-sorter could do, and how
+    // much is answers that were never found and so are out of its reach.
   const depthOf = (r: { config: Record<string, unknown> }) => Number(r.config.rankDepth ?? 10);
   const ladderDepth = Math.min(depthOf(a), depthOf(b));
   if (ladderDepth > 10) {
@@ -292,27 +278,10 @@ function compare(fileA: string, fileB: string): void {
     for (const line of recallLadder(scopeOf(paired.map((q) => q.rb)), ladderDepth)) console.log(line);
   }
 
-  /**
-   * Both metrics get their own paired test.
-   *
-   * METHODS §9a fixed the decision rule to resolve on LENIENT R@1 — rank 1
-   * against the hand-authored `acceptable[]` list — because strict R@1 is
-   * tie-deflated on a gloss index, where synset mates hold identical vectors.
-   * Until RD-12 this function tested strict rank-1 only, so the one number the
-   * rule actually resolves on was the one number it could not see.
-   *
-   * They are reported side by side, never merged: a reranker that reorders
-   * across synonyms moves strict R@1 without moving lenient R@1 on the 133 rows
-   * that carry `acceptable[]`, and moves both on the other 179 (METHODS §8.6).
-   * One figure alone would misattribute that.
-   */
-  // §9a resolves on the HEADLINE SLICE — authored and reachable — not on every
-  // row in the file. Scoring the paired test over all 405 would dilute it with
-  // the 93 quarantined tripwire rows (leakage=paraphrase, explicitly never a
-  // headline number) and the 25 unreachable coverage rows, and would divide the
-  // delta by the wrong denominator: a 3-point move on 287 queries reads as 2.1
-  // over 405. Every other number this project records is the 287-row slice, and
-  // a verdict line has to be on the same footing as the table beside it.
+    /** Both measures get their own test, reported side by side and never merged. */
+    // Scored on the headline questions only — the hand-written, answerable ones.
+    // Including the rest would dilute the result and divide it by the wrong total,
+    // so a verdict would not match the table printed beside it.
   const scoped = paired.filter(
     (q) => q.ra.source === "authored" && q.ra.meta.reachable !== false
   );
@@ -326,8 +295,8 @@ function compare(fileA: string, fileB: string): void {
     const regressed = scoped.filter((q) => hit(q.ra) && !hit(q.rb));
     const won = scoped.filter((q) => !hit(q.ra) && hit(q.rb));
     const { p, n } = mcnemar(regressed.length, won.length);
-    // Difference of the two runs' recall on this slice — which, for a binary
-    // rank-1 outcome, is exactly (wins - regressions) / n.
+        // The gap between the two runs, which for a right/wrong outcome is exactly
+        // wins minus losses, over the number of questions.
     const delta = (won.length - regressed.length) / (scoped.length || 1);
 
     console.log(
@@ -346,9 +315,9 @@ function compare(fileA: string, fileB: string): void {
         ` — the ${scoped.length - n} queries both runs agree on carry no information here.`
     );
     if (decisive) {
-      // Rendered from the delta rather than left to a reader's optimism: a
-      // positive result below the pre-committed ~6-point bar is a NULL RESULT
-      // and is not to be acted on, significance notwithstanding.
+            // Stated outright rather than left to the reader's optimism: a gain below
+            // the bar agreed in advance is a null result and is not to be acted on,
+            // however convincing the statistics look.
       const verdict =
         delta >= 0.06 && p < 0.05
           ? "WIN under 9a"
@@ -367,13 +336,11 @@ function compare(fileA: string, fileB: string): void {
   testRank1("lenient", (r) => r.lenientRank, true);
   const { wins, regressions } = testRank1("strict", (r) => r.rank, false);
 
-  // RD-17: the coverage slice, paired and on its own denominator.
-  //
-  // Kept out of the McNemar above on purpose. These rows are flagged
-  // `reachable: false` precisely because no vocabulary could answer them, so
-  // including them in the headline test would mix "did ranking improve?" with
-  // "did the candidate set grow?" — two different questions whose answers can
-  // point opposite ways. Carried beside recall the way echo is, never inside it.
+    // The coverage questions, tested separately and on their own total.
+    //
+    // Deliberately outside the main test. These are questions no dictionary we had
+    // could answer, so folding them in would mix "did ranking improve?" with "did
+    // the word list grow?" — two questions whose answers can point opposite ways.
   const coverage = paired.filter((q) => q.ra.meta.reachable === false);
   if (coverage.length) {
     const found = (rows: QueryResult[]) => rows.filter((r) => r.lenientRank === 1).length;
@@ -422,28 +389,21 @@ function compare(fileA: string, fileB: string): void {
   console.log(`\n  ${PREREGISTERED_NOTE}\n`);
 }
 
-// ------------------------------------------------------- synset expansion
+// ------------------------------------------- expanding meanings into words
 
 type ExpansionOrder = "wordnet" | "zipf" | "index";
 
 /**
- * How a retrieved synset is unpacked into the member words the answer key is
- * written in.
+ * How a retrieved meaning is unpacked into the words the answer key uses.
  *
- * Synset mates carry bit-identical vectors, so retrieval genuinely cannot
- * separate them: this is a POLICY, not a result. It must be chosen deliberately,
- * and it must not be able to see the answer key.
+ * Words sharing a meaning have identical numbers, so search genuinely cannot
+ * tell them apart. This is therefore a policy, not a result — it has to be
+ * chosen deliberately, and it must not be able to see the answer key.
  *
- *   wordnet  the order WordNet itself lists a synset's words in, which is by
- *            sense familiarity. Independent of this benchmark, and the best of
- *            the three at putting the authored target first (51.8% of
- *            multi-word synsets against 42.7% for zipf). Production default.
- *   zipf     commonest word first. Defensible a priori — if you cannot tell
- *            `bungle` from `botch`, guess the commoner — but measurably the
- *            worst of the three here.
- *   index    stored member order. Neutral only because the pool is now shuffled;
- *            before that fix this WAS the answer key (METHODS.md §12). Kept for
- *            comparison, never for production.
+ *   wordnet  the dictionary's own order, most familiar sense first. Independent
+ *            of this test, and the best of the three. The default.
+ *   zipf     commonest word first. Reasonable in principle, worst in practice.
+ *   index    stored order. For comparison only, never for production.
  */
 function expansionOrderFn(kind: ExpansionOrder): ExpandOrder {
   if (kind === "index") return (_key, members) => members;
@@ -454,7 +414,7 @@ function expansionOrderFn(kind: ExpansionOrder): ExpandOrder {
     return (_key, members) => [...members].sort((a, b) => rank(b) - rank(a));
   }
 
-  // WordNet's own within-synset ordering, read straight from `data.<pos>`.
+    // The dictionary's own ordering, read straight from its data files.
   const wnOrder = new Map<string, Map<string, number>>();
   for (const pos of POS_LIST) {
     for (const sense of readSenses(pos)) {
@@ -466,7 +426,7 @@ function expansionOrderFn(kind: ExpansionOrder): ExpandOrder {
   return (key, members) => {
     const positions = wnOrder.get(key);
     if (!positions) return members;
-    // Anything WordNet does not list keeps its place after everything it does.
+        // Anything the dictionary doesn't list keeps its place after everything it does.
     return [...members].sort(
       (a, b) =>
         (positions.get(a.toLowerCase()) ?? Number.MAX_SAFE_INTEGER) -
@@ -477,17 +437,10 @@ function expansionOrderFn(kind: ExpansionOrder): ExpandOrder {
 
 // ------------------------------------------------------------ scoring a row
 
-/**
- * Score one query's result lists into a `QueryResult`.
- *
- * Extracted so the rerank depth sweep scores its alternate orderings through
- * the SAME code as the headline. Two scoring implementations would let a sweep
- * table disagree with the run it is printed beside for reasons nobody could
- * find.
- *
- * `top` (k results) drives what is reported and the echo rate; `ranked` (the
- * deep list) drives the target's true rank.
- */
+/** Score one question's results. */
+// Shared with the depth sweep on purpose. Two scoring implementations would let
+// a sweep table disagree with the run printed beside it, for reasons nobody
+// could find.
 function measure(
   row: EvalRow,
   top: ResultRow[],
@@ -531,22 +484,14 @@ function measure(
 
 // ------------------------------------------------------------ rerank stage
 
-/**
- * Re-sort the first `depth` retrieved synsets by cross-encoder score, leaving
- * the tail exactly as retrieval ordered it.
- *
- * The tail matters: `rank` is measured to `--rank-depth` (100), so appending
- * the un-reordered remainder keeps the deep-rank statistic comparable against
- * a non-rerank run instead of silently truncating the measurement to the
- * shortlist. It is also what a serving reranker actually does.
- *
- * The tie-break is written out rather than left to sort stability. Equal
- * cross-encoder scores fall back to retrieval order, which is the only
- * answer-key-independent order available — METHODS §12 is an entire section
- * about a tie-break that quietly encoded the answer key, and the lesson there
- * is that a tie policy has to be a decision on the page, not an emergent
- * property of whichever sort the runtime happens to use.
- */
+/** Re-sort the first few results with the second model, leaving the rest alone. */
+// The tail is kept because the answer's true position is measured much deeper
+// than the part being re-sorted; dropping it would silently shorten the
+// measurement. It is also what a real re-sorting step would do.
+//
+// Ties fall back to search order, spelled out rather than left to whichever
+// sort the language happens to use. A tie rule has to be a decision on the
+// page: an earlier one quietly encoded the answer key.
 function rerankOrder(
   hits: GlossSynsetHit[],
   scores: number[],
@@ -560,19 +505,10 @@ function rerankOrder(
   return [...head.map((h) => h.hit), ...hits.slice(depth)];
 }
 
-/**
- * Which candidate set a Postgres index holds, READ FROM THE INDEX (RD-17).
- *
- * A cell states its vocabulary in its metadata; a live table has to be asked.
- * Assuming it from the table name would be exactly the kind of label that goes
- * stale the moment someone runs a migration, and the failure would be silent —
- * two runs against genuinely different candidate sets, tabled side by side as if
- * their absolute recall meant the same thing.
- *
- * The supplement is namespaced (`wikt:<word>:<pos>:<n>`), so one indexed
- * existence check answers it. Undefined for the lemma index, which has no
- * `synsetKey` and no supplement to hold.
- */
+/** Which dictionaries a live index holds — asked, not assumed. */
+// Guessing from the table's name is exactly the kind of label that goes stale
+// after a migration, and the failure would be silent: two runs over genuinely
+// different word lists, tabled side by side as if their scores meant the same.
 async function postgresVocabulary(
   index: string
 ): Promise<"wordnet" | "wordnet+wiktionary" | undefined> {
@@ -583,8 +519,8 @@ async function postgresVocabulary(
     );
     return row?.has ? "wordnet+wiktionary" : "wordnet";
   } catch {
-    // A probe that cannot run must not take the run down with it — the field is
-    // provenance, not a measurement.
+        // A check that cannot run must not take the whole run down with it — this is
+        // a record of what was used, not a measurement.
     return undefined;
   }
 }
@@ -604,17 +540,16 @@ async function run(): Promise<void> {
   const exact = has("--exact");
   const filterJunk = has("--filter-junk");
   const index = arg("--index") ?? DEFAULT_INDEX;
-  // Undefined unless asked for, so each index contributes its own production
-  // default (lemma 10, gloss 40) rather than having the lemma value imposed on
-  // everything. Recorded below as the value actually used, never as "10".
+    // Left unset unless asked for, so each index uses its own setting rather than
+    // having another index's imposed on it. Recorded below as the value actually
+    // used, never as a guess.
   const probes = has("--probes") ? numArg("--probes", PRODUCTION_PROBES) : undefined;
   const effectiveProbes = probes ?? (index === GLOSS_INDEX ? GLOSS_PROBES : PRODUCTION_PROBES);
   const indexFile = arg("--index-file");
   const perSense = has("--per-sense");
 
-  // The Phase E cells live in local files rather than Postgres: the Neon
-  // project is at its 512 MB limit with VocabEmbedding alone. A brute-force
-  // scan of the pool is exact, so these runs carry no index error at all.
+    // Experiments live in local files rather than the database. Searching a file
+    // checks every row, so those runs carry no index shortcuts at all.
   let local: LocalIndex | undefined;
   if (indexFile) {
     local = loadIndex(indexFile);
@@ -623,16 +558,11 @@ async function run(): Promise<void> {
         `${local.meta.distinctWords.toLocaleString()} distinct words, model ${local.meta.model}`
     );
   }
-  // A synset cell stores one row per synset and must expand to member words
-  // before anything can be scored against a word-level answer key. Ordering is
-  // by descending Zipf: where retrieval genuinely cannot separate two synonyms
-  // (their vectors are identical), the commoner word is the better guess.
+    // A meaning-keyed experiment stores one row per meaning and has to be expanded
+    // into words before it can be scored against a word-level answer key.
   const synsetCell = local?.meta.variant === "gloss_synset";
-  // Synset mates are bit-identical vectors, so which one surfaces first is a
-  // pure tie-break, not a retrieval result. `zipf` is a deliberate policy —
-  // guess the commoner word. `index` keeps the stored order, which is the same
-  // arbitrary order a per-sense cell's stable sort leaves mates in, and is what
-  // makes a synset cell comparable to a per-sense one on one held-constant axis.
+    // Words sharing a meaning have identical numbers, so which one comes first is
+    // purely a tie-break, not a result. Each option below is a deliberate policy.
   const expansionOrder = (arg("--expansion-order") ?? "wordnet") as ExpansionOrder;
   if (!["wordnet", "zipf", "index"].includes(expansionOrder)) {
     console.error(`--expansion-order must be wordnet|zipf|index, got "${expansionOrder}"`);
@@ -652,13 +582,10 @@ async function run(): Promise<void> {
     );
   }
 
-  // The query encoder MUST match the model the cell was built with. Getting this
-  // wrong is silent and fatal: embedding queries with the fine-tune while the
-  // documents were encoded by the base model compares vectors from two different
-  // spaces, and every number that comes out is meaningless. It reads as a
-  // representation result. An earlier version defaulted to the production
-  // embedder regardless of the cell, which would have invalidated both base-model
-  // arms of the 2x2 while reporting the cell's model in the run config.
+    // The model measuring the questions MUST be the one the experiment was built
+    // with. Getting it wrong is silent and fatal: it compares numbers from two
+    // different scales, and every result that comes out is meaningless while
+    // reading like a real finding.
   const explicitModel = arg("--model");
   const model = explicitModel ?? local?.meta.model;
   const usesProductionEmbedder = !model || model === PRODUCTION_MODEL;
@@ -675,7 +602,7 @@ async function run(): Promise<void> {
   const rankDepth = numArg("--rank-depth", 100);
   const deep = !has("--no-deep") && rankDepth > k;
 
-  // ------------------------------------------------------------- RD-12 rerank
+  // -------------------------------------------------------------- re-sorting
   const rerank = has("--rerank");
   const rerankModel = arg("--rerank-model") ?? DEFAULT_RERANK_MODEL;
   const rerankQuantized = has("--rerank-quantized");
@@ -688,10 +615,9 @@ async function run(): Promise<void> {
     .sort((a, b) => a - b);
 
   if (rerank) {
-    // Refuse rather than silently ignore, exactly as the gloss path in
-    // scripts/lib/retrieval.ts refuses --exact/--filter-junk/--per-sense: a run
-    // tagged `--rerank` that quietly reranked nothing would put a false claim
-    // in eval/runs/*.json, and nobody would ever catch it.
+        // Refuse rather than quietly ignore: a run labelled as re-sorted that never
+        // re-sorted anything would put a false claim in a saved result file, and
+        // nobody would ever catch it.
     if (indexFile) {
       console.error("--rerank cannot apply to a local cell: the cells store vectors, not gloss text.");
       process.exitCode = 1;
@@ -735,8 +661,8 @@ async function run(): Promise<void> {
   let rows = readSet(setFile);
   if (Number.isFinite(limit)) rows = rows.slice(0, limit);
 
-  // The eval set already carries a raw Zipf per row; --freq overrides it so a
-  // different frequency source can be swapped in without rebuilding the set.
+    // Each question already carries a word-frequency figure; this flag swaps in a
+    // different source without rebuilding the set.
   const freqFile = arg("--freq");
   if (freqFile) {
     const table = loadZipf(freqFile);
@@ -757,15 +683,12 @@ async function run(): Promise<void> {
     perSense,
     exactByConstruction: Boolean(indexFile),
     poolScope: local?.meta.note,
-    // Cells of different scale are not comparable. Recorded per run so
-    // `report.ts` can flag a cross-scale comparison instead of tabling it as
-    // if the two numbers meant the same thing.
+        // Experiments of different sizes are not comparable. Recorded per run so a
+        // mismatched comparison gets flagged rather than tabled as if it were fair.
     poolScale: local ? scaleOf(local.meta) : undefined,
-    // RD-17: which dictionary the candidates came from. A separate axis from
-    // scale — two cells can both be "full" and still hold different candidate
-    // sets, and absolute recall across those is no more comparable than across
-    // scales. `report.ts` reads this to say which of the two numbers beside it
-    // is the regression test and which is the capability.
+        // Which dictionaries the candidates came from — tracked apart from size,
+        // because two experiments can be the same size and still hold different
+        // candidates, which makes their scores just as incomparable.
     vocabulary: local ? vocabularyOf(local.meta) : await postgresVocabulary(index),
     supplementArm: local?.meta.supplementArm,
     filterVersion: local?.meta.filterVersion,
@@ -784,11 +707,9 @@ async function run(): Promise<void> {
     rerankQuantized: rerank ? rerankQuantized : undefined,
     rerankInput: rerank ? rerankInput : undefined,
     rerankDepth: rerank ? rerankDepth : undefined,
-    // `dbMs` means something DIFFERENT in a rerank run and the difference is
-    // recorded rather than left to be discovered. A non-rerank Postgres run
-    // times a `LIMIT k` query and issues the deep scan separately and untimed;
-    // a rerank run issues ONE `LIMIT rankDepth` query and slices it, so its
-    // `dbMs` is the deep query. Latency is not comparable across the two.
+        // Database timings mean something different in a re-sorting run, so which
+        // kind this was is recorded rather than left to be discovered later. The two
+        // are not comparable.
     dbTiming: rerank ? `single LIMIT ${rankDepth} query` : undefined,
     rows: rows.length,
     ranAt: new Date().toISOString(),
@@ -799,8 +720,11 @@ async function run(): Promise<void> {
     console.log(`  ${key.padEnd(12)} ${value}`);
   }
 
-  // Warm the embedder BEFORE timing. ONNX cold start is seconds; letting it
-  // land on query #1 would destroy the latency percentiles.
+    // Load the model before timing starts. Its first use takes seconds, and
+    // letting that land on question one would wreck the timing figures.
+    //
+    // This is the live site's own measuring code, deliberately — the harness must
+    // not carry a second copy of it.
   process.stdout.write("\n  warming embedder... ");
   // `embed` is the production path from lib/embedder.ts and is used whenever the
   // production model is what we want — the harness must not have a second
@@ -811,8 +735,8 @@ async function run(): Promise<void> {
   console.log(`${Date.now() - warmStart}ms`);
 
   if (rerank) {
-    // Same reason the embedder is warmed: ONNX session init is seconds, and
-    // letting it land on query #1 destroys the latency percentiles.
+        // Same reason as above: the first use takes seconds, and letting it land on
+        // question one would wreck the timing figures.
     process.stdout.write(
       `  warming reranker ${rerankModel}${rerankQuantized ? " (int8)" : ""}... `
     );
@@ -822,18 +746,14 @@ async function run(): Promise<void> {
   }
 
   if (!local) {
-    // Warm the DATABASE for the same reason, and one more besides. Neon
-    // auto-suspends its compute, so the first query of a run pays several
-    // seconds of wake-up: it lands on query #1 and wrecks the p50 exactly as an
-    // ONNX cold start would (`prod_gloss_shipped.json` records dbMs=6606 on its
-    // first row against a p50 of ~479). Worse, that wake-up can exceed Prisma's
-    // default 2s interactive-transaction `maxWait` and abort the run outright
-    // with "Transaction not found" before a single row is scored.
-    //
-    // Warmed through the SAME `search()` the run uses, not a bespoke `SELECT 1`
-    // — connecting is only half of it; the IVFFlat probe pages want to be in
-    // cache too, and a second retrieval path here would be the very thing this
-    // harness refuses to have.
+        // Wake the database up first, for the same reason and one more besides. It
+        // goes to sleep when idle, so the first query pays several seconds — enough
+        // to wreck the timings, and sometimes enough to abort the whole run before a
+        // single question is scored.
+        //
+        // Warmed through the very same search the run uses, not a token query:
+        // connecting is only half of it, and a second search path here is exactly
+        // what this harness refuses to have.
     process.stdout.write("  warming database... ");
     const dbWarmStart = Date.now();
     const warmVector = await encode("warm up the database before any timing starts");
@@ -843,15 +763,13 @@ async function run(): Promise<void> {
   console.log("");
 
   const results: QueryResult[] = [];
-  // The rerank depth sweep: a depth-D re-sort is a prefix of the depth-100
-  // cross-encoder scores, so every shallower depth is scored from the SAME
-  // forward passes rather than from another run. That is what makes RD-12's
-  // "sweep the shortlist depth the way GLOSS_PROBES was swept" cost one run.
+    // Sweeping the depth is free: a shallow re-sort is just the front of a deep
+    // one, so every depth is scored from the same work rather than another run.
   const sweepResults = new Map<number, QueryResult[]>(
     rerankSweep.map((depth) => [depth, [] as QueryResult[]])
   );
-  // Full shortlists including gloss text, written beside the run. Kept out of
-  // the run JSON itself so a committed reference run stays a reviewable size.
+    // The full shortlists, written to a file beside the run rather than inside it,
+    // so a saved reference run stays a reviewable size.
   const shortlistRows: unknown[] = [];
   let done = 0;
 
@@ -860,9 +778,9 @@ async function run(): Promise<void> {
     const raw = await encode(row.query);
     const embedMs = Date.now() - t0;
 
-    // A quantized or truncated cell needs the query put into the same space —
-    // a halfvec column casts the query too, so applying the rounding to the
-    // documents alone would flatter the result. No-op for a plain fp32 cell.
+        // A rounded or shortened experiment needs the question given the same
+        // treatment, or the cost of doing it looks smaller than it is. Does nothing
+        // for a plain, full-precision experiment.
     const vector = local ? prepareQuery(local.meta, raw) : raw;
 
     const runSearch = (depth: number) =>
@@ -870,9 +788,9 @@ async function run(): Promise<void> {
         ? Promise.resolve(searchLocal(local, vector, { k: depth, perSense }))
         : search(prisma, vector, { k: depth, probes, exact, filterJunk, index, perSense });
 
-    // The deep scan finds the target's true rank. It answers whether a wider
-    // reranker could ever help: a target at rank 40 is recoverable, one at rank
-    // 5,000 is not.
+        // Look deep to find where the right answer really came. That answers whether
+        // re-sorting could ever help: position 40 is recoverable, position 5,000
+        // is not.
     let top: ResultRow[];
     let ranked: ResultRow[];
     let dbMs: number;
@@ -881,12 +799,9 @@ async function run(): Promise<void> {
     const sweepRanked = new Map<number, ResultRow[]>();
 
     if (local) {
-      // ONE exhaustive scan serves both depths. The scan is exact and
-      // deterministic, so the top-k is literally a prefix of the top-`depth`.
-      // Scanning twice would double the cost of a full-scale gloss cell —
-      // 204,549 rows x 384 dims is ~79M multiply-adds per scan — to recompute
-      // an answer already in hand. Latency from a local cell is meaningless
-      // anyway; the report suppresses it.
+            // One pass serves both depths: the scan is exact and repeatable, so the
+            // short list is literally the front of the long one. Scanning twice would
+            // double the cost to recompute an answer already in hand.
       const depth = deep ? rankDepth : k;
       const t1 = Date.now();
       ranked = synsetCell
@@ -895,12 +810,9 @@ async function run(): Promise<void> {
       dbMs = Date.now() - t1;
       top = ranked.slice(0, k);
     } else if (rerank) {
-      // ONE deep query, then slice — not the two-query shape below. The
-      // cross-encoder needs the shortlist AND its gloss text, and a separate
-      // shallow query for `top` would rerank a list the deep query had already
-      // ordered differently. Consequence, recorded in the run config: `dbMs`
-      // here is the depth-`rankDepth` query, so it is not comparable to a
-      // non-rerank run's `dbMs`.
+            // One deep query, then slice it — not two separate queries. The second
+            // model needs the whole shortlist and its definitions, and a separate
+            // shallow query would re-sort a differently ordered list.
       const t1 = Date.now();
       const hits = (await searchGlossSynsets(
         prisma,
@@ -920,16 +832,13 @@ async function run(): Promise<void> {
       );
       rerankMs = Date.now() - t2;
 
-      // Rerank the SYNSETS, then expand. Doing it the other way round would let
-      // expandSynsets() dedupe and truncate first, so the cross-encoder would
-      // reorder a list that had already thrown away its tail.
-      //
-      // NOTE: each word still inherits its synset's COSINE, so the run's
-      // `similarities` are no longer descending — order now carries the
-      // cross-encoder's judgement while the number carries retrieval's. Fine
-      // offline, where only order is scored. It is not fine in the serving
-      // path, which renders that number to users as a percentage; RD-13 has to
-      // decide what the field means before any of this reaches a page.
+            // Re-sort the meanings, then expand into words. The other way round would
+            // throw away the tail before the second model ever saw it.
+            //
+            // Note that each word keeps its original score, so the saved scores no
+            // longer fall in order: the order now carries the second model's opinion
+            // while the number carries the first's. Fine offline, where only order is
+            // scored. Not fine on a page that shows that number to a user.
       ranked = expandSynsets(rerankOrder(hits, scores, rerankDepth), rankDepth);
       top = ranked.slice(0, k);
 
@@ -955,9 +864,8 @@ async function run(): Promise<void> {
         sweepRanked.set(depth, expandSynsets(rerankOrder(hits, scores, depth), rankDepth));
       }
     } else {
-      // Against Postgres the two are genuinely different queries (LIMIT k vs
-      // LIMIT depth), so the deep scan stays separate and untimed — it must not
-      // contaminate the latency figures.
+            // Against the database these really are two different queries, so the deep
+            // one stays separate and untimed and cannot pollute the timing figures.
       const t1 = Date.now();
       top = await runSearch(k);
       dbMs = Date.now() - t1;
@@ -1003,17 +911,13 @@ async function run(): Promise<void> {
       `\n  coverage slice: ${unreachable.length} targets flagged absent from the vocabulary; ` +
         `${found} retrieved within rank depth`
     );
-    // Scored in full since RD-17, not just counted. Vocabulary expansion is the
-    // one change that moves this slice, and a bare count cannot say whether a
-    // newly-indexed word RANKS — which is the whole question, since a word that
-    // is present but never surfaces has not been added in any useful sense.
-    //
-    // Reported HERE, beside headline recall and never folded into it. The
-    // headline slice is `reachable !== false`, and `meta.reachable` is stored
-    // truth inside a frozen file, so adding vocabulary cannot move that
-    // denominator. That is what keeps the comparison honest: RD-17's warning
-    // that "a strictly better app can score 1.7 points worse" describes a trap
-    // this harness does not fall into, and this line is why it stays that way.
+        // Scored properly, not just counted. A bare count cannot say whether a
+        // newly added word actually ranks, which is the whole question — a word
+        // that is present but never surfaces has not really been added.
+        //
+        // Reported here beside the headline and never folded into it. The headline
+        // set is fixed, so adding words cannot quietly move its denominator. That is
+        // what keeps the comparison honest.
     console.log(METRICS_HEADER);
     console.log(metricsLine("coverage (unreachable)", score(unreachable)));
   }
@@ -1096,8 +1000,8 @@ async function run(): Promise<void> {
   }
 
   if (rerank) {
-    // Carried the way PREREGISTERED_NOTE is: attached to the numbers rather
-    // than filed somewhere a future run would have to go looking for.
+        // Attached to the numbers themselves, rather than filed somewhere a future
+        // run would have to go looking for it.
     console.log(`\n  ${RERANK_FINDING}`);
   }
 
@@ -1124,9 +1028,9 @@ async function run(): Promise<void> {
   console.log(`\n  wrote ${path.relative(process.cwd(), outPath)}`);
 
   if (shortlistRows.length) {
-    // Sidecar, not inlined: gloss text for 100 candidates x 405 rows would
-    // quadruple a committed reference run for detail only a re-scoring or an
-    // audit ever reads. Gitignored; the run JSON keeps the compact form.
+        // Written to its own file, not inlined: the definitions for every candidate
+        // would bloat a saved reference run several times over, for detail only a
+        // re-scoring or an audit ever reads.
     const shortlistPath = path.join(RUNS_DIR, `${tag}.shortlist.jsonl`);
     fs.writeFileSync(
       shortlistPath,

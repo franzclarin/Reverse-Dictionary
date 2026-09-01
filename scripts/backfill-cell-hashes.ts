@@ -1,25 +1,19 @@
 /**
- * Backfill `inputsSha256` / `vectorsSha256` onto cells built before those
- * fields existed.
+ * Add fingerprints to experiment files built before they were recorded.
  *
- * WHY. During an interrupted rebuild, nine concurrent processes wrote
- * overlapping cell outputs. The surviving files were argued to be correct from
- * timestamps and throughput rates — sound reasoning, but inference, and every
- * downstream number depends on these files being what they claim. Backfilling
- * the fingerprint converts the argument into a record.
+ * A half-finished parallel rebuild once left overlapping output. The surviving
+ * files were argued to be correct from timestamps and speeds — sound reasoning,
+ * but inference, and every number downstream depends on those files being what
+ * they claim. A fingerprint turns the argument into a record.
  *
- * WHAT IT DOES AND DOES NOT PROVE.
- *   - `inputsSha256` is recomputed from the CURRENT manifest. A cell that
- *     matches is provably built from the same ordered input list the manifest
- *     describes. That is a real check, and it runs now, on the existing files.
- *   - `vectorsSha256` is the hash of whatever bytes are on disk today. It pins
- *     the artifact from this moment forward; it cannot retroactively prove the
- *     file was never disturbed. Combined with the self-retrieval check (which
- *     confirms vectors and words are aligned) the chain is strong, but this
- *     distinction is worth stating rather than glossing.
+ * What it does and does not prove: the fingerprint of the inputs is recomputed
+ * from the current record, so a file that matches is provably built from what
+ * that record describes — a real check, running now. The fingerprint of the
+ * output only pins the file from this moment onward; it cannot prove the file
+ * was never disturbed before. Worth stating rather than glossing over.
  *
- * A cell whose recomputed input hash disagrees with the manifest is NOT
- * written to — it is reported, because that is the finding.
+ * A file whose fingerprint disagrees is not written to. It is reported, because
+ * that is the finding.
  *
  *   npx tsx scripts/backfill-cell-hashes.ts            # report only
  *   npx tsx scripts/backfill-cell-hashes.ts --write
@@ -64,8 +58,8 @@ function main(): void {
     const want = expected.get(meta.variant);
     const vecHash = bytesSha256(fs.readFileSync(vecPath));
 
-    // A cell built from a different pool cannot match the current manifest;
-    // that is expected and is reported as such, not as corruption.
+        // A file built from a different pool cannot match the current record. That
+        // is expected, and is reported as such rather than as corruption.
     const rowsFromThisPool =
       meta.rows ===
       (meta.representation === "lemma" ? manifest.words.length : manifest.glosses.length);

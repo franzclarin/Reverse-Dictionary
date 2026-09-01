@@ -1,16 +1,15 @@
 """
-Faithful port of scripts/lib/metrics.ts.
+A faithful port of the TypeScript scoring code.
 
-This is the second scoring implementation in the project, which METHODS is
-explicit is a hazard: a harness with two scorers can drift, and a drifted scorer
-produces numbers that look comparable to committed runs and are not. It exists
-because RD-22 chose a self-contained Python loop, and it is made safe the same
-way the repo makes its other second implementations safe -- by pinning it to the
-original with a check. `parity.py` re-scores committed runs with this module and
-asserts the published figures reproduce. Run it after touching this file.
+A second scoring implementation is a hazard: two scorers can drift, and a
+drifted one produces numbers that look comparable to recorded runs and are not.
+It exists because the Python side needs a self-contained loop, and it is made
+safe the way every other second implementation here is -- by pinning it to the
+original with a check that re-scores recorded runs and asserts the published
+figures reproduce. Run that after touching this file.
 
-Two details are easy to get wrong and are called out at their definitions:
-`percentile` does not interpolate, and rank is 1-based with `None` for absent.
+Two details are easy to get wrong and are called out where they are defined:
+how percentiles are picked, and that positions count from one.
 """
 
 from __future__ import annotations
@@ -87,13 +86,12 @@ def score(results: Sequence[QueryResult]) -> Metrics:
 
 def percentile(values: Iterable[float], p: float) -> float:
     """
-    Mirrors `percentile()` in metrics.ts.
+    Matches the TypeScript version exactly.
 
-    DO NOT replace this with `np.percentile`. The TypeScript version indexes at
-    `floor((p/100) * len)` into the sorted list and takes that element; numpy
-    interpolates between neighbours by default. On 287 rows the two disagree by
-    a few milliseconds on every latency figure, which is exactly the kind of
-    silent drift the parity gate exists to prevent.
+    Do not replace this with the library function. This one picks an actual
+    element from the sorted list; the library one averages between neighbours.
+    They disagree by a few milliseconds on every timing figure, which is exactly
+    the kind of silent drift the gate exists to prevent.
     """
     sorted_values = sorted(values)
     if not sorted_values:
@@ -104,16 +102,14 @@ def percentile(values: Iterable[float], p: float) -> float:
 
 def mcnemar(b: int, c: int) -> tuple[float, int]:
     """
-    Exact two-sided McNemar test on rank-1 disagreements. Returns `(p, n)`.
+    Tests whether two runs really differ, by looking only at where they disagree.
 
-    Comparing two independent Recall@1 figures at n=300 cannot see a three-point
-    change. The paired test can, because it discards every query both runs get
-    right -- which is exactly where the variance lives -- and looks only at the
-    discordant pairs. The exact binomial form is used rather than the chi-square
-    approximation because b + c is often small.
+    Comparing two overall percentages at this sample size cannot see a
+    three-point change. Comparing question by question can, because it throws
+    away every question both runs get right -- which is where the noise is.
 
-    Ported rather than delegated to `scipy.stats.binomtest` so the arithmetic is
-    the harness's arithmetic, digit for digit.
+    Written out rather than called from a library, so the arithmetic is the
+    harness's arithmetic, digit for digit.
     """
     n = b + c
     if n == 0:
@@ -137,15 +133,11 @@ def compare(
     lenient: bool = True,
 ) -> dict:
     """
-    Paired comparison of two runs on rank-1, by query id.
+    Compare two runs question by question.
 
-    Lenient by default, because METHODS 9a resolves on lenient R@1 and nothing
-    else. Before RD-12 this tool tested strict rank-1 over all 405 rows while
-    every recall figure printed beside it was the 287-row authored-reachable
-    slice; read the "Established facts" entry on paired-test scope before
-    citing any pre-2026-08-28 count.
-
-    `wins` are queries b gets right and a does not.
+    Uses the forgiving measure by default, because that is what decisions are
+    made on. `wins` are questions the second run gets right and the first does
+    not.
     """
     by_id_a = {r.id: r for r in a}
     wins: list[str] = []
@@ -177,6 +169,6 @@ def compare(
         "n_regressions": len(regressions),
         "p": p,
         "n_discordant": n_discordant,
-        # METHODS 9a: under ~6 points of lenient R@1 is a null result, not a win.
+        # A gain under about six points is a null result, not a win.
         "clears_9a_bar": lenient and (delta * 100) >= 6.0,
     }

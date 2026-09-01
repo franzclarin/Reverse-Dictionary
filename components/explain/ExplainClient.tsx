@@ -5,18 +5,12 @@ import { useExplainRun } from "./useExplainRun";
 import InstrumentShell from "./InstrumentShell";
 import { useSound } from "@/context/SoundContext";
 
-/**
- * Loads the two static assets, then hands off to the one layout.
- *
- * The three-shell picker this briefly carried is gone: variant B was chosen and
- * the other two were deleted rather than left behind as dead code.
- */
+/** Loads the two saved files, then hands off to the layout. */
 export default function ExplainClient() {
   const { assets, assetError, run, search } = useExplainRun();
   const { play } = useSound();
 
-  // A landed result is the app's own "stamp" moment; reuse the same effect the
-  // search page plays so the two pages sound like one product.
+  // Reuse the search page's arrival sound, so both pages sound like one app.
   useEffect(() => {
     if (run.phase === "done") play(run.results.length > 0 ? "stamp" : "error");
     if (run.phase === "error") play("error");

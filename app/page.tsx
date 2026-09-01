@@ -8,10 +8,8 @@ export default function Home() {
   const router = useRouter();
   const { isLoading } = useLoading();
 
-  // No fetch here — the results page owns the /api/lookup call (and its
-  // errors, rate limiting, and timing display) so a query typed on the
-  // landing page and one re-run from the results page's own search bar go
-  // through exactly one code path.
+  // Just navigate; the results page does the actual searching. That way a
+  // query typed here and one retyped there follow the same single path.
   const handleSearch = (description: string) => {
     router.push(`/search?q=${encodeURIComponent(description)}`);
   };

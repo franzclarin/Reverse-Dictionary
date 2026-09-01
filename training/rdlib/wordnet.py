@@ -1,18 +1,13 @@
 """
-WordNet 3.0, parsed from the same bytes the TypeScript side reads.
+The dictionary, read from the same bytes the TypeScript side reads.
 
-A LINE-FOR-LINE port of `readSenses()` in scripts/lib/wordnet.ts, and it has to
-stay that way. The gloss text produced here is the text a cell is built from,
-and `cells.inputs_sha256()` pins it: if this parser and the TS one disagree by
-so much as a stripped semicolon, a cell built in Python and a cell built in
-TypeScript get different hashes and neither can be checked against the other.
+A line-for-line port, and it has to stay that way: if the two readers disagree by
+so much as a stripped semicolon, files built on each side get different
+fingerprints and neither can be checked against the other.
 
-DO NOT SUBSTITUTE nltk.corpus.wordnet. It is a different distribution of the
-same version with its own gloss punctuation and its own offsets, and swapping it
-in would be invisible until a hash mismatch much later.
-
-ENCODING: latin1, matching `readDataLines()`. The WordNet data files are not
-UTF-8; reading them as UTF-8 either throws or mangles the accented headwords.
+Do not substitute a library version of the dictionary -- different punctuation,
+different numbering, invisible until a fingerprint mismatch much later. And the
+data files are not UTF-8; reading them as UTF-8 mangles every accented headword.
 """
 
 from __future__ import annotations
@@ -26,8 +21,8 @@ from .paths import WORDNET_DICT_DIR
 
 POS_LIST = ("noun", "verb", "adj", "adv")
 
-# The production GlossEmbedding WordNet row count, as a drift check rather than
-# a requirement. RD-17 added 575,534 Wiktionary senses on top of these.
+# The live row count from this dictionary, as a drift check rather than a
+# requirement. A second dictionary adds many more on top of these.
 EXPECTED_SYNSETS = 117_791
 
 
@@ -58,17 +53,14 @@ _WHITESPACE = re.compile(r"\s+")
 
 def read_senses(pos: str, dict_dir: Path = WORDNET_DICT_DIR) -> list[Sense]:
     """
-    All synsets for one part of speech, in WordNet's own file order.
+    Every meaning for one part of speech, in the dictionary's own file order.
 
-    A WordNet gloss is `definition; "example one"; "example two"`. The examples
-    are split out rather than dropped so gloss-text variants can be tested with
-    and without them (RD-16 measured examples at -1.4pp, and they raised echo).
+    Example sentences are split off rather than dropped, so text variants can be
+    tested with and without them.
 
-    MEMBER ORDER IS WORDNET'S OWN AND IS NEVER SORTED. `--expansion-order
-    wordnet` reads that order back out of these files at query time to break
-    synonym ties, and it is worth 2.5 points of lenient R@1 over alphabetical on
-    identical vectors. Re-sorting here would silently change production's
-    tie-break.
+    The word order within a meaning is never sorted: it is read back at query
+    time to break ties between synonyms, and it is measurably better than
+    alphabetical. Re-sorting here would silently change production.
     """
     if pos not in POS_LIST:
         raise ValueError(f"pos must be one of {POS_LIST}, got {pos!r}")
@@ -149,23 +141,15 @@ def read_index(pos: str, dict_dir: Path = WORDNET_DICT_DIR) -> list[str]:
 
 def gloss_text_for(variant: str, sense: Sense) -> str:
     """
-    The text indexed for one row, per cell variant. Ports `glossTextFor()` in
-    scripts/lib/cellText.ts -- keep the two in step or hashes will not match.
+    The text indexed for one row. Keep in step with the TypeScript version, or
+    fingerprints will not match.
 
-    Measured outcomes, so you do not have to re-derive them:
-      "gloss"          the production variant. Definition only.
-      "gloss_examples" -1.4pp lenient R@1 and echo UP (RD-16). Examples are
-                       usage sentences about a specific referent, not the
-                       meaning.
-      "lemma_gloss"    reintroduces the exact echo the gloss index exists to
-                       remove -- RD-12 measured echo climbing to 21.4% on the
-                       reranker arm that used it. It also makes every row's text
-                       unique, which incidentally breaks the synonym ties the
-                       other variants have.
+    What each has been measured to do: definition only is what production uses;
+    adding example sentences is slightly worse and echoes more; prefixing the
+    word itself brings back the echoing this index exists to remove.
 
-    A NEW VARIANT IS THE CHEAPEST REAL EXPERIMENT IN THIS PROJECT. Changing what
-    is indexed bought +12.9pp at the RD-02 cutover; the entire fine-tune bought
-    +4.5pp. Add a branch here, build a cell, score it.
+    Adding a variant is the cheapest real experiment in this project -- changing
+    what gets indexed bought roughly three times what the entire fine-tune did.
     """
     if variant == "gloss_examples" and sense.examples:
         return f"{sense.gloss}; {'; '.join(sense.examples)}"

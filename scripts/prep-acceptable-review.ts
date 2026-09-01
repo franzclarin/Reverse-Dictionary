@@ -1,29 +1,22 @@
 /**
- * Pass 1 of the acceptable[] review: strip mechanical noise from the synonym
- * worklist, and stage the survivors for per-candidate judgement.
+ * First pass of the synonym review: strip out mechanical noise and stage the
+ * rest for a human judgement.
  *
- * PASS 1 IS DETERMINISTIC AND INVOLVES NO JUDGEMENT. It removes only what can
- * be decided by string shape:
+ * This pass makes no judgements at all. It removes only what can be decided from
+ * the shape of the word: candidates that are just the answer in different
+ * capitals, duplicate groups that differ only in capitals, and pure symbols —
+ * very short forms with no lowercase version at all, like chemical elements.
  *
- *   A. candidates that are case-variants of the target itself (not synonyms,
- *      the same word)
- *   B. case-only duplicate groups among the candidates (Centre/center/centre
- *      collapse to one canonical form)
- *   C. pure symbol forms — a case group whose base is <= 3 characters and that
- *      has NO all-lowercase variant (Sn). Element symbols, nothing else.
+ * That last rule is the only one that could over-reach, so every group it
+ * removes is listed individually rather than counted silently, and it is
+ * deliberately narrow: a first version also removed `sin` and `mar`, which are
+ * ordinary words. Abbreviations that do have a lowercase form survive and are
+ * rejected in the next pass on meaning instead — a judgement someone can read
+ * and overrule, rather than a deletion nobody sees.
  *
- * Rule C is the only one with any risk of over-reach, so every group it removes
- * is listed individually in the report rather than counted silently, and it is
- * deliberately narrow: a first version keyed on "short and capitalised
- * somewhere" also removed `sin` and `mar`, which are ordinary words. Unit
- * abbreviations that do have a lowercase form (cd) survive Pass 1 and are
- * rejected in Pass 2 on sense grounds instead — a judgement that can be read
- * and overridden, rather than a deletion that cannot.
- *
- * The working file it writes carries WordNet gloss text, so it goes to the
- * scratchpad, NOT to eval/audit/. Franz may still be editing query wording, and
- * dictionary phrasing in a file he is reading could bleed into that editing.
- * The deliverable paraphrases instead.
+ * The working file carries dictionary definitions, so it goes to a scratch
+ * directory rather than into the audit folder: question wording is still being
+ * edited, and dictionary phrasing in a file being read could bleed into it.
  *
  *   npx tsx scripts/prep-acceptable-review.ts --out <path>
  */
@@ -63,7 +56,7 @@ function arg(flag: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
-/** Rows of the draft TSV, keyed by target. Read-only; never written back. */
+/** The draft questions, keyed by answer. Read-only; never written back. */
 function readDraft(): Map<string, { query: string; hint: string; style: string }> {
   const lines = fs
     .readFileSync(DRAFT, "utf8")
@@ -92,7 +85,7 @@ function main(): void {
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8")) as PoolManifest;
   const draft = readDraft();
 
-  // synset -> pooled member words, and the gloss carried by that synset
+    // Each meaning, its words, and the definition they share.
   const members = new Map<string, Set<string>>();
   const glossOf = new Map<string, { gloss: string; examples: string[] }>();
   for (const g of manifest.glosses) {
@@ -129,7 +122,7 @@ function main(): void {
       let candidates = [...all].filter((w) => w !== target);
       report.candidatesBefore += candidates.length;
 
-      // A. case-variants of the target itself
+            // Candidates that are just the answer in different capitals.
       const kept: string[] = [];
       for (const c of candidates) {
         if (c.toLowerCase() === target.toLowerCase()) {
@@ -140,7 +133,7 @@ function main(): void {
       }
       candidates = kept;
 
-      // B/C. collapse case groups; strip short capitalised ones as symbols
+            // Collapse capital-only duplicates, and drop short symbol-like forms.
       const groups = new Map<string, string[]>();
       for (const c of candidates) {
         const k = c.toLowerCase();
@@ -150,17 +143,16 @@ function main(): void {
 
       const survivors: string[] = [];
       for (const [base, variants] of groups) {
-        // Only a PURE symbol: short, and with no all-lowercase form at all.
-        // An earlier draft stripped any short group containing a capitalised
-        // variant, which also removed `sin` (for wickedness) and `mar` (for
-        // defect) — real words that deserve a judgement. `cd` for the candela
-        // sense survives to Pass 2 and is rejected there on sense grounds,
-        // which is more transparent than deleting it with a regex.
+                // Only a genuine symbol: short, with no lowercase form at all. An
+                // earlier draft dropped anything short and capitalised, which also
+                // removed real words like `sin` and `mar`. Borderline cases survive to
+                // the next pass and are rejected there on meaning, which is far more
+                // transparent than deleting them with a pattern match.
         if (base.length <= 3 && variants.every(hasUpper)) {
           report.symbolForms.push(`${target} [${senseKey}]  <-  ${variants.join(", ")}`);
           continue;
         }
-        // Canonical casing: prefer the all-lowercase form, else first alphabetically.
+                // Prefer the lowercase form, else the first alphabetically.
         const canonical = variants.find((v) => v === v.toLowerCase()) ?? [...variants].sort()[0];
         for (const v of variants) {
           if (v !== canonical) report.caseDuplicates.push(`${target}  <-  ${v} (kept ${canonical})`);

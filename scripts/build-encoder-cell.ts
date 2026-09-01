@@ -1,31 +1,23 @@
 /**
- * Build a FULL-SCALE synset cell straight from WordNet, for any encoder. (RD-16)
+ * Build a full-size experiment index straight from the dictionary, for any model.
  *
- * WHY THIS EXISTS AND `embed-eval-pool.ts` DOES NOT SUFFICE. That script builds
- * from `eval/data/pool-manifest.json` — a *sampled* 20,287-word pool whose
- * absolute recall is deliberately not comparable to production (CLAUDE.md says
- * so, and the measurement bore it out at the cutover). It also hardcodes
- * `DIM`, so it cannot hold a 768-dimensional encoder. RD-16 needs both: numbers
- * on the same 114k synsets production searches, and the freedom to test a wider
- * model. This goes WordNet -> cell with no database and no pool manifest.
+ * The other builder works from a smaller sampled pool whose scores deliberately
+ * aren't comparable to production, and it can only hold one width of model. This
+ * one covers every meaning the live site searches and takes any model, going
+ * from dictionary to file with no database in between.
  *
- * WHAT A CELL IS FOR. `eval.ts --index-file <cell>` scans it exhaustively, so
- * the result is EXACT — no IVFFlat approximation mixed into the comparison.
- * That is what makes a cell the right instrument for a representation question
- * and the wrong one for a latency question.
+ * The result is searched exhaustively, so it is exact — which makes it the right
+ * tool for a question about how words are represented, and the wrong one for a
+ * question about speed.
  *
- * THE MODEL/QUERY PAIRING IS THE WHOLE HAZARD. Documents encoded by one model
- * and queries by another compare vectors from two different spaces, and the
- * output looks like a representation result rather than the nonsense it is.
- * `eval.ts` defends against this by reading the encoder from `meta.model`, so
- * this script's one non-negotiable duty is to record the model it actually used.
+ * The one real hazard: if the questions are measured by a different model than
+ * the entries were, the comparison is nonsense that looks like a finding. The
+ * scorer guards against this by reading the model out of the file, so this
+ * script's one non-negotiable duty is to record the model it actually used.
  *
- * MEAN POOLING, NO PREFIX. `embedWith` reproduces the production pipeline
- * (mean pooling, L2 normalise) for every model it is handed. Models that need
- * CLS pooling (BGE) or an instruction prefix (E5, "query: " / "passage: ")
- * would be silently mis-encoded by it and must NOT be built here without
- * teaching the harness's encode path the same rule — the query side has to
- * match or the pairing hazard above applies to prefixes too.
+ * Every model here is treated the same way — averaged, then rescaled. Models
+ * that need different handling would be silently mis-measured and must not be
+ * built here without teaching the scorer the same rule.
  *
  *   npx tsx scripts/build-encoder-cell.ts --model Xenova/gte-small --out full_gloss_gte
  *   npx tsx scripts/build-encoder-cell.ts --variant gloss_examples --out full_gloss_ft_ex
@@ -36,22 +28,12 @@ import { bytesSha256, glossTextFor, inputsSha256 } from "./lib/cellText";
 import { writeIndex, cellDir, type CellMeta } from "./lib/localIndex";
 import { POS_LIST, readSenses } from "./lib/wordnet";
 
-/**
- * The harness recognises a synset cell by this exact string
- * (`eval.ts`: `local?.meta.variant === "gloss_synset"`), which is what switches
- * on member expansion. The *text* variant therefore cannot live in this field;
- * it is recorded in the cell name, in `note`, and — bindingly — in
- * `inputsSha256`, which pins the exact ordered text list the cell was built
- * from and is what `verify-eval-pool.ts` recomputes.
- */
+/** The exact label the scorer looks for to know this is a meaning-keyed index. */
+// Which *text* was indexed cannot live in this field; it is recorded in the
+// file's name, its note, and — bindingly — in the fingerprint of its inputs.
 const HARNESS_SYNSET_VARIANT = "gloss_synset";
 
-/**
- * The production `GlossEmbedding` row count, as a drift check rather than a
- * requirement. Note this is NOT Phase E's 114,662 — that figure is the sampled
- * pool's collapsed row count, and `build-gloss-index.ts` carries it as a
- * sanity check against full WordNet, where it has never matched.
- */
+/** The live row count, as a drift check rather than a requirement. */
 const EXPECTED_SYNSETS = 117_791;
 
 type Synset = { key: string; words: string[]; gloss: string; examples: string[] };
@@ -61,16 +43,11 @@ function arg(flag: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
-/**
- * One row per synset, in WordNet's file order.
- *
- * Mirrors `groupBySynset()` in `build-gloss-index.ts`, which builds the
- * production table: every line of `data.<pos>` already IS a synset, so this is
- * a read rather than a grouping. Member order is WordNet's own and is never
- * sorted — `--expansion-order wordnet` reads that order back out of the same
- * files at query time, so a reordering here would silently change the
- * tie-break the production index uses.
- */
+/** One row per meaning, in the dictionary's own file order. */
+// Every line of the source already is one meaning, so this reads rather than
+// groups. Never sort the words within a meaning: the scorer reads that same
+// order back at query time, so reordering here would silently change how ties
+// are broken in production.
 function readSynsets(): Synset[] {
   const out: Synset[] = [];
   for (const pos of POS_LIST) {
@@ -110,8 +87,8 @@ async function main(): Promise<void> {
   }
   if (benchmark) synsets = synsets.slice(0, limit);
 
-  // The single definition of what text a variant indexes. A second copy here is
-  // exactly the builder/checker drift `cellText.ts` was split out to prevent.
+    // The one place that decides what text goes in. A second copy here is exactly
+    // the drift that shared file was split out to prevent.
   const texts = synsets.map((s) =>
     glossTextFor(variant, { word: s.words[0], gloss: s.gloss, examples: s.examples })
   );
@@ -128,8 +105,8 @@ async function main(): Promise<void> {
   const dim = probe.length;
   console.log(`${Date.now() - warmStart}ms  (${dim} dimensions)`);
 
-  // One flat buffer: 114,662 x 768 floats is 352 MB contiguous, versus several
-  // gigabytes of boxed JS numbers as an array of arrays.
+    // One flat block of memory: the same numbers held as ordinary nested arrays
+    // would take several gigabytes instead of a few hundred megabytes.
   const vectors = new Float32Array(texts.length * dim);
   const started = Date.now();
   for (let i = 0; i < texts.length; i++) {
@@ -172,9 +149,8 @@ async function main(): Promise<void> {
     model,
     variant: HARNESS_SYNSET_VARIANT,
     representation: "gloss",
-    // Full WordNet, not the sampled Phase E pool. `report.ts` refuses to table a
-    // cross-scale delta, so this field is what keeps these cells from being
-    // compared against the 20k ones by accident.
+        // Full dictionary, not the smaller sample. This field is what stops these
+        // being compared against the small ones by accident.
     scale: "full",
     poolWords: new Set(synsets.flatMap((s) => s.words)).size,
     inputsSha256: inputsSha256(texts),

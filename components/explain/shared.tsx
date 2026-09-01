@@ -5,26 +5,10 @@ import { useSound } from "@/context/SoundContext";
 import { APPROXIMATIONS, type Stage } from "./stages";
 import type { Snapshot } from "./types";
 
-/**
- * Example queries, every one of which lands its intended word at rank 1.
- *
- * **Verified against the live index, not guessed.** Two of the originals did
- * not work and had to go: "the smell of rain on dry earth" returned `humidity`
- * — and could never have been right, because `petrichor` is not in the
- * vocabulary at all (see RD-17) — and "a fear of being forgotten after you die"
- * returned `thanatophobia`, which is the fear of death itself.
- *
- * Each one also has a rank-1 synset with **more than one member**, so stage 7
- * always has a real tie to demonstrate rather than a lone word:
- *
- *   wandering, roving, vagabondage        0.726
- *   sunset, sundown                       0.745
- *   bibliophile, booklover, book lover    0.931
- *   ambidextrous, two-handed              0.761
- *
- * **Retest before changing this list**, and retest it wholesale if the index is
- * ever rebuilt. A broken example is the first thing a visitor clicks.
- */
+/** Example queries, each checked to return the word it is meant to. */
+// Each also returns a meaning with several words attached, so step 7 always has
+// a real tie to show. Retest before changing this list, and retest all of it if
+// the index is rebuilt — a broken example is the first thing a visitor clicks.
 export const EXAMPLES = [
   "walking without a destination in mind",
   "the last light before the sun goes down",
@@ -123,7 +107,7 @@ export function QueryBar({
   );
 }
 
-/** The measured PCA figure. RD-18 requires this to be on screen, not in a doc. */
+/** How much of the real detail the picture keeps. Must stay on screen. */
 export function VarianceNote({ snapshot, inverted = false }: { snapshot: Snapshot; inverted?: boolean }) {
   const colour = inverted ? "rgba(250,247,242,0.72)" : "var(--rd-ink-muted)";
   return (
@@ -138,14 +122,9 @@ export function VarianceNote({ snapshot, inverted = false }: { snapshot: Snapsho
   );
 }
 
-/**
- * The four approximations, permanently visible.
- *
- * Not a disclosure widget by accident: the short line is always rendered, and
- * only the elaboration is behind the toggle. RD-18 calls this the
- * acceptance-critical step — a pretty picture is more persuasive than a correct
- * one, so the caveats do not get to hide.
- */
+/** The four things this picture simplifies, always visible. */
+// Only the longer explanation hides; the warning itself never does. A pretty
+// picture is more persuasive than a correct one, so the caveats stay put.
 export function ApproximationNotes({
   snapshot,
   inverted = false,

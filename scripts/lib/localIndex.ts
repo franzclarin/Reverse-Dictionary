@@ -1,24 +1,12 @@
-/**
- * File-backed vector indexes for the Phase E 2x2.
- *
- * WHY NOT POSTGRES. The Neon project has a 512 MB size limit and
- * `VocabEmbedding` plus its IVFFlat index already occupies 451 MB of it. There
- * is no room for ~100k experiment vectors, and making room would mean touching
- * production data. Storing the sampled pool locally sidesteps that entirely and
- * has two side benefits: the experiment performs no database writes at all, and
- * a brute-force scan over the pool is *exact* by construction, so the 2x2
- * measures representation with no approximate-index effect mixed in.
- *
- * Format, per cell:
- *   <cell>.vec   raw little-endian Float32, n * dim, no header
- *   <cell>.json  { cell, model, variant, dim, words[], senseKeys[]? }
- *
- * Vectors are L2-normalised on the way in (the sentence-transformers Normalize
- * layer), so cosine similarity is a plain dot product.
- *
- * Files live outside the repo by default: this working tree is inside OneDrive,
- * which would try to sync ~230 MB of derived data. Override with EVAL_CELL_DIR.
- */
+// Experiment indexes kept as plain files instead of in the database.
+//
+// Two benefits beyond staying out of the way: the experiments write nothing to
+// the real database, and searching a file checks every row, so results measure
+// the idea being tested with no index shortcuts mixed in.
+//
+// Each experiment is two files: the raw numbers, and a description of them.
+// They live outside the repo by default, since they are large and derived.
+// Override the location with EVAL_CELL_DIR.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -38,45 +26,25 @@ export type CellMeta = {
   model: string;
   variant: string;
   representation: "lemma" | "gloss";
-  /**
-   * Which pool this cell was built from. Optional only because cells written
-   * before the full-scale rebuild predate the field; `scaleOf()` treats those
-   * as sampled. Cells of different scale are not comparable — fewer distractors
-   * is a strictly easier task — and the tooling flags rather than merges them.
-   */
+  /** How big a pool this was built from. Different sizes aren't comparable —
+   *  fewer wrong answers to sift is simply an easier task. */
   scale?: "sampled" | "full";
-  /**
-   * Which dictionary the rows come from (RD-17). Deliberately a SEPARATE axis
-   * from `scale`: a wordnet-only cell and a wordnet+wiktionary cell are both
-   * "full", and both cover every synset production searches, but they hold
-   * different candidate sets — so their absolute recall is no more comparable
-   * than a sampled cell's is to a full one. `scale`'s union is not widened
-   * because `scaleOf()` is typed against it and every existing cell would have
-   * to be re-stamped; a new field means old cells read as `undefined`, which
-   * `vocabularyOf()` correctly treats as wordnet-only.
-   */
+  /** Which dictionaries the rows come from. Tracked separately from size,
+   *  because two experiments can be the same size and still hold different
+   *  candidates, which makes their scores just as incomparable. */
   vocabulary?: "wordnet" | "wordnet+wiktionary";
-  /** RD-17 arm that produced the supplement half, if there is one. */
+  /** Which variant produced the extra half, if there is one. */
   supplementArm?: string;
-  /** `FILTER_VERSION` from `scripts/lib/wiktionary.ts`, if a supplement is present. */
+  /** Which version of the filter was used, if extra entries are present. */
   filterVersion?: string;
   poolWords?: number;
-  /**
-   * SHA256 of the ordered input text list this cell was built from, and of the
-   * vector file's raw bytes. Optional only because cells written before the
-   * concurrent-write incident predate the fields. `verify-eval-pool.ts`
-   * recomputes the first from the manifest and treats a mismatch as stale.
-   */
+  /** Fingerprints of what went in and what came out, so a stale or
+   *  half-written file can be caught rather than argued about. */
   inputsSha256?: string;
   vectorsSha256?: string;
-  /**
-   * Storage precision of the vectors on disk. `float16` cells hold values that
-   * have been rounded to IEEE binary16 and written back as float32 — the same
-   * values pgvector's `halfvec` would store, so the recall they produce is the
-   * recall a halfvec column produces. `dim` below may also be shorter than the
-   * encoder's native width: that is TRUNCATION, a separate and much larger
-   * lossy step, not part of quantization. Kept distinct on purpose.
-   */
+  /** How precisely the numbers are stored, so rounding can be tested the way
+   *  the database would do it. Storing fewer numbers is a different and far
+   *  lossier step, tracked separately on purpose. */
   precision?: "float32" | "float16";
   sourceCell?: string;
   dim: number;
@@ -86,11 +54,7 @@ export type CellMeta = {
   note: string;
   words: string[];
   senseKeys?: string[];
-  /**
-   * Synset cells only: synset key -> the words that belong to it. A row is a
-   * synset, so retrieval must expand it into member words before anything can
-   * be scored against a word-level answer key.
-   */
+  /** Which words belong to each meaning, since the answer key is a word. */
   synsetMembers?: Record<string, string[]>;
 };
 
@@ -98,12 +62,8 @@ export function scaleOf(meta: CellMeta): "sampled" | "full" {
   return meta.scale ?? "sampled";
 }
 
-/**
- * Which candidate set a cell holds.
- *
- * Cells written before RD-17 carry no `vocabulary` field and are wordnet-only
- * by construction, so the default is the honest reading rather than a guess.
- */
+/** Which dictionaries an experiment holds. Older files say nothing, and for
+ *  those the honest reading is the original single source. */
 export function vocabularyOf(meta: CellMeta): "wordnet" | "wordnet+wiktionary" {
   return meta.vocabulary ?? "wordnet";
 }
@@ -145,7 +105,7 @@ export function writeIndex(
   return { vec, json, bytes: vectors.byteLength };
 }
 
-/** Accepts a cell name or a path to its .json / .vec. */
+/** Takes either an experiment's name or a path to one of its files. */
 export function loadIndex(ref: string, dir = cellDir()): LocalIndex {
   const cell = path.basename(ref).replace(/\.(json|vec)$/, "");
   const base = ref.includes("/") || ref.includes("\\") ? path.dirname(ref) : dir;
@@ -166,24 +126,10 @@ export function loadIndex(ref: string, dir = cellDir()): LocalIndex {
   return { meta, data };
 }
 
-/**
- * Put a query vector into the same space as a cell's stored vectors.
- *
- * Every step here mirrors something the database would do to a query against
- * the corresponding column, and each is applied ONLY if the cell says so:
- *
- *   truncate   `halfvec(256)` over a 384-dim encoder means the query is
- *              truncated too. Renormalising after the cut makes the dot product
- *              a true cosine over the surviving subspace, which is what pgvector
- *              computes with `<=>`.
- *   quantize   a `halfvec` column casts the query to halfvec before comparing,
- *              so BOTH sides carry the rounding error. Quantizing only the
- *              documents would understate the cost.
- *
- * The final renormalisation is what lets the search stay a plain dot product:
- * `cos(a,b) = (a/|a|)·(b/|b|)`, so pre-dividing both sides reproduces `<=>`
- * exactly rather than approximately.
- */
+/** Put the question through the same treatment the stored entries got. */
+// Whatever was done to the entries — dropping numbers, or rounding them — has
+// to happen to the question too, or the cost of doing it looks smaller than it
+// really is. Rescaling at the end is what keeps the comparison exact.
 export function prepareQuery(meta: CellMeta, vector: number[]): number[] {
   let v = vector.length === meta.dim ? vector.slice() : vector.slice(0, meta.dim);
   if (meta.precision === "float16") v = Array.from(new Float32Array(new Float16Array(v)));
@@ -191,22 +137,12 @@ export function prepareQuery(meta: CellMeta, vector: number[]): number[] {
   return norm > 0 ? v.map((x) => x / norm) : v;
 }
 
-/**
- * Deterministic, answer-key-independent tie order.
- *
- * Equal scores are common and structural here: every word in a WordNet synset
- * shares one gloss, so a gloss cell holds bit-identical vectors for all of them
- * and something has to decide which surfaces first. Whatever decides it must not
- * correlate with row position — that is the general vulnerability that made the
- * pool's target-first layout exploitable (METHODS.md §12), and it is fixed here
- * independently so a future pool change cannot reopen it silently.
- *
- * Alphabetical on the word: deterministic, reproducible, and unrelated to both
- * row position and the answer key. It is arbitrary with respect to quality —
- * that is the point. A tie the retrieval genuinely cannot break should be
- * decided by something that knows nothing, not by something that knows where
- * the targets were written.
- */
+/** How to break ties, without peeking at the answer key. */
+// Identical scores are normal here, since words sharing a meaning share their
+// numbers exactly. Alphabetical order settles it: repeatable, and unrelated to
+// both where a row sits in the file and where the right answers were put. A tie
+// the search genuinely cannot break should be settled by something that knows
+// nothing, not by something that knows where the answers are.
 export function compareWord(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -218,16 +154,10 @@ export type LocalRowHit = {
   similarity: number;
 };
 
-/**
- * Row-level search: no per-word dedupe, so the caller can see WHICH row won.
- *
- * Needed by the integrity check. A WordNet synset has one gloss shared by all
- * its words, so a gloss cell stores that identical text once per synonym —
- * identical vectors, and which synonym lands at rank 1 is an arbitrary
- * tie-break. Asking "did the exact lemma win?" therefore measures tie-breaking,
- * not correctness; asking "did a row from the right synset win?" measures
- * whether vectors and words are still aligned, which is the actual question.
- */
+/** Search without merging duplicates, so the caller sees which row won. */
+// The integrity check needs this. Synonyms share identical numbers, so asking
+// "did the exact word win?" only measures how ties were broken. Asking "did a
+// row from the right meaning win?" is the question that actually matters.
 export function searchLocalRows(
   index: LocalIndex,
   query: number[],
@@ -253,20 +183,11 @@ export function searchLocalRows(
     .map((i) => ({ row: i, word: words[i], senseKey: senseKeys?.[i], similarity: scores[i] }));
 }
 
-/**
- * Search a synset-keyed cell and expand each hit into its member words.
- *
- * A row here is a synset, but the answer key is a single word, so the results
- * have to be words. Members are emitted in `order` (descending Zipf in the
- * harness): if the retrieval cannot distinguish `bungle` from `botch` — and it
- * cannot, their vectors are identical — the commoner word is the better guess.
- *
- * NOTE THE SCORING SURFACE. One retrieved synset can occupy several top-k
- * slots, so a 24-member synset at rank 1 fills the entire top 10 by itself.
- * That makes these numbers structurally different from a per-sense gloss cell's,
- * which is why this cell is reported separately and never substituted into the
- * 2x2.
- */
+/** Search by meaning, then expand each result into its words. */
+// The answer key is a single word, so results have to be words. When the search
+// genuinely cannot tell two synonyms apart, the commoner one is the better bet.
+// One meaning can fill several result slots, so these scores are not
+// interchangeable with the one-row-per-meaning kind and are reported apart.
 export type ExpandOrder = (key: string, members: string[]) => string[];
 
 export function searchLocalSynsets(
@@ -276,7 +197,7 @@ export function searchLocalSynsets(
   expand: ExpandOrder
 ): ResultRow[] {
   const members = index.meta.synsetMembers ?? {};
-  // Each synset yields at least one word, so k synsets always yield >= k words.
+  // Every meaning yields at least one word, so k meanings yield at least k words.
   const hits = searchLocalRows(index, query, k);
   const out: ResultRow[] = [];
   const seen = new Set<string>();
@@ -293,13 +214,8 @@ export function searchLocalSynsets(
   return out;
 }
 
-/**
- * Exhaustive nearest-neighbour search. Exact by construction.
- *
- * `perSense` collapses to one row per word keeping its best-matching sense —
- * a single averaged vector represents no sense of a polysemous word well,
- * which is half the reason for indexing senses separately.
- */
+/** Check every row, so the result is exactly right rather than nearly right. */
+// `perSense` keeps each word's best meaning instead of blending them together.
 export function searchLocal(
   index: LocalIndex,
   query: number[],

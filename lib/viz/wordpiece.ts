@@ -1,24 +1,10 @@
-/**
- * BERT WordPiece tokenization, in the browser, for the /explain page (RD-18).
- *
- * WHY THIS EXISTS RATHER THAN `AutoTokenizer`. The acceptance criterion is that
- * the sub-words on screen are the tokenizer's actual output and not a
- * whitespace split dressed up as sub-words. Importing `@xenova/transformers`
- * into a client component would satisfy that but drag ~1 MB of JS and the
- * onnxruntime-web loader into the bundle to do the work of ~100 lines — for a
- * page whose whole point is that the 86 MB model never reaches a browser.
- *
- * So this reimplements the exact configuration recorded in the model's own
- * `tokenizer.json`: `BertNormalizer` (clean_text, handle_chinese_chars,
- * strip_accents = null → follows lowercase, lowercase) → `BertPreTokenizer`
- * (whitespace and punctuation) → `WordPiece` (greedy longest-match-first, `##`
- * continuation, `[UNK]` fallback) → `[CLS]` … `[SEP]`, truncated at 256.
- *
- * **A reimplementation is only honest if it is checked.** `scripts/verify-viz-snapshot.ts`
- * runs this against the real `AutoTokenizer` over a corpus of phrases and
- * asserts the token ids are identical. If that check is ever removed, this file
- * becomes exactly the plausible-looking split the ticket forbids.
- */
+// Chopping a phrase into the word-pieces the model actually reads, in the
+// browser. /explain shows these, so they must be the real ones — this is a
+// hand-written copy of the model's rules, rather than shipping the whole model
+// library to the browser for a hundred lines of work.
+//
+// A copy is only trustworthy if it is checked: `scripts/verify-viz-snapshot.ts`
+// compares it against the real thing. Do not remove that check.
 
 export type WordPieceConfig = {
   vocab: string[];
@@ -35,17 +21,17 @@ export type WordPieceConfig = {
 export type Token = {
   text: string;
   id: number;
-  /** A `##` continuation of the previous piece — the visually interesting case. */
+  /** This piece continues the word before it, rather than starting a new one. */
   continuation: boolean;
-  /** `[CLS]` / `[SEP]`. They are pooled with everything else; the page says so. */
+  /** A marker the model adds around the phrase. Counted like any other piece. */
   special: boolean;
-  /** True when the word fell out of the 30,522-piece vocabulary entirely. */
+  /** True when the model has never seen this word and gives up on it. */
   unknown: boolean;
 };
 
 export type Tokenization = {
   tokens: Token[];
-  /** Set when the input exceeded `maxLength` and the tail was dropped. */
+  /** Set when the phrase was too long and the end was cut off. */
   truncated: boolean;
 };
 
@@ -67,7 +53,7 @@ function isChineseChar(cp: number): boolean {
   );
 }
 
-/** `BertNormalizer`, in the order the Rust implementation applies its steps. */
+/** Tidy the text up — same steps, same order, as the real tokenizer. */
 function normalize(text: string, config: WordPieceConfig): string {
   let out = "";
   for (const char of text) {
@@ -81,13 +67,13 @@ function normalize(text: string, config: WordPieceConfig): string {
     out += isChineseChar(cp) ? ` ${char} ` : char;
   }
 
-  // strip_accents is null in tokenizer.json, which means "follow lowercase".
+  // The model's settings tie accent-stripping to lowercasing.
   if (config.stripAccents) out = out.normalize("NFD").replace(/\p{Mn}/gu, "");
   if (config.lowercase) out = out.toLowerCase();
   return out;
 }
 
-/** `BertPreTokenizer`: split on whitespace, then peel punctuation off as words. */
+/** Split on spaces, then peel punctuation off into words of its own. */
 function preTokenize(text: string): string[] {
   const words: string[] = [];
   let current = "";
@@ -111,12 +97,8 @@ function preTokenize(text: string): string[] {
   return words;
 }
 
-/**
- * Greedy longest-match-first over the vocabulary, the WordPiece algorithm.
- *
- * Note the failure mode this encodes: if ANY piece of a word is unmatchable the
- * WHOLE word becomes `[UNK]`, not just the offending span.
- */
+/** Match the longest piece the model knows, then repeat on what's left. */
+// If any part of a word can't be matched, the whole word is given up on.
 function wordPiece(word: string, lookup: Map<string, number>, config: WordPieceConfig): Token[] {
   const unkId = lookup.get(config.unkToken)!;
   const unk = (text: string): Token[] => [
@@ -174,15 +156,9 @@ export function createTokenizer(config: WordPieceConfig) {
       unknown: false,
     });
 
-    // Post-process FIRST, then hard-truncate — which is what Transformers.js
-    // does, and it has a genuinely surprising consequence: an over-long input
-    // loses its [SEP], because the cut lands before the token that was appended
-    // to close the sequence. Reserving two slots up front would be the tidier
-    // algorithm and would NOT match what the server feeds the encoder.
-    //
-    // Unreachable from /api/lookup in practice — the route caps queries at 500
-    // characters — but the page claims these are the real sub-words, so this
-    // follows the real behaviour rather than the sensible one.
+    // Add the end marker first, then cut — so an over-long phrase loses that
+    // marker. Tidier orderings exist, but this is what the real tokenizer does,
+    // and matching it is the point.
     const all = [special(config.clsToken), ...body, special(config.sepToken)];
     const truncated = all.length > config.maxLength;
 

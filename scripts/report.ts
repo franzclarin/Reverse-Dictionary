@@ -1,31 +1,22 @@
 /**
- * Generate `eval/REPORT.md` from whatever is in `eval/runs/`.
+ * Writes `eval/REPORT.md` from whatever runs are on disk.
  *
- * WHY THIS IS A GENERATOR AND NOT A DOCUMENT. A hand-written results file is
- * wrong the moment anything reruns, and this one will rerun a dozen times. Every
- * number in the report traces to a `eval/runs/*.json` written by `eval.ts`; if a
- * figure is wrong here, it is wrong in this generator or in the run, never in the
- * markdown. `eval/REPORT.md` must never be edited by hand.
+ * A hand-written results file is wrong the moment anything is re-run, and this
+ * one gets re-run often. Every number here traces back to a saved run, so a
+ * wrong figure is wrong in this generator or in the run, never in the markdown.
+ * Never edit `eval/REPORT.md` by hand.
  *
- * The reasoning behind the benchmark lives in `eval/METHODS.md`, which IS
- * hand-written and does not change when the numbers do. The two are meant to be
- * read together: methods explain why a number means anything, this explains what
- * the number is.
+ * The reasoning behind the tests lives in the methods document, written by
+ * hand and does not change when the numbers do.
  *
- * Rules this file enforces so the report cannot mislead:
- *   - the authored slice is the only headline; `gloss_tripwire` is tabled
- *     separately, labelled leaked, and never mixed in
- *   - the set's sha256 is printed beside the numbers, and a run scored against a
- *     different version of its set is called out loudly
- *   - comparisons are paired (McNemar), so a non-significant difference reads as
- *     non-significant rather than as a win
- *   - the pre-registered prediction is printed directly above the style slice,
- *     and the pre-committed decision rule directly above the comparison table
- *   - cells built from different pools are marked cross-scale, not tabled as
- *     though their numbers meant the same thing
- *   - the two retrieval implementations are cross-validated against each other
- *     whenever the runs to do it exist
- *   - latency is always accompanied by the note that it is not production latency
+ * Rules this file enforces so the report cannot mislead: only hand-written
+ * questions make the headline; the question set's fingerprint is printed beside
+ * the numbers and a mismatch is called out loudly; comparisons are made question
+ * by question, so a weak result reads as weak; the prediction made in advance is
+ * printed above the results it concerns; runs built from different pools are
+ * marked as not comparable; the two search implementations are checked against
+ * each other; and timings always carry the note that they are not what a user
+ * would experience.
  *
  *   npx tsx scripts/report.ts
  *   npx tsx scripts/report.ts --out /tmp/preview.md --runs eval/runs
@@ -42,13 +33,10 @@ const DEFAULT_OUT = "eval/REPORT.md";
 
 const DASH = "—";
 
-/**
- * Pre-committed before any Phase E number existed. `eval/METHODS.md` §9a.
- *
- * Printed directly above the comparison table rather than filed in the methods
- * document, because the moment it is needed is the moment a small delta is on
- * screen and the reading of it is being decided.
- */
+/** The bar for "worth acting on", agreed before any of these numbers existed. */
+// Printed directly above the comparison table rather than filed away, because
+// the moment it matters is the moment a small difference is on screen and
+// someone is deciding what to make of it.
 const DECISION_RULE_HEADING = "Pre-committed decision rule — recorded before the data";
 const DECISION_RULE = [
   "**A gloss cell beating the lemma baseline by fewer than ~6 points of LENIENT Recall@1",
@@ -67,12 +55,10 @@ const DECISION_RULE = [
   "both wordings: `eval/METHODS.md` §9a.",
 ];
 
-/**
- * The pre-committed rule in one place (METHODS §9a): a delta below the
- * threshold is a null result even when it is positive, and even when the paired
- * test happens to reach significance. Rendered by the generator so the verdict
- * cannot drift from the rule through someone's optimistic reading.
- */
+/** The rule in one place: a gain below the bar is a null result, even if positive,
+ *  and even when the statistics happen to look convincing. */
+// Written by the generator so the verdict cannot drift from the rule through
+// somebody's optimistic reading.
 const DECISION_THRESHOLD = 0.06;
 
 function verdict(delta: number, p: number): string {
@@ -95,25 +81,25 @@ type RunConfig = {
   exactByConstruction?: boolean;
   poolScope?: string;
   poolScale?: "sampled" | "full";
-  /** RD-17: which dictionary the candidate set came from. */
+    /** Which dictionaries the candidates came from. */
   vocabulary?: "wordnet" | "wordnet+wiktionary";
   supplementArm?: string;
   filterVersion?: string;
   poolWords?: number;
   cellVariant?: string;
-  /** Synset cells only: how a retrieved synset was expanded into member words. */
+    /** How each retrieved meaning was expanded into words. */
   expansionOrder?: string;
   cellPrecision?: string;
   cellDim?: number;
   model: string;
   rankDepth: number;
-  /** RD-12: a cross-encoder re-sorted the shortlist before scoring. */
+    /** A second model re-sorted the shortlist before scoring. */
   rerank?: boolean;
   rerankModel?: string;
   rerankQuantized?: boolean;
   rerankInput?: string;
   rerankDepth?: number;
-  /** What `dbMs` measured — a rerank run times one deep query, not a LIMIT k one. */
+    /** What the database timing measured; a re-sorting run times a different query. */
   dbTiming?: string;
   rows: number;
   ranAt: string;
@@ -183,11 +169,8 @@ function readSet(file: string): EvalRow[] | null {
 
 // -------------------------------------------------------------- scoring
 
-/**
- * `score()` from lib/metrics is the shared source of truth; this adds only the
- * lenient R@3, which the report shows and the console harness does not. Derived
- * from the same `lenientRank` field, not recomputed from scratch.
- */
+/** The shared scorer, plus the one extra figure only the report shows. */
+// Derived from the same stored ranks, never recomputed from scratch.
 type FullMetrics = Metrics & { lenientRecall3: number };
 
 function scoreFull(rows: QueryResult[]): FullMetrics {
@@ -204,7 +187,7 @@ const authoredOf = (r: Run) =>
 const tripwireOf = (r: Run) => r.results.filter((q) => q.source === "gloss_tripwire");
 const unreachableOf = (r: Run) => r.results.filter((q) => q.meta.reachable === false);
 
-/** The slice scope: authored where it exists, everything reachable otherwise. */
+/** Which questions to score: the hand-written ones where they exist. */
 function sliceScope(r: Run): QueryResult[] {
   const authored = authoredOf(r);
   return authored.length ? authored : r.results.filter((q) => q.meta.reachable !== false);
@@ -259,12 +242,9 @@ function lengthBucket(query: string): string {
   return "17+ words";
 }
 
-/**
- * Fixed Zipf bands, mirroring `lib/freq.ts`. Duplicated as a labeller rather
- * than imported wholesale because the report only ever needs the fixed bands —
- * data-driven terciles depend on the run's own distribution, which would make
- * two runs' band columns mean different things.
- */
+/** Fixed frequency bands. */
+// Only the fixed ones are used here: bands derived from a run's own spread would
+// make two runs' columns mean different things.
 function bandOfZipf(z: unknown): string {
   if (typeof z !== "number") return "unknown";
   if (z >= 5) return "very_common (>=5)";
@@ -346,8 +326,8 @@ function setIdentitySection(runs: Run[]): string {
       );
     }
 
-    // Pair counts: from the set file where it still exists (authoritative),
-    // otherwise reconstructed from the run that scored the most rows.
+        // Taken from the question set where it still exists, otherwise rebuilt from
+        // whichever run scored the most questions.
     const rowsFromFile = readSet(setFile);
     const counted: { label: string; get: (r: EvalRow | QueryResult) => string }[] = [
       { label: "source", get: (r) => (r as EvalRow).source },
@@ -522,17 +502,10 @@ function headroomSection(runs: Run[]): string {
   return out.join("\n");
 }
 
-/**
- * Two independent implementations of the same measurement, checked against
- * each other.
- *
- * At full vocabulary a lemma cell scores the same words, vectors and model as
- * the Postgres `--exact` run, through completely separate code: a brute-force
- * scan of a local Float32 buffer versus a pgvector sequential scan. They should
- * agree closely. A divergence means one of the two pipelines has a bug, and that
- * has to surface before anything is built on top of the results — which is why
- * this is generated rather than left to be remembered.
- */
+/** The same measurement made two completely different ways, checked against each other. */
+// One scans a local file, the other scans the database. They should agree
+// closely; if they don't, one of the two has a bug, and that has to surface
+// before anything is built on the results. Hence generated, not remembered.
 function crossValidationSection(runs: Run[]): string {
   const out: string[] = ["## 5. Cross-validation — two implementations, one measurement", ""];
 
@@ -642,8 +615,8 @@ function slicesSection(runs: Run[], prereg: string): string {
     const bySource = sliceTable(r.results, (q) => q.source);
     if (bySource) out.push("**by source** (all rows, including unreachable and leaked):", "", bySource, "");
 
-    // The prediction is printed here, immediately above the slice it concerns,
-    // so it cannot be read after the fact as a description of the result.
+        // Printed immediately above the results it concerns, so it cannot be reread
+        // afterwards as a description of what happened.
     out.push("**Pre-registered before any authored number existed:**", "", `> ${prereg}`, "");
 
     const byStyle = sliceTable(scope, (q) => q.meta.style as string | undefined);
@@ -673,13 +646,11 @@ function slicesSection(runs: Run[], prereg: string): string {
     if (unreachable.length) {
       const found = unreachable.filter((q) => q.rank !== null).length;
       const first = unreachable.filter((q) => q.lenientRank === 1).length;
-      // Scored, not just counted (RD-17). "Unexpectedly retrieved" was the right
-      // wording while the vocabulary was fixed and any hit was an anomaly; once a
-      // change can deliberately add these words, the count has to say whether they
-      // RANK, because a word that is present and never surfaces has not been added
-      // in any sense a user would notice. Still excluded from every headline
-      // figure — the flag is stored truth in a frozen file, so the headline
-      // denominator cannot move, which is what keeps before/after comparable.
+            // Scored, not merely counted. A count was the right thing while the word
+            // list was fixed and any hit was a fluke; once a change can deliberately
+            // add these words, what matters is whether they actually rank — a word
+            // that is present and never surfaces has not been added in any sense a
+            // user would notice. Still kept out of every headline figure.
       out.push(
         `**Coverage slice:** ${unreachable.length} targets flagged absent from the vocabulary; ` +
           `**${first} at rank 1**, ${found} retrieved at all. Reported here and excluded from ` +
@@ -692,7 +663,7 @@ function slicesSection(runs: Run[], prereg: string): string {
   return out.join("\n");
 }
 
-/** Explicit `--pair a:b`, else each set's reference run against its siblings. */
+/** Explicit pairs if given, otherwise each set's reference run against its siblings. */
 function choosePairs(runs: Run[]): { a: Run; b: Run; why: string }[] {
   const byTag = new Map(runs.map((r) => [r.tag, r]));
   const explicit = argAll("--pair");
@@ -708,7 +679,7 @@ function choosePairs(runs: Run[]): { a: Run; b: Run; why: string }[] {
     return out;
   }
 
-  // Runs are only comparable if they scored the same rows, so group by set.
+    // Runs are only comparable if they scored the same questions.
   const groups = new Map<string, Run[]>();
   for (const r of runs) {
     const key = r.config.setSha256 ?? r.config.set;
@@ -766,7 +737,7 @@ function comparisonsSection(runs: Run[]): string {
     const paired = a.results
       .map((ra) => ({ ra, rb: byId.get(ra.id) }))
       .filter((p): p is { ra: QueryResult; rb: QueryResult } => p.rb !== undefined)
-      // Headline comparisons run on the headline slice only.
+            // Headline comparisons use the headline questions only.
       .filter(({ ra }) => ra.source === "authored" && ra.meta.reachable !== false);
 
     const scoped =
@@ -782,10 +753,9 @@ function comparisonsSection(runs: Run[]): string {
     const ma = scoreFull(scoped.map((p) => p.ra));
     const mb = scoreFull(scoped.map((p) => p.rb));
 
-    // The pre-committed rule (METHODS §9a) resolves on LENIENT R@1, so the
-    // paired test that decides it runs on lenient rank-1 disagreements. Strict
-    // is computed alongside and reported, but it is tie-deflated for gloss
-    // cells and does not decide anything.
+        // The agreed rule decides on the lenient measure, so that is what the test
+        // runs on. The strict one is computed and reported alongside, but it
+        // undercounts wherever synonyms tie, and it decides nothing.
     const lenTop1 = (r: QueryResult) => r.lenientRank === 1;
     const regressions = scoped.filter((p) => lenTop1(p.ra) && !lenTop1(p.rb));
     const wins = scoped.filter((p) => !lenTop1(p.ra) && lenTop1(p.rb));
@@ -795,40 +765,34 @@ function comparisonsSection(runs: Run[]): string {
     const strictWins = scoped.filter((p) => p.ra.rank !== 1 && p.rb.rank === 1).length;
     const strict = mcnemar(strictRegressions, strictWins);
 
-    // A sampled cell and a full-scale cell are not measuring the same task:
-    // fewer distractors is strictly easier. Flag rather than drop, since the
-    // full-scale-cell-vs-Postgres cross-validation is a comparison we DO want.
+        // A sampled run and a full-scale one are not the same task: fewer wrong
+        // answers to sift is simply easier. Flag it rather than drop it, since one
+        // full-scale comparison is exactly the check we do want.
     const crossScale =
       a.config.poolScale !== undefined &&
       b.config.poolScale !== undefined &&
       a.config.poolScale !== b.config.poolScale;
 
-    // RD-17: a candidate-set change, which is NOT the same kind of problem as a
-    // cross-scale one and must not be flagged with the same words. A sampled
-    // pool is an easier version of the same task, so its delta means nothing. A
-    // larger *vocabulary* is a different task in one direction only: the
-    // reachable slice is answerable by both runs and its delta IS the regression
-    // test, while the coverage slice is answerable by one of them and is the
-    // capability. Both are real; the mistake would be adding them together.
+        // A change to the word list, which is a different problem from a size
+        // mismatch and must not be flagged in the same words. A smaller pool is an
+        // easier version of the same task, so its difference means nothing. A bigger
+        // vocabulary is a different task in one direction only: the answerable
+        // questions test for regressions, the rest test for new capability. Both are
+        // real; the mistake would be adding them together.
     const crossVocabulary =
       a.config.vocabulary !== undefined &&
       b.config.vocabulary !== undefined &&
       a.config.vocabulary !== b.config.vocabulary;
 
-    // A synset cell was long flagged here as "cross-surface", on the theory that
-    // expanding one row into several words consumes top-k slots a per-sense cell
-    // would spend on distinct results. That theory was MEASURED AND FALSIFIED:
-    // synset mates already sit in one bit-identical tied block in a per-sense
-    // cell, so expansion spends no slots the per-sense cell was not already
-    // spending. With the tie order held constant the two are per-query identical
-    // — 287/287 identical top-10 order, 0 discordant rank-1 pairs, p = 1.0.
-    //
-    // What genuinely differs is the TIE-BREAK POLICY: a per-sense cell resolves
-    // equal scores alphabetically (`compareWord`), a synset cell by its
-    // `--expansion-order`. Both are answer-key-independent, but they are not the
-    // same policy, and on tied queries that is the only thing separating them.
-    // So the comparison is valid; it just measures policy as well as
-    // representation, and the report says which.
+        // These two kinds of run were long assumed to be unfairly matched, on the
+        // theory that expanding one row into several words eats result slots. That
+        // theory was measured and proved false: synonyms already sit together in one
+        // tied block either way, so nothing extra is spent.
+        //
+        // What genuinely differs is how ties are broken. Both rules ignore the answer
+        // key, but they are not the same rule, and on tied questions that is the only
+        // thing separating the two. So the comparison is valid; it just measures the
+        // tie rule as well, and the report says so.
     const isSynset = (r: Run) => r.config.cellVariant === "gloss_synset";
     const tieOrderOf = (r: Run) =>
       isSynset(r) ? String(r.config.expansionOrder ?? "unknown") : "alphabetical";

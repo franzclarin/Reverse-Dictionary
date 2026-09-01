@@ -18,8 +18,8 @@ const SoundContext = createContext<SoundContextType>({
   play: () => {},
 });
 
-// Module-level, not state — an AudioContext survives remounts and browsers
-// cap how many can exist per page.
+// Kept outside React: browsers limit how many of these a page may create, so
+// it has to survive re-renders.
 let audioCtx: AudioContext | null = null;
 
 function getAudioContext(): AudioContext | null {
@@ -29,8 +29,7 @@ function getAudioContext(): AudioContext | null {
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Ctor) return null;
   if (!audioCtx) audioCtx = new Ctor();
-  // Browsers start a freshly-created context suspended until a user gesture;
-  // resume() is a no-op once it's already running.
+  // Browsers keep sound paused until the user interacts with the page.
   if (audioCtx.state === "suspended") void audioCtx.resume();
   return audioCtx;
 }
@@ -70,7 +69,7 @@ function noiseBurst(
   source.stop(now + duration);
 }
 
-/** Short filtered noise burst — a typewriter key striking the platen. Pitch varies slightly so a run of keystrokes doesn't sound mechanically identical. */
+/** A typewriter key strike. Pitch varies so fast typing doesn't sound robotic. */
 function playKey(ctx: AudioContext, variant: number) {
   noiseBurst(ctx, {
     duration: 0.03,
@@ -98,7 +97,7 @@ function playReturn(ctx: AudioContext) {
   osc.stop(now + 0.45);
 }
 
-/** Low pitch-dropping thud plus a tight noise transient — a rubber stamp landing, on a result. */
+/** A rubber stamp landing, when results arrive. */
 function playStamp(ctx: AudioContext) {
   const now = ctx.currentTime;
 
@@ -118,7 +117,7 @@ function playStamp(ctx: AudioContext) {
   noiseBurst(ctx, { duration: 0.02, gain: 0.18, filterType: "lowpass", filterFreq: 900 });
 }
 
-/** Soft descending two-note tone — no match or a request error. Deliberately not alarm-like. */
+/** Two soft falling notes for no match or an error. Deliberately not alarming. */
 function playError(ctx: AudioContext) {
   const now = ctx.currentTime;
   [440, 349.23].forEach((freq, i) => {
@@ -138,7 +137,7 @@ function playError(ctx: AudioContext) {
   });
 }
 
-/** Small neutral click — secondary actions like "Load more" or copying a link. */
+/** A small click for minor actions, like "Load more" or copying a link. */
 function playClick(ctx: AudioContext) {
   const now = ctx.currentTime;
   const osc = ctx.createOscillator();
@@ -154,7 +153,7 @@ function playClick(ctx: AudioContext) {
   osc.stop(now + 0.04);
 }
 
-/** Minimum gap between repeats of the same sound (ms) — a hard floor against key-repeat/paste turning into a buzz. */
+/** Smallest gap between repeats of a sound, so held keys don't turn into a buzz. */
 const MIN_GAP_MS: Record<SoundName, number> = {
   key: 35,
   return: 200,

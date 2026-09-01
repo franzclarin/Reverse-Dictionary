@@ -1,28 +1,13 @@
 """
-Training-pair recipes, and the split that keeps them honest.
+Recipes for building training examples, and the split that keeps them honest.
 
-WHAT THE MODEL NEEDS TO LEARN, stated precisely, because two separate
-measurements now point at it:
+What the model needs to learn: a question is a DESCRIPTION and a dictionary entry
+is a DEFINITION, related by rephrasing, not by sharing words. Two experiments
+already failed for that reason, so every recipe below says where it stands on it.
 
-    A query is a DESCRIPTION. A gloss is a DEFINITION.
-    They are related by PARAPHRASE, not by term overlap.
-
-RD-12 found MS MARCO cross-encoders ranking glosses by overlap with the query
-and losing to plain retrieval. RD-16 found `multi-qa-MiniLM` -- same
-architecture, same width, same depth as the fine-tune, trained on 215M QA pairs
-instead of 181k WordNet triplets -- losing 7.0 points, the only significant
-result in that sweep. Different architectures, different pipeline stages, one
-cause: QA and web-passage corpora teach question-to-answer-passage relevance,
-and this task is not that.
-
-So the recipes below are judged on ONE question: does this pair teach
-description-to-definition paraphrase? Each says where it stands.
-
-THE ORIGINAL RUN'S MISTAKE IS THE ONE TO AVOID. 181,149 triplets,
-`MultipleNegativesRankingLoss`, 3 epochs, `eval_on_start: False`,
-`prediction_loss_only: True` -- no evaluator and NO HELD-OUT SPLIT. Its recorded
-10.9% describes memorisation and cannot be cited. `split()` below exists so that
-cannot happen again, and `evalset.assert_disjoint()` is the harder gate on top.
+The original run held nothing back to test against, so its recorded score
+describes memorisation and cannot be quoted. The split below, and a harder gate
+on top of it, exist so that cannot happen again.
 """
 
 from __future__ import annotations
@@ -48,17 +33,11 @@ class Pair:
 
 def pairs_gloss_to_lemma(senses: list[Sense] | None = None) -> list[Pair]:
     """
-    (gloss, lemma) -- THE ORIGINAL RECIPE, reproduced as a CONTROL.
+    Definition to word -- the original recipe, kept as a control.
 
-    This is what the shipped fine-tune was trained on: 181,149 triplets of
-    (gloss, lemma, negative-lemma). Include it to reproduce the baseline with a
-    proper split, not because it is expected to be good.
-
-    Why it is weak, measured rather than argued: `VocabEmbedding` stores bare
-    lemma embeddings and `cos(embed(word), stored[word]) = 1.000000 +/- 1e-6`
-    across 24 probe words, so this recipe trains the model to match a 12-word
-    description against a ONE-TOKEN document. The whole RD-02 cutover exists
-    because that representation loses to indexing gloss text by 12.9 points.
+    Reproduces the baseline properly; not expected to be good. It trains the
+    model to match a twelve-word description against a single word, which is the
+    representation the index rebuild replaced.
     """
     senses = list(senses if senses is not None else all_senses())
     return [
@@ -70,17 +49,11 @@ def pairs_gloss_to_lemma(senses: list[Sense] | None = None) -> list[Pair]:
 
 def pairs_example_to_gloss(senses: list[Sense] | None = None) -> list[Pair]:
     """
-    (usage example, gloss) -- free, and genuinely cross-register.
+    Example sentence to definition -- free, and genuinely spans the gap.
 
-    32,991 of 117,791 WordNet synsets carry quoted examples. An example is a
-    natural sentence ("he loitered on the corner") and a gloss is a definition,
-    so the pair spans exactly the register distance a real query does.
-
-    The catch, and it is the same one that made `gloss_examples` a losing INDEX
-    variant at -1.4pp: an example is about a specific referent, not the meaning.
-    "how big is that part compared to the whole?" describes a situation, not
-    `whole`. Expect noise; that is why it is offered as a supplement rather than
-    a base.
+    An example is a natural sentence and a definition is a definition, so the
+    pair spans the distance a real question does. The catch: an example is about
+    one particular case, not the meaning. Expect noise; a supplement, not a base.
     """
     senses = list(senses if senses is not None else all_senses())
     out: list[Pair] = []
@@ -107,25 +80,16 @@ def pairs_wiktionary_paraphrase(
     max_per_word: int = 2,
 ) -> list[Pair]:
     """
-    (Wiktionary gloss, WordNet gloss) -- TWO INDEPENDENT DEFINITIONS OF ONE WORD.
+    Two independent definitions of one word.
 
-    This is the recipe worth trying first, and the reasoning is short: two
-    lexicographers, working separately, defining the same word, produce a
-    genuine paraphrase pair. That is the exact relation the task needs and the
-    exact relation QA corpora do not teach. It costs nothing but a pass over a
-    dump already on disk, and no language model is involved, so no LLM register
-    leaks in (which is the risk RD-14 carries).
+    Worth trying first: two lexicographers defining the same word separately
+    produce a genuine rephrasing, which is exactly what this task needs. Costs
+    one pass over a file already on disk, and no machine-written phrasing gets in.
 
-    Its honest weaknesses, stated up front so a null result is interpretable:
-      - SENSE ALIGNMENT IS APPROXIMATE. Pairing is by (word, pos), so a
-        polysemous word can pair Wiktionary's sense 2 with WordNet's sense 1.
-        `max_per_word` limits how far that compounds.
-      - Both sides are still DICTIONARY REGISTER. It teaches paraphrase, which
-        is the thing; it does not teach user phrasing, which is RD-10/RD-14's
-        separate problem. Do not claim it closes that gap.
-      - Wiktionary is CC BY-SA. Attribution travels with anything derived.
-
-    Requires the Kaikki dump -- `npm run supplement:fetch`.
+    Honest weaknesses, so a null result can be read. Senses are matched only by
+    spelling and part of speech, so a word with several meanings can pair the
+    wrong two. Both sides are still dictionary language, so it does not teach how
+    people actually talk. And the source is share-alike licensed.
     """
     from .wiktionary import glosses_by_word
 
@@ -141,7 +105,7 @@ def pairs_wiktionary_paraphrase(
             if not candidates:
                 continue
             for gloss in candidates[:max_per_word]:
-                # A near-identical pair teaches nothing and inflates the count.
+                                # A nearly identical pair teaches nothing and pads the count.
                 if gloss.lower() == s.gloss.lower():
                     continue
                 out.append(
@@ -174,18 +138,11 @@ def split(
     by_target: bool = True,
 ) -> tuple[list[Pair], list[Pair]]:
     """
-    Train/validation split, decided BEFORE training. Never after.
+    Split into training and checking data, decided BEFORE training. Never after.
 
-    `by_target=True` splits on the WORD, not the row, so every pair about
-    `petrichor` lands on one side. Splitting by row would put one definition of
-    a word in train and another in validation, and the validation number would
-    then measure memorisation -- which is precisely the failure the original run
-    made at full scale.
-
-    This validation set is for watching the loss curve and choosing a
-    checkpoint. IT IS NOT THE BENCHMARK. The benchmark is `eval/sets/v1.jsonl`,
-    it is scored through the retrieval path, and METHODS 9a resolves on lenient
-    R@1 there and nowhere else.
+    Splits on the WORD, not the row, so everything about `petrichor` lands on one
+    side; otherwise the check measures memorisation. This is for choosing when to
+    stop, not for judging the result -- that is the frozen question set.
     """
     rng = random.Random(seed)
 
@@ -207,14 +164,12 @@ def split(
 
 def to_dataset(pairs: list[Pair]):
     """
-    A `datasets.Dataset` shaped for MultipleNegativesRankingLoss.
+    The data shaped the way the training method expects.
 
-    MNRL takes (anchor, positive) columns and mines negatives IN-BATCH, so the
-    batch size is the number of negatives each example sees. That is also the
-    reason the original run's training-time figure is meaningless as a retrieval
-    number: ranking against 63 in-batch negatives and ranking against 693,325
-    live candidates are different problems, and this project exists partly
-    because they disagreed.
+    It learns by contrasting each example against the others in its batch, so
+    batch size decides how many wrong answers each one faces. Which is why the
+    original run's training score means nothing as a search result: beating 63
+    alternatives and beating 693,325 are different problems.
     """
     from datasets import Dataset
 

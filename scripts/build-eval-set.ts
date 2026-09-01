@@ -1,15 +1,13 @@
 /**
- * Build `eval/sets/v1.jsonl` from the reviewed TSV plus the gloss tripwire.
+ * Build the frozen question set from the reviewed file plus the tripwire rows.
  *
- * The authored slice comes from a human-edited TSV, never from the draft this
- * repo generated. Pass `--tsv <file>`; omit it to build the tripwire slice
- * alone, which is what the Phase C smoke test runs on.
+ * The hand-written questions come from a human-edited file, never from the draft
+ * this repo generated. Leaving out that file builds the tripwire rows alone,
+ * which is what the smoke test runs on.
  *
- * The tripwire is derived, not authored: `Word.definition` rows written during
- * the era when word pages had generated profiles. Those definitions are not
- * WordNet gloss text, but they describe words the fine-tune saw glossed, so
- * they leak at the paraphrase level. Hence `meta.leakage: "paraphrase"` and the
- * standing rule that this slice is never a headline number.
+ * The tripwire rows are not hand-written: they are paraphrased from stored
+ * definitions, which describe words the model was trained on. So they leak, they
+ * are labelled as leaking, and they are never a headline number.
  *
  *   npx tsx scripts/build-eval-set.ts --tsv eval/sets/v1-reviewed.tsv
  *   npx tsx scripts/build-eval-set.ts --tripwire-only --out eval/sets/tripwire.jsonl
@@ -51,17 +49,16 @@ function arg(flag: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
-/** Columns the reviewed TSV must have for the parse to mean anything. */
+/** Columns the reviewed file must have for the parse to mean anything. */
 const REQUIRED_COLUMNS = ["target", "query"];
 
 function parseTsv(file: string): Record<string, string>[] {
   const lines = fs
     .readFileSync(file, "utf8")
     .split(/\r?\n/)
-    // Comment lines are emitted with a QUOTED first cell, so they begin with
-    // `"#` rather than `#`. Matching only `#` made the first comment line the
-    // header, which silently produced zero authored rows and a frozen set
-    // containing nothing but the quarantined tripwire.
+        // Comment lines start with a quote mark before the hash. Matching the hash
+        // alone made the first comment the header, which silently produced zero
+        // hand-written rows and a set containing only the quarantined ones.
     .filter((l) => l.length > 0 && !l.startsWith("#") && !l.startsWith('"#'));
   const header = lines[0].split("\t");
 
@@ -98,8 +95,8 @@ async function buildAuthored(file: string): Promise<EvalRow[]> {
     if (!row.target || !row.query) continue;
     n++;
 
-    // Trust the reviewed file for content, but recompute anything derivable so
-    // an edited query can't carry stale metadata.
+        // Trust the reviewed file for wording, but recompute anything derivable, so
+        // an edited question cannot carry stale details.
     const rawZipf = row.zipf ? Number(row.zipf) : zipf.get(row.target.toLowerCase());
     out.push({
       id: `authored-${String(n).padStart(4, "0")}`,
@@ -112,10 +109,9 @@ async function buildAuthored(file: string): Promise<EvalRow[]> {
         token_count: /[ _-]/.test(row.target) ? "multi" : "single",
         style: row.style || undefined,
         lexical_overlap: (row.lexical_overlap as EvalMeta["lexical_overlap"]) || "none",
-        // Case-insensitive: the reviewed TSV writes TRUE/FALSE, and comparing
-        // against lowercase "false" silently marked all 25 coverage rows
-        // reachable — which would have counted deliberately-absent targets as
-        // headline misses.
+                // Compared ignoring case: the file writes TRUE/FALSE, and matching only
+                // lowercase silently marked every deliberately-missing word as findable,
+                // which would have counted them as headline failures.
         reachable: !/^(false|0|no)$/i.test((row.reachable ?? "").trim()),
         acceptable: splitAcceptable(row.acceptable ?? ""),
       },
@@ -127,9 +123,8 @@ async function buildAuthored(file: string): Promise<EvalRow[]> {
 async function buildTripwire(): Promise<EvalRow[]> {
   const zipf = loadZipf();
 
-  // Same exclusions as every other slice: query at least three words, query
-  // must not contain the target, target must be reachable. Case-insensitive
-  // vocabulary match — this is a tripwire, precision there does not matter.
+    // Same rules as everywhere else: at least three words, must not contain its
+    // own answer, answer must be findable.
   const rows = await prisma.$queryRawUnsafe<{ word: string; definition: string }[]>(
     `SELECT w.word, w.definition
        FROM "Word" w
@@ -187,9 +182,9 @@ async function main(): Promise<void> {
   }
   rows.push(...(await buildTripwire()));
 
-  // A --tsv build that yields no authored rows is always a parse failure, never
-  // a legitimate outcome. Writing it would freeze a set whose only content is
-  // the quarantined slice, under a filename claiming otherwise.
+    // A build that yields no hand-written rows is always a parse failure, never a
+    // real outcome. Writing it would freeze a set containing only the quarantined
+    // rows, under a filename claiming otherwise.
   if (tsv && !rows.some((r) => r.source === "authored")) {
     console.error(
       "Refusing to write: --tsv was given but the authored slice is empty.\n" +

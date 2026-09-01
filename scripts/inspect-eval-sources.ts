@@ -1,11 +1,8 @@
 /**
- * Phase 1 — discovery.
+ * A first look at the live database: what is actually in it, and does anything
+ * hold (description -> word) pairs a test set could be built from?
  *
- * Read-only reconnaissance of the production database: what does the live
- * schema actually contain, and which tables (if any) hold labelled
- * (description -> word) pairs we could build an eval set from?
- *
- * Everything here is SELECT-only. Run:
+ * Reads only; changes nothing.
  *   npx tsx scripts/inspect-eval-sources.ts
  */
 import { PrismaClient } from "@prisma/client";
@@ -55,7 +52,7 @@ async function countRows(table: string): Promise<number> {
   return Number(rows[0].n);
 }
 
-/** Any free-text column anywhere is a candidate home for a stored query. */
+/** Any free-text column is somewhere a stored question could be hiding. */
 async function findTextColumns(): Promise<ColumnRow[]> {
   return prisma.$queryRawUnsafe<ColumnRow[]>(
     `SELECT table_name, column_name, data_type, udt_name, is_nullable
@@ -229,8 +226,8 @@ async function main(): Promise<void> {
   }
 
   heading("Vocabulary provenance");
-  // If VocabEmbedding is the WordNet lemma set, then WordNet glosses are not a
-  // neutral eval source — the fine-tune's model card shows it trained on them.
+    // If the index is the dictionary's word list, then that dictionary's own
+    // definitions are not a fair test source — the model was trained on them.
   const probes = [
     "correlation",
     "moaner",

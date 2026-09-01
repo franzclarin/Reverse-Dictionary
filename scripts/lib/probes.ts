@@ -1,15 +1,12 @@
-/**
- * The 25 hand-written user-voice probe queries, plus the lexical-echo rule.
- *
- * Shared by `audit-vocab.ts` (Phase A), `probe-margins.ts` (Phase A3) and
- * `eval.ts` (Phase C) so the echo numbers stay comparable across all of them.
- * Change the rule here or not at all.
- *
- * The queries were written blind — from the concept, never from a gloss — so
- * they also serve as the pilot batch for the Phase B authoring protocol.
- * `answer` is the word I had in mind while writing; several queries have other
- * defensible answers, so it is a single reference, not a gold standard.
- */
+// Twenty-five test questions written the way a person would ask them, plus the
+// rule for spotting answers that merely echo the question back.
+//
+// Shared by every script that reports echo, so the numbers stay comparable.
+// Change the rule here or not at all.
+//
+// The questions were written from the idea alone, never from a dictionary. The
+// listed answer is the word the author had in mind — often not the only fair
+// one, so treat it as a reference rather than a verdict.
 export type ProbeQuery = { query: string; answer: string };
 
 export const PROBE_QUERIES: ProbeQuery[] = [
@@ -40,7 +37,7 @@ export const PROBE_QUERIES: ProbeQuery[] = [
   { query: "when two words sound the same but mean completely different things", answer: "homophone" },
 ];
 
-/** Function words that carry no retrieval signal. */
+/** Everyday joining words that say nothing about meaning. */
 export const STOPWORDS = new Set(
   ("a an the of to in on at for from by with and or but not no is are was were be been " +
     "being it its that this these those you your they them their he she his her i we our " +
@@ -51,7 +48,7 @@ export const STOPWORDS = new Set(
     .split(/\s+/)
 );
 
-/** Content tokens of a query, for the echo rule. */
+/** The meaningful words of a question, used by the echo rule. */
 export function contentTokens(query: string): string[] {
   return query
     .toLowerCase()
@@ -59,13 +56,9 @@ export function contentTokens(query: string): string[] {
     .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
 }
 
-/**
- * Does `resultWord` echo a content word of the query?
- *
- * Deliberately crude: a shared 4-character prefix on any token pair. That is
- * enough to catch rain/raininess/raindrop/rainstorm, laugh/laughter/laughing
- * and minute/minuteness, which is the pattern of interest.
- */
+/** Does this answer just repeat a word from the question? */
+// Crude on purpose — a shared four-letter opening. Enough to catch
+// rain/raininess/raindrop and laugh/laughter, which is the pattern of interest.
 export function echoesQuery(resultWord: string, queryTokens: string[]): boolean {
   const resultTokens = resultWord.toLowerCase().split(/[^a-z]+/).filter(Boolean);
   for (const rt of resultTokens) {

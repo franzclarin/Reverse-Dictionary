@@ -1,32 +1,23 @@
 /**
- * RD-17 step 6 — insert the measured supplement into the production index.
+ * Add the measured extra entries to the live index.
  *
- * ONLY RUN THIS PAST THE GATE. Steps 4 and 5 exist so the decision is made on a
- * local cell at zero production exposure, exactly as RD-12's reranker and
- * RD-16's encoder sweep were — and both of those ended in "nothing shipped".
- * Read eval/METHODS.md §15 before running it.
+ * Only run this once the decision is made. The earlier steps exist so that
+ * decision is reached on a local file with no exposure at all — and two previous
+ * experiments of the same shape ended in "nothing shipped".
  *
- * THE VECTORS COME FROM THE CELL THAT WAS MEASURED, not from a re-embed. Two
- * reasons, and the second is the important one:
+ * The numbers come from the file that was measured, never from measuring again.
+ * Re-measuring would take an hour to prove the model is repeatable, and worse,
+ * it is a second measuring path in disguise: if anything differed, the table
+ * would hold numbers no run ever scored, and every published result would
+ * describe something other than what shipped.
  *
- *   - Re-encoding half a million glosses to get the same numbers is an hour
- *     spent proving the encoder is deterministic.
- *   - A re-embed is a second embedding path in disguise. If anything differed —
- *     a model revision, a changed text variant, a reordered manifest — the table
- *     would hold vectors no eval run ever scored, and every number in §15 would
- *     describe something other than what shipped. The cell has an input hash and
- *     a prefix-identity check behind it; that is the artifact to trust.
+ * Insert only. The existing rows are not touched, not rewritten and not
+ * re-measured, so undoing this is a single delete of the newly added rows and
+ * the previous index is exactly restored.
  *
- * INSERT ONLY. The 117,791 WordNet rows are not touched, not rewritten, and not
- * re-embedded — their vectors are bit-identical before and after, so the
- * rollback is `DELETE FROM "GlossEmbedding" WHERE "synsetKey" LIKE 'wikt:%'`
- * and the pre-expansion index is exactly restored.
- *
- * AFTER INSERTING, REBUILD THE IVFFLAT INDEX. `lists = 115` was tuned for
- * 117,791 rows and is wrong for the new count, and `GLOSS_PROBES = 40` is only
- * meaningful as a fraction of `lists`. The script prints the statement and the
- * probe sweep to run; it does not rebuild the index unattended, because that is
- * a minutes-long exclusive operation on the table serving production.
+ * Afterwards, rebuild the search index: its tuning was chosen for the old row
+ * count and is wrong for the new one. This script prints the commands rather
+ * than running them, because that rebuild locks a table the live site is using.
  *
  *   npx tsx scripts/build-supplement-index.ts --cell full_gloss_wikt_new --dry-run
  *   npx tsx scripts/build-supplement-index.ts --cell full_gloss_wikt_new --confirm
@@ -44,10 +35,10 @@ loadEnv();
 
 const prisma = new PrismaClient();
 
-/** Matches `build-gloss-index.ts`: one multi-row INSERT per batch, not 500 round trips. */
+/** One insert per batch, rather than hundreds of separate round trips. */
 const BATCH_SIZE = 500;
 
-/** Namespace prefix every supplement key carries. The rollback predicate. */
+/** The prefix every added row carries, which is also how they get removed again. */
 const KEY_PREFIX = "wikt:";
 
 type ManifestRow = { key: string; word: string; text: string; source: string };
@@ -104,8 +95,8 @@ async function main(): Promise<void> {
     throw new Error(`manifest has ${manifest.length} rows, cell has ${idx.meta.rows}`);
   }
 
-  // The gloss text per key, straight from the filtered source, so the column and
-  // the vector describe the same sense.
+    // The definition for each row, straight from the filtered source, so the text
+    // and the numbers describe the same meaning.
   const supplement = manifest
     .map((row, i) => ({ ...row, row: i }))
     .filter((r) => r.source === "wiktionary");
@@ -144,8 +135,8 @@ async function main(): Promise<void> {
       const base = n * 5;
       values.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}::text[], $${base + 5}::halfvec)`);
       const vector = Array.from(idx.data.subarray(r.row * DIM, (r.row + 1) * DIM));
-      // `pos` mirrors the WordNet rows' vocabulary (noun/verb/adj/adv); the
-      // Wiktionary filter keeps only those four, so nothing new appears here.
+            // The filter keeps only the same four parts of speech the existing rows
+            // use, so nothing new appears here.
       params.push(r.key, r.key.split(":")[2] ?? "", r.text, [r.word], `[${vector.join(",")}]`);
     });
     await prisma.$executeRawUnsafe(

@@ -1,23 +1,10 @@
-/**
- * The production retrieval path, mirrored for offline evaluation.
- *
- * This is a deliberate mirror of `app/api/lookup/route.ts` — the same
- * `$transaction`, the same `SET LOCAL ivfflat.probes`, the same `<=>` ordering
- * and `1 - distance` similarity. It must not drift. The embedding side is not
- * mirrored at all: we import `embed` from `lib/embedder.ts` directly, because a
- * second embedding path would make every number here fiction.
- *
- * Additions over the route (all opt-in, all off by default):
- *   - `exact`      : disable index scans for a true nearest-neighbour ceiling
- *   - `filterJunk` : restrict the candidate pool to plausibly-answerable lemmas
- *
- * Since the RD-02 cutover the route searches the synset-keyed gloss index, so
- * `index: GLOSS_INDEX` is the setting that mirrors production. That path is not
- * reimplemented here — it DELEGATES to the same `lib/glossSearch.ts` the route
- * calls, because the whole point of this file is that there is one retrieval
- * path, not two that resemble each other. The lemma queries below remain for
- * the rollback path and for lemma-vs-gloss comparisons.
- */
+// The real search, copied here so it can be scored offline. It must not drift
+// from the live version, so the meaning-based path calls the very same code the
+// app calls rather than repeating it, and measuring text is never redone here —
+// a second way of doing that would make every number below fiction.
+//
+// Two extras the app doesn't have, both off unless asked for: search everything
+// exhaustively, and ignore words that could never be an answer.
 import type { PrismaClient } from "@prisma/client";
 import { GLOSS_INDEX, searchGloss } from "../../lib/glossSearch";
 
@@ -25,19 +12,9 @@ export type ResultRow = { word: string; similarity: number };
 
 export const PRODUCTION_PROBES = 10;
 
-/**
- * True for a `VocabEmbedding` row that cannot be the answer to a
- * reverse-dictionary query, and so only crowds the neighbourhood around rows
- * that can.
- *
- * Written as one SQL expression so the same text backs both the proposed
- * `answerable_vocab` view and the inline `--filter-junk` WHERE clause. `%s` is
- * the table alias.
- *
- * Deliberately NOT included: multi-word entries. "deja vu", "stiff upper lip"
- * and "red herring" are legitimate answers, and the audit found the multi-word
- * class is far too mixed to reject wholesale.
- */
+/** Spots entries that could never be the answer, and only crowd the ones that could. */
+// Written once, in one place, so everything that filters uses the same rule.
+// Multi-word entries are deliberately kept: "deja vu" is a legitimate answer.
 export function junkPredicate(alias = ""): string {
   const w = alias ? `${alias}.word` : "word";
   return [
@@ -49,7 +26,7 @@ export function junkPredicate(alias = ""): string {
 
 export const DEFAULT_INDEX = "VocabEmbedding";
 
-/** Table names are interpolated, never parameterised — whitelist the shape. */
+/** Table names get pasted into the query, so only allow safe-looking ones. */
 export function assertSafeIdentifier(name: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
     throw new Error(`unsafe SQL identifier: ${JSON.stringify(name)}`);
@@ -60,35 +37,21 @@ export function assertSafeIdentifier(name: string): string {
 export type SearchOptions = {
   k?: number;
   probes?: number;
-  /** Force a sequential scan — the true nearest-neighbour ceiling. */
+  /** Check every row. Slow, but shows the best score possible. */
   exact?: boolean;
-  /** Restrict the candidate pool with `junkPredicate()`. */
+  /** Leave out entries that could never be an answer. */
   filterJunk?: boolean;
-  /** Table to search. Must expose `word` and `embedding`. */
+  /** Which table to search. */
   index?: string;
-  /**
-   * The table holds one row per (word, sense) rather than one per word. Take
-   * the best-matching sense per word, then dedupe by word — a single averaged
-   * vector represents no sense of a polysemous word well, which is half the
-   * point of a gloss index.
-   */
+  /** The table stores each meaning separately, so keep each word's best one. */
   perSense?: boolean;
-  /**
-   * Candidates to pull before per-sense dedupe. One word can occupy many
-   * senses, so k rows of raw nearest-neighbours may collapse to far fewer
-   * distinct words. Ignored when `exact` is set (that path groups the whole
-   * table and needs no over-fetch).
-   */
+  /** Ask for extra rows first, since one word can appear under many meanings. */
   overfetch?: number;
 };
 
-/**
- * Run the pgvector search exactly as `/api/lookup` does.
- *
- * `embedding` must already be the 384-dim L2-normalised vector from
- * `embed()` — this function never embeds, so callers cannot accidentally
- * introduce a second encoder.
- */
+/** Run the search exactly as the live app does. */
+// Takes numbers already measured by `embed()`; never measures text itself, so
+// no caller can accidentally slip in a second way of doing it.
 export async function search(
   prisma: PrismaClient,
   embedding: number[],
@@ -96,11 +59,9 @@ export async function search(
 ): Promise<ResultRow[]> {
   const {
     k = 10,
-    // Left undefined so each index applies its OWN default: the lemma path
-    // below uses PRODUCTION_PROBES (10), the gloss path uses GLOSS_PROBES (40).
-    // Defaulting here would silently impose the lemma tuning on the gloss
-    // index, which is exactly the mistake that cost 5.5 points before it was
-    // measured. An explicit --probes still overrides both.
+    // Left unset so each index uses its own setting. Choosing one here would
+    // silently force one index's tuning onto the other, which has cost real
+    // accuracy before. Passing --probes still overrides both.
     probes,
     exact = false,
     filterJunk = false,
@@ -114,10 +75,8 @@ export async function search(
   const where = filterJunk ? `WHERE NOT (${junkPredicate()})` : "";
 
   if (table === GLOSS_INDEX) {
-    // The gloss table is keyed by synset and has no `word` column, so none of
-    // the lemma-shaped options below apply to it. Refuse rather than silently
-    // ignore them: a run tagged `--filter-junk` that quietly did no filtering
-    // would put a false claim in eval/runs/*.json.
+    // These options don't apply to the meaning-based table. Refuse rather than
+    // ignore them, or a saved result would claim a filter that never ran.
     const unsupported = [
       exact && "--exact",
       filterJunk && "--filter-junk",
@@ -135,8 +94,8 @@ export async function search(
 
   return prisma.$transaction(async (tx) => {
     if (exact) {
-      // A sequential scan over 141,854 x 384 floats is cheap, and it is the
-      // only way to see what the approximate index is losing.
+      // Checking every row is cheap here, and it is the only way to see what
+      // the fast-but-approximate index is missing.
       await tx.$executeRawUnsafe(`SET LOCAL enable_indexscan = off`);
       await tx.$executeRawUnsafe(`SET LOCAL enable_bitmapscan = off`);
     } else {
@@ -146,7 +105,7 @@ export async function search(
     }
 
     if (!perSense) {
-      // The production query, unchanged.
+      // The live query, unchanged.
       return tx.$queryRawUnsafe<ResultRow[]>(
         `SELECT word, 1 - (embedding <=> $1::vector) AS similarity
            FROM "${table}"
@@ -159,8 +118,8 @@ export async function search(
     }
 
     if (exact) {
-      // True max-similarity per word over the whole table. Only affordable
-      // because the 2x2 runs on a local file-backed pool.
+      // Each word's genuine best score across the whole table. Only affordable
+      // because this runs against a local file.
       return tx.$queryRawUnsafe<ResultRow[]>(
         `SELECT word, max(1 - (embedding <=> $1::vector)) AS similarity
            FROM "${table}"
@@ -173,8 +132,7 @@ export async function search(
       );
     }
 
-    // Index-friendly path: pull k * overfetch nearest senses, then collapse to
-    // one row per word keeping its best sense.
+    // Pull extra nearby meanings, then keep one row per word — its best one.
     return tx.$queryRawUnsafe<ResultRow[]>(
       `SELECT word, max(similarity) AS similarity
          FROM (

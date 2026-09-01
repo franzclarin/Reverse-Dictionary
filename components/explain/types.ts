@@ -1,21 +1,21 @@
 import type { Basis } from "@/lib/viz/projection";
 import type { Token } from "@/lib/viz/wordpiece";
 
-/** `public/viz/pipeline-snapshot.json`, built by `scripts/build-viz-snapshot.ts`. */
+/** The saved background cloud, built by `scripts/build-viz-snapshot.ts`. */
 export type Snapshot = {
   builtAt: string;
   dim: number;
-  /** Rows in the live index (693,325 since RD-17). The cloud is a sample of it, not all of it. */
+  /** How many meanings are in the real index. The cloud shows a sample of them. */
   indexRows: number;
   sampled: number;
-  /** Share of 384-d variance the three drawn components carry. MUST be displayed. */
+  /** How much of the real detail the flattened picture keeps. Must be displayed. */
   varianceExplained: number;
   componentVariance: number[];
   spread95: number[];
   basis: Basis;
   mean: number[];
   keys: string[];
-  /** One char per point, in point order: n / v / a / r. */
+  /** Part of speech per point: noun, verb, adjective, adverb. */
   pos: string;
   lemmas: string[][];
   glosses: string[];
@@ -24,10 +24,10 @@ export type Snapshot = {
   z: number[];
 };
 
-/** The `debug` block `/api/lookup` returns for `{ debug: true }`. */
+/** The extra working-out the search API returns when asked for it. */
 export type LookupDebug = {
   queryVector: number[];
-  /** The real per-token vectors the query vector was pooled from. */
+  /** The real numbers for each word-part, before they were averaged. */
   tokenVectors: number[][];
   tokenVectorsTruncated: boolean;
   synsets: {
@@ -43,13 +43,13 @@ export type LookupDebug = {
 
 export type ResultRow = { word: string; similarity: number };
 
-/** A retrieved synset, placed. `x/y/z` come from `project()`, never from neighbours. */
+/** A result with its position, worked out exactly rather than from its neighbours. */
 export type PlacedSynset = LookupDebug["synsets"][number] & {
   rank: number;
   x: number;
   y: number;
   z: number;
-  /** Row in the sampled cloud, when this synset happens to be drawn there too. */
+  /** Its place in the background cloud, when it happens to be drawn there too. */
   cloudRow: number | null;
 };
 
@@ -60,9 +60,9 @@ export type Run = {
   query: string;
   tokens: Token[];
   truncated: boolean;
-  /** The query's real 384 numbers, as the server computed them. */
+  /** The query's real numbers, as the server worked them out. */
   queryVector: number[] | null;
-  /** One real vector per token, in token order. The film averages these on screen. */
+  /** The real numbers per word-part. The animation averages these on screen. */
   tokenVectors: number[][];
   tokenVectorsTruncated: boolean;
   queryPoint: { x: number; y: number; z: number } | null;

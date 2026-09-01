@@ -1,33 +1,26 @@
 /**
- * Integrity check for RD-17's composed cells.
+ * Integrity check for the assembled experiment files.
  *
- * `verify-encoder-cell.ts` recomputes its input hash from `wordnet-db` alone, so
- * it would correctly reject a cell holding Wiktionary rows — the hash of
- * WordNet's texts is not the hash of WordNet's texts followed by half a million
- * others. Same criteria, different source of truth: the sidecar manifest each
- * composed cell is written with.
+ * The other checker rebuilds its fingerprint from the original dictionary alone,
+ * so it would rightly reject a file that also holds added entries. Same
+ * criteria, different source of truth: the record written alongside each file.
  *
- *   1. INPUT HASH. Recompute `inputsSha256()` over the manifest's ordered texts
- *      and compare to the cell's stored value. Proves row i holds the text row i
- *      claims, in the order the vectors were written.
+ *   1. Fingerprint. Recompute it from the recorded texts and compare. Proves
+ *      row 5 holds the text row 5 claims, in the order the numbers were written.
  *
- *   2. PREFIX IDENTITY — the check that licences reading the delta at all. The
- *      first 117,791 rows must be BYTE-IDENTICAL to `full_gloss_ft.vec`, RD-16's
- *      verified control. The entire argument for these cells is that the WordNet
- *      half was copied rather than re-embedded, so any measured difference is
+ *   2. Unchanged front. The original rows must be byte-for-byte identical to the
+ *      verified control. The entire argument for these files is that the
+ *      original half was copied rather than re-measured, so any difference is
  *      the added rows alone. That is an assumption until something compares the
  *      bytes, and this is that something.
  *
- *   3. SELF-RETRIEVAL, BY KEY, SAMPLED FROM BOTH HALVES. Embed a row's own
- *      indexed text and require a row with that key at rank 1. Sampled from the
- *      WordNet half and the Wiktionary half separately, because a build that
- *      misaligned only the appended half would still pass a sample drawn from
- *      the front.
+ *   3. Can it find itself? Measure a row's own text and require that row back
+ *      first. Sampled from each half separately, because a build that misaligned
+ *      only the added half would still pass a sample drawn from the front.
  *
- *      Not 60/60, for the reason RD-16 records and one more: 482 WordNet gloss
- *      texts are shared by more than one synset, and Wiktionary contains its own
- *      verbatim-duplicate glosses across homographs. Both are genuinely
- *      indistinguishable and neither is a defect.
+ *      Not a perfect score, and that is expected: some definitions appear word
+ *      for word under more than one entry, in both halves. Those are genuinely
+ *      indistinguishable, and neither is a defect.
  *
  *   npx tsx scripts/verify-supplement-cell.ts
  *   npx tsx scripts/verify-supplement-cell.ts full_gloss_wikt_new
@@ -41,7 +34,7 @@ import { cellDir, loadIndex, searchLocalRows, vocabularyOf, DIM } from "./lib/lo
 
 const BASE_CELL = "full_gloss_ft";
 const BASE_ROWS = 117_791;
-/** Probes per half. Kept equal so neither half can hide behind the other's score. */
+/** Checks per half, kept equal so neither can hide behind the other's score. */
 const SAMPLE_PER_HALF = 30;
 const PASS_THRESHOLD = 27; // of 30, per half — same 5% collision allowance as RD-16
 
@@ -64,7 +57,7 @@ async function readManifest(file: string): Promise<ManifestRow[]> {
   return rows;
 }
 
-/** Byte-compare a prefix of two vector files without loading either whole. */
+/** Compare the start of two files byte by byte, without loading either whole. */
 function prefixIdentical(a: string, b: string, rows: number): boolean {
   const bytes = rows * DIM * 4;
   if (fs.statSync(b).size < bytes) return false;

@@ -1,29 +1,20 @@
 """
-The gate. Pins this package to the TypeScript harness.
+The gate. Ties this Python code to the TypeScript harness.
 
-RD-22 chose a self-contained Python scoring loop. That is a SECOND
-IMPLEMENTATION, and METHODS is blunt about the risk: two scorers can drift, and
-a drifted scorer produces numbers that look comparable to committed runs and are
-not. The repo's answer to that problem elsewhere is never "be careful" -- it is a
-check:
+A second scoring implementation is a real hazard: two scorers can drift, and a
+drifted one produces numbers that look comparable to recorded runs and are not.
+The answer to that here is never "be careful" -- it is a check, exactly as the
+browser's word-splitter is checked against the real one, and as each experiment
+has to reproduce its predecessor before it may be read.
 
-  - `npm run verify-viz` asserts the browser's reimplemented WordPiece tokenizer
-    against the real AutoTokenizer over 415 strings.
-  - RD-17's `rd17_control` had to reproduce RD-16's `full_gloss_ft` to the digit
-    before either arm was allowed to be read.
-  - `exact` (pgvector) was cross-validated against `cell_lemma_ft` (local brute
-    force) at 99.0% top-1 agreement.
+Run `check_all()` after touching any of the scoring or search modules, and
+before believing any number a notebook prints.
 
-This module is the same move for the Python port. Run `check_all()` after
-touching metrics.py, echo.py, wordnet.py or retrieval.py, and before believing
-any number a notebook prints.
-
-WHAT IT PROVES AND WHAT IT DOES NOT. It proves the SCORING agrees with the
-harness on runs the harness produced, and that the encoder agrees with the ONNX
-model that serves production. It does not prove the local exact scan agrees with
-the live IVFFlat index -- those are different retrieval methods and are expected
-to differ by ~0.3 points. Confirm anything decision-shaped through
-`npx tsx scripts/eval.ts`.
+What it proves and what it does not. It proves the scoring agrees with the
+harness on runs the harness produced, and that the model here is the model that
+serves production. It does not prove a local exhaustive scan matches the live
+index -- those are different methods and are expected to differ slightly.
+Confirm anything decision-shaped through the TypeScript harness.
 """
 
 from __future__ import annotations
@@ -46,8 +37,8 @@ class Check:
         return f"  [{'PASS' if self.passed else 'FAIL'}]  {self.name}\n           {self.detail}"
 
 
-# Published in CLAUDE.md's production table, authored-reachable slice (n=287).
-# These are what `npm run eval:prod` wrote and what every RD-17 claim rests on.
+# The published production figures. These are what the eval command wrote, and
+# what every current claim rests on.
 PUBLISHED = {
     "prod_wikt_shipped": {
         "lenient_recall1": 0.251,
@@ -116,8 +107,8 @@ def check_metrics(tolerance: float = 0.001) -> list[Check]:
             have = getattr(got, metric)
             if abs(have - want) > tolerance:
                 ok = False
-            # MRR is a reciprocal rank, not a rate; showing it as a percentage
-            # alongside the recall figures invites it being copied as one.
+                        # This one is not a percentage; showing it beside the others as if
+                        # it were invites it being copied as one.
             if metric.startswith("mrr"):
                 diffs.append(f"{metric} {have:.3f} vs {want:.3f}")
             else:
@@ -154,11 +145,11 @@ def check_mcnemar() -> list[Check]:
 
 def check_echo(tag: str = "prod_wikt_shipped", tolerance: float = 0.002) -> Check:
     """
-    Recompute echo from the ported rule and compare against the stored field.
+    Recompute the echo rate here and compare against what was stored.
 
-    This is the strongest check in the module, because it does not trust the
-    harness's output at all: it re-derives the value from `query` and `results`
-    using echo.py, and compares against what probes.ts computed at run time.
+    The strongest check in this file, because it trusts none of the harness's
+    output: it re-derives the value from the question and the results, and
+    compares against what the harness computed at the time.
     """
     try:
         run = runs_mod.load_run(tag)
@@ -197,15 +188,13 @@ def check_wordnet() -> Check:
 
 def check_encoder(tolerance: float = 1e-5) -> Check:
     """
-    The Python encoder is the production encoder.
+    Confirm the model here is the model that serves production.
 
-    Loads the fine-tune through sentence-transformers and compares against
-    vectors produced by the ONNX model lib/embedder.ts serves. Measured at
-    cos = 1.0000001, max abs difference 1.3e-07 when RD-22 was built -- float32
-    rounding, nothing more.
+    Loads it one way and compares against numbers produced the other way. The
+    two agree to within ordinary rounding.
 
-    Reference vectors are regenerated on demand rather than committed, so this
-    check cannot go stale against a model change.
+    The reference numbers are regenerated on demand rather than committed, so
+    this check cannot go stale against a model change.
     """
     try:
         import numpy as np
@@ -241,17 +230,17 @@ def check_encoder(tolerance: float = 1e-5) -> Check:
 
 def check_cell_roundtrip(cell_name: str, ts_run_tag: str) -> Check:
     """
-    The strongest available check: same cell, both scorers, per-query comparison.
+    The strongest check available: one file, both scorers, question by question.
 
-    Not part of `check_all()` because it needs a built cell and a harness run,
-    which `check_all()` deliberately does not require. Run it once after any
-    change to retrieval.py, like this:
+    Not part of `check_all()`, because it needs a built file and a harness run
+    that `check_all()` deliberately does not require. Run it once after any
+    change to the search code:
 
         EVAL_CELL_DIR=~/rd_eval_cells npx tsx scripts/eval.ts \\
             --set eval/sets/v1.jsonl --index-file <cell> --tag <tag>
 
-    then pass the cell and tag here. When RD-22 was built this returned
-    287/287 identical on all three axes -- not "close", identical.
+    then pass the file and tag here. It should come back identical -- not close,
+    identical.
     """
     import numpy as np  # noqa: F401  (imported for the encoder path below)
 

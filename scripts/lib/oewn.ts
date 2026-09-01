@@ -1,33 +1,26 @@
-/**
- * Minimal Open English WordNet (WN-LMF 1.3 XML) reader — RD-17 step 2.
- *
- * WHY IT EXISTS AND WHY IT IS NOT A BUILD INPUT. RD-17's step 2 says to try the
- * cheap source before the expensive one: OEWN is the maintained successor to
- * Princeton WordNet 3.0 with the same synset/gloss structure, so adopting it
- * would change only the reader in `wordnet.ts` and cost roughly zero extra
- * storage. The delta was measured (see `probe-oewn-delta.ts`) and it is not the
- * ticket, so this stays a probe. Do not wire it into `build-gloss-index.ts`
- * without reading METHODS §15 first — OEWN uses its own synset identifiers, so
- * adopting it re-keys the whole index and orphans every committed run.
- *
- * The file is ~100 MB of XML unpacked. A DOM parse would be gratuitous: the
- * format is machine-generated with one element per line and fixed attribute
- * order, so the three regexes below read it in one pass. If the upstream
- * formatting ever changes this will silently return less than it should, which
- * is why `readOewn()` asserts non-trivial counts before returning.
- */
+// Reads Open English WordNet, the maintained successor to the dictionary this
+// project uses.
+//
+// This is a probe, not a build input. Switching to it was measured and turned
+// out not to be worth it, and it numbers its entries differently — adopting it
+// would renumber the whole index and invalidate every recorded result.
+//
+// The file is about 100 MB of XML, machine-generated with one item per line, so
+// three patterns read it in a single pass. If that formatting ever changes this
+// would quietly return too little, which is why the reader checks it got a
+// sensible amount before handing anything back.
 import fs from "node:fs";
 import zlib from "node:zlib";
 
 export type OewnSynset = {
-  /** OEWN's own id, e.g. `oewn-08242255-n`. NOT a WordNet 3.0 offset. */
+    /** This source's own id, which is not the same as our dictionary's. */
   id: string;
   pos: string;
   definition: string;
   lemmas: string[];
 };
 
-/** XML entities the LMF export actually emits. */
+/** The handful of escape codes this file format actually uses. */
 function unescapeXml(text: string): string {
   return text
     .replace(/&apos;/g, "'")
@@ -37,7 +30,7 @@ function unescapeXml(text: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** Accepts the `.xml` or the shipped `.xml.gz` directly. */
+/** Takes either the plain file or the compressed one. */
 function readXml(file: string): string {
   const raw = fs.readFileSync(file);
   return (file.endsWith(".gz") ? zlib.gunzipSync(raw) : raw).toString("utf8");
@@ -46,7 +39,7 @@ function readXml(file: string): string {
 export function readOewn(file: string): OewnSynset[] {
   const xml = readXml(file);
 
-  // <LexicalEntry ...><Lemma writtenForm="x" partOfSpeech="n"/><Sense id=".." synset="oewn-..-n"/>...
+    // Each entry gives a word, its part of speech, and the meanings it belongs to.
   const bySynset = new Map<string, string[]>();
   const entryRe =
     /<LexicalEntry[^>]*>([\s\S]*?)<\/LexicalEntry>/g;
@@ -58,7 +51,7 @@ export function readOewn(file: string): OewnSynset[] {
     const body = entry[1];
     const lemmaMatch = lemmaRe.exec(body);
     if (!lemmaMatch) continue;
-    // Underscores are the file's word separator, as in WordNet's own data files.
+        // Underscores stand in for spaces, as in the original dictionary files.
     const lemma = unescapeXml(lemmaMatch[1]).replace(/_/g, " ");
     senseRe.lastIndex = 0;
     let sense: RegExpExecArray | null;
@@ -70,7 +63,7 @@ export function readOewn(file: string): OewnSynset[] {
     }
   }
 
-  // <Synset id=".." ... partOfSpeech="n" ...><Definition>text</Definition>
+    // Each meaning gives its part of speech and its definition.
   const synsets: OewnSynset[] = [];
   const synsetRe = /<Synset\s+([^>]*)>([\s\S]*?)<\/Synset>/g;
   const defRe = /<Definition>([\s\S]*?)<\/Definition>/;
@@ -88,8 +81,8 @@ export function readOewn(file: string): OewnSynset[] {
     });
   }
 
-  // A formatting change upstream would show up as a near-empty parse rather
-  // than as an error, and a near-empty parse reads as "OEWN adds nothing".
+    // A change to the file's format would show up as a nearly empty read rather
+    // than as an error, and that reads as "this source adds nothing".
   if (synsets.length < 100_000 || bySynset.size < 100_000) {
     throw new Error(
       `OEWN parse looks wrong: ${synsets.length} synsets, ${bySynset.size} with members. ` +
@@ -99,7 +92,7 @@ export function readOewn(file: string): OewnSynset[] {
   return synsets;
 }
 
-/** Every distinct lemma in the lexicon, spaces restored. */
+/** Every distinct word in the dictionary. */
 export function oewnLemmas(synsets: OewnSynset[]): Set<string> {
   const out = new Set<string>();
   for (const s of synsets) for (const l of s.lemmas) out.add(l);

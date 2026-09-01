@@ -1,13 +1,13 @@
 """
-Building cells from WordNet with any sentence-transformers encoder.
+Building experiment files from the dictionary, with any model.
 
-The Python counterpart to `scripts/build-encoder-cell.ts`, and it exists for the
-same reason that script does: to go WordNet -> cell with no database and no pool
-manifest, at full scale, so absolute recall is comparable to a production run.
+The Python counterpart to the TypeScript builder, and it exists for the same
+reason: to go from dictionary to file with no database in between, at full size,
+so the scores are comparable to a production run.
 
-Roughly 2,800 glosses/second on an M5 via MPS, so all 117,791 WordNet synsets
-take about 40 seconds. That is the point of doing this locally -- RD-16's six
-cells were an overnight job; here a representation experiment is a coffee break.
+Fast enough that the whole dictionary takes under a minute on this machine. That
+is the point of doing it locally -- the same six experiments were once an
+overnight job, and here one is a coffee break.
 """
 
 from __future__ import annotations
@@ -26,20 +26,18 @@ BASE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 def load_encoder(model_id: str = PRODUCTION_MODEL, device: str | None = None):
     """
-    Load a sentence-transformers encoder, preferring MPS on Apple silicon.
+    Load a model, using the Mac GPU where available.
 
-    MEAN POOLING, NO PREFIX -- inherited from whatever the model's own
-    `modules.json` declares. That is correct for the fine-tune, its base, gte and
-    the MiniLM family, and WRONG and SILENT for two families worth naming:
+    Every model is handled the way its own settings declare. That is right for
+    the models used here, and wrong and silent for two families worth naming:
+    one expects a different way of combining word parts, and one expects a
+    prefix on every input.
 
-      - BGE expects CLS pooling.
-      - E5 expects an instruction prefix ("query: " / "passage: ").
-
-    Encoding either of those here produces plausible-looking vectors that are
-    simply not what the model was trained to produce, and the resulting cell
-    reads as a representation result. If you test one, prefix and pool it
-    correctly on BOTH sides -- documents here and queries at scoring time -- or
-    the comparison is meaningless.
+    Measuring either of those here produces plausible-looking numbers that are
+    simply not what the model was trained to produce, and the result reads as a
+    real finding. If you test one, handle it correctly on BOTH sides -- the
+    entries here and the questions at scoring time -- or the comparison is
+    meaningless.
     """
     import torch
     from sentence_transformers import SentenceTransformer
@@ -74,24 +72,21 @@ def build_wordnet_cell(
     device: str | None = None,
 ) -> dict:
     """
-    Build a full-scale synset cell and write it where `scripts/eval.ts` finds it.
+    Build a full-size experiment file where the TypeScript harness will find it.
 
-    `variant` selects the indexed text via `wordnet.gloss_text_for` -- this is
-    the cheapest real experiment in the project, so it is the first argument
-    worth changing.
+    `variant` picks which text gets indexed -- the cheapest real experiment in
+    this project, and so the first argument worth changing.
 
-    The cell is keyed by SYNSET, matching production: `GlossEmbedding` holds one
-    row per sense and `expandSynsets()` unpacks each into its member lemmas at
-    query time. Collapsing to synsets was measured lossless (287/287 identical
-    top-10 order, 0 discordant rank-1 pairs).
+    Keyed by meaning, matching production, where each row is unpacked into its
+    words at query time. Collapsing to meanings was measured lossless.
     """
     senses = list(senses if senses is not None else all_senses())
     if limit:
         senses = senses[:limit]
 
     texts = [gloss_text_for(variant, s) for s in senses]
-    # Member order is WordNet's own and is never sorted -- it is the tie-break
-    # production uses, and it is worth 2.5 points over alphabetical.
+        # The word order is the dictionary's own and is never sorted -- it is the
+        # tie-break production uses, and it is measurably better than alphabetical.
     words = [s.words[0] if s.words else s.key for s in senses]
     sense_keys = [s.key for s in senses]
     members = {s.key: list(s.words) for s in senses}
@@ -103,9 +98,9 @@ def build_wordnet_cell(
 
     dim = vectors.shape[1]
     if dim != 384:
-        # Not fatal here -- a wider cell is still a valid experiment -- but it
-        # cannot ship. GlossEmbedding is halfvec(384), which is exactly why
-        # all-mpnet-base-v2 was rejected despite scoring +2.8pp.
+                # Not fatal here -- a wider model is still a valid experiment -- but it
+                # cannot ship, because the live column has a fixed width. That is exactly
+                # why one otherwise promising model was rejected.
         print(
             f"  NOTE: {dim}-dim encoder. Measurable, but NOT shippable: "
             "GlossEmbedding is halfvec(384)."

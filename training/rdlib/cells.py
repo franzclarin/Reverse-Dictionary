@@ -1,28 +1,22 @@
 """
-Reading and writing local vector cells -- the interop format with the TS harness.
+Reading and writing local experiment files -- the format shared with TypeScript.
 
-A "cell" is a file-backed vector index. `scripts/eval.ts --index-file <cell>`
-scans one exhaustively, so results are EXACT by construction: no IVFFlat
-approximation is mixed into a representation comparison. That is what makes a
-cell the right instrument for "is this encoder better" and the wrong one for
-"is this fast".
+An experiment file is a search index kept as a plain file. The harness scans one
+exhaustively, so results are exact: no index shortcuts get mixed into a
+comparison. That makes it the right tool for "is this model better" and the
+wrong one for "is this fast".
 
-The format is language-neutral, which is why this module is short:
+The format is language-neutral, which is why this file is short: one file of raw
+numbers with no header, and one describing them. Numbers are scaled to a
+standard length on the way in, so comparing them is a plain multiply.
 
-    <cell>.vec    raw little-endian float32, rows * dim, NO HEADER
-    <cell>.json   { cell, model, variant, dim, rows, words[], senseKeys[], ... }
+Writing one of these is how a Python-trained model gets an authoritative number:
+build it here, then score it with the TypeScript harness.
 
-Vectors are L2-normalised on the way in (the sentence-transformers Normalize
-layer), so cosine similarity is a plain dot product.
-
-WRITING A CELL IS HOW A PYTHON-TRAINED MODEL GETS AN AUTHORITATIVE NUMBER.
-Build it here, then score it with the TypeScript harness. See notebook 04.
-
-THE MODEL/QUERY PAIRING IS THE WHOLE HAZARD, and it is silent. Documents encoded
-by one model and queries by another compare vectors from two different spaces,
-and the output reads as a representation result rather than the nonsense it is.
-`eval.ts` defends against this by reading the encoder from `meta.model`, so
-`write_cell()` REQUIRES the model id and refuses to guess.
+The one real hazard, and it is silent: if the entries are measured by one model
+and the questions by another, the comparison is nonsense that reads like a
+finding. The harness defends against this by reading the model out of the file,
+so writing one REQUIRES naming the model and refuses to guess.
 """
 
 from __future__ import annotations
@@ -39,10 +33,8 @@ from .paths import cell_dir
 
 DIM = 384
 
-# The string the harness recognises as a synset cell (`eval.ts`:
-# `local?.meta.variant === "gloss_synset"`), which is what switches on member
-# expansion. A synset cell whose variant is anything else will be scored as if
-# each row were a single word, and every synonym will be counted wrong.
+# The exact label the harness looks for to know rows are meanings rather than
+# single words. Anything else and every synonym gets counted wrong.
 SYNSET_VARIANT = "gloss_synset"
 
 
@@ -104,16 +96,15 @@ def load_cell(name: str, directory: Path | None = None) -> Cell:
 
 def inputs_sha256(texts: list[str]) -> str:
     """
-    SHA256 over the ordered input text list -- ports `inputsSha256` in cellText.ts.
+    Fingerprint of the ordered text list.
 
-    NUL-separated rather than newline-separated so that a text containing a
-    newline could not forge a different partition of the same byte stream.
+    Joined with an invisible separator, so a text containing a line break cannot
+    disguise itself as two entries.
 
-    This exists because nine concurrent processes once wrote overlapping cell
-    outputs during an interrupted rebuild, and correctness was argued from
-    timestamps and throughput rates -- which is inference, not proof. A cell
-    states the exact text sequence it was built from, and the verifier
-    recomputes that sequence and compares.
+    This exists because a half-finished parallel rebuild once left overlapping
+    output, and correctness was argued from timestamps and speeds -- which is
+    inference, not proof. A file now states exactly what it was built from, and
+    the checker recomputes that and compares.
     """
     h = hashlib.sha256()
     for t in texts:
@@ -139,15 +130,14 @@ def write_cell(
     directory: Path | None = None,
 ) -> tuple[Path, Path]:
     """
-    Write a cell readable by `scripts/eval.ts --index-file <name>`.
+    Write a file the TypeScript harness can score.
 
-    `model` MUST be the id of the encoder that produced `vectors`, and the same
-    encoder must be reachable by Transformers.js when the harness scores it --
-    the harness encodes QUERIES with `meta.model` and will otherwise compare two
-    different vector spaces without complaint.
+    `model` MUST be the model that produced these numbers, and it must be
+    reachable when the harness runs -- the harness measures the QUESTIONS with
+    it, and would otherwise compare two different scales without complaint.
 
-    Pass `input_texts` to record `inputsSha256`. Do it: it is what turns "this
-    cell is probably right" into a checkable claim.
+    Pass the input texts to record a fingerprint. Do it: that is what turns
+    "this file is probably right" into a checkable claim.
     """
     d = Path(directory) if directory is not None else cell_dir()
     d.mkdir(parents=True, exist_ok=True)
@@ -160,10 +150,10 @@ def write_cell(
     if rows != len(words):
         raise ValueError(f"{rows} vectors but {len(words)} words -- these must correspond by index")
 
-    # L2 normalisation is assumed by every consumer, since cosine is scored as a
-    # plain dot product. Check rather than silently renormalise: a cell arriving
-    # unnormalised means the encoder was configured wrong, and quietly fixing it
-    # here would hide that from the notebook that built it.
+        # Everything downstream assumes the numbers are already scaled to a standard
+        # length. Check rather than quietly fix: numbers arriving unscaled means the
+        # model was configured wrong, and silently correcting it here would hide that
+        # from whoever built the file.
     norms = np.linalg.norm(vectors, axis=1)
     if not np.allclose(norms, 1.0, atol=1e-3):
         bad = int((~np.isclose(norms, 1.0, atol=1e-3)).sum())

@@ -1,29 +1,21 @@
 /**
- * Build `eval_gloss_base_synset` — one row per synset instead of one per
- * (word, sense) — as a pure dedupe pass over an existing gloss cell.
+ * Collapse an existing experiment to one row per meaning instead of one per word.
  *
- * NO RE-EMBEDDING. Every word in a WordNet synset shares one gloss, so the
- * gloss cells already hold that identical text once per synonym, and the
- * resulting vectors are bit-identical. Collapsing them is a lossless rewrite of
- * bytes already computed, which is why this takes seconds rather than an hour.
+ * Nothing is re-measured. Words sharing a meaning share one definition, so those
+ * rows already hold identical numbers; collapsing them just rewrites bytes
+ * already computed, which is why this takes seconds rather than an hour. About
+ * 44% of the rows turn out to be duplicated storage and duplicated scanning.
  *
- * WHY IT MATTERS. 204,549 gloss rows collapse to ~114,662 distinct ones: about
- * 44% of the gloss index is duplicated storage and duplicated scan work. In a
- * database with a 512 MB ceiling that is the difference between a gloss index
- * fitting alongside `VocabEmbedding` and not.
+ * The safety property: rows are checked to be genuinely identical before being
+ * collapsed. If any disagree the build stops and reports them, rather than
+ * quietly averaging or picking one — a disagreement would mean the indexed text
+ * is not really per-meaning, which is a finding, not a nuisance. One variant is
+ * expected to disagree, because it attaches example sentences per word; inspect
+ * that one, and do not collapse it.
  *
- * THE SAFETY PROPERTY. Mate vectors are asserted bit-identical BEFORE
- * collapsing. If any synset's rows disagree, the build stops and reports them
- * rather than silently averaging or picking one — a disagreement would mean the
- * indexed text is not actually per-synset, which is a finding, not a nuisance.
- * (`gloss_base_ex` is the variant where that is expected: WordNet's example
- * sentences are attached per sense, so its rows may legitimately differ. Run it
- * with `--analyse-only` to see, and do not build a synset cell from it.)
- *
- * THE SCORING SURFACE DIFFERS. A synset row expands to several words at query
- * time, so one retrieved synset can consume several top-10 slots. That makes
- * this cell's numbers NOT a drop-in substitute for `eval_gloss_base` in the 2x2.
- * It is reported separately, always.
+ * Scores from this are not interchangeable with the uncollapsed kind: one row
+ * now expands into several words and can take several result slots. It is always
+ * reported separately.
  *
  *   npx tsx scripts/build-synset-cell.ts
  *   npx tsx scripts/build-synset-cell.ts --from eval_gloss_base_ex --analyse-only
@@ -38,7 +30,7 @@ function arg(flag: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
-/** Exact float-by-float comparison. Identical input text must give identical bytes. */
+/** Exact number-by-number comparison. Identical text must give identical bytes. */
 function sameVector(data: Float32Array, a: number, b: number): boolean {
   const oa = a * DIM;
   const ob = b * DIM;
@@ -67,7 +59,7 @@ function main(): void {
   console.log(`  scale       ${src.meta.scale ?? "sampled"}`);
   console.log(`  rows        ${src.meta.rows.toLocaleString()}\n`);
 
-  // ------------------------------------------------- group rows by synset
+  // ------------------------------------------------- group rows by meaning
   const groups = new Map<string, number[]>();
   const keys = src.meta.senseKeys;
   for (let i = 0; i < src.meta.rows; i++) {
@@ -149,8 +141,8 @@ function main(): void {
 
   orderedKeys.forEach((key, i) => {
     const rows = groups.get(key)!;
-    // Every row in the group is bit-identical by the assertion above, so the
-    // first is the group.
+        // Every row in the group is identical by the check above, so the first one
+        // stands for all of them.
     vectors.set(src.data.subarray(rows[0] * DIM, rows[0] * DIM + DIM), i * DIM);
     const members = [...new Set(rows.map((r) => src.meta.words[r]))];
     words.push(members[0]);
@@ -164,9 +156,8 @@ function main(): void {
     representation: "gloss",
     scale: src.meta.scale,
     poolWords: src.meta.poolWords,
-    // Derived from an existing cell rather than from text, so the input
-    // fingerprint is over the ordered synset keys — the thing that actually
-    // determines this cell's contents.
+        // Built from an existing file rather than from text, so the fingerprint
+        // covers the ordered list of meanings — what actually decides the contents.
     inputsSha256: inputsSha256(orderedKeys),
     vectorsSha256: bytesSha256(
       Buffer.from(vectors.buffer, vectors.byteOffset, vectors.byteLength)

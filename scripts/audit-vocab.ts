@@ -1,14 +1,13 @@
 /**
- * Phase A — vocabulary audit.
+ * How much of the index could never be an answer?
  *
- * `VocabEmbedding` is the WordNet 3.0 lemma set. WordNet is a lexical database,
- * not an answer key: it carries proper nouns, taxonomic binomials, and
- * multi-word collocations that can never be the answer to "what's the word
- * for...". Every one of those still occupies space in the index and crowds the
- * neighbourhood around lemmas that *can* be answers.
+ * The index is a dictionary's word list, and a dictionary is not an answer key:
+ * it carries proper nouns, Latin species names and set phrases that can never be
+ * the answer to "what's the word for...". Every one still takes up space and
+ * crowds the neighbourhood around words that can.
  *
- * This quantifies that, and converts the index statistic into a user-visible
- * one by measuring how much junk comes back in the top 10 for real queries.
+ * This counts them, and turns that into something a user would notice by
+ * measuring how much of it comes back in real results.
  *
  * Read-only. Proposes a filter; applies nothing.
  *
@@ -30,7 +29,7 @@ const SAMPLES_PER_CATEGORY = 200;
 const INLINE_SAMPLE = 24;
 
 
-/** Category predicates, evaluated in SQL so the counts are exact. */
+/** The category tests, run in the database so the counts are exact. */
 const CATEGORIES: { key: string; label: string; sql: string }[] = [
   { key: "multiword", label: "multi-word (space or underscore)", sql: `word ~ '[ _]'` },
   { key: "capitalised", label: "starts with a capital letter", sql: `word ~ '^[A-Z]'` },
@@ -67,7 +66,7 @@ async function count(where: string): Promise<number> {
 
 async function sampleWords(where: string, limit: number): Promise<string[]> {
   const rows = await prisma.$queryRawUnsafe<{ word: string }[]>(
-    // md5 ordering gives a spread-out but perfectly reproducible sample.
+        // A spread-out but perfectly repeatable sample.
     `SELECT word FROM "VocabEmbedding" WHERE ${where} ORDER BY md5(word) LIMIT ${limit}`
   );
   return rows.map((r) => r.word);
@@ -223,7 +222,7 @@ async function main(): Promise<void> {
     totalJunk += junkSet.size;
     totalEcho += echoSet.size;
 
-    // Is the word I had in mind even reachable?
+        // Is the word I had in mind even in the index?
     const [{ n: present }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(
       `SELECT count(*)::bigint AS n FROM "VocabEmbedding" WHERE lower(word) = lower($1)`,
       answer

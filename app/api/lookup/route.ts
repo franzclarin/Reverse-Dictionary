@@ -19,58 +19,31 @@ import {
 } from "@/lib/errors";
 
 export const runtime = "nodejs";
-// Kept at 60 as a safety ceiling, NOT because loading is slow: since RD-11 the
-// model ships in the function bundle and loads in ~64ms. Lowering this would
-// only turn a slow Neon query into a 504, and Vercel bills actual duration
-// rather than the limit — so there is nothing to win by tightening it.
+// A safety ceiling, not a target. Lowering it would only turn a slow database
+// query into a worse error, and we are billed for time used, not the limit.
 export const maxDuration = 60;
 
-// Shadow logging survives the RD-02 cutover with its roles INVERTED: the gloss
-// index is now the primary path, so the sampled shadow query runs against the
-// old lemma index (VocabEmbedding) instead. The ShadowLookup columns keep their
-// original meaning — `old*` is always the lemma index and `new*` always the
-// gloss index — so rows logged before and after the cutover stay comparable and
-// scripts/shadow-compare.ts needs no change.
-//
-// Kept on rather than removed because the soak gate was retired for lack of
-// traffic, not because the question was answered: if this app ever does get
-// traffic, the comparison becomes worth running retroactively. Sampled and
-// fire-and-forget; flip to false to stop logging without touching anything else.
+// Occasionally run the old search too and log whether the two agree. Kept on
+// because the comparison becomes worth reading if this app ever gets traffic.
+// Set to false to stop logging without touching anything else.
 const SHADOW_LOOKUP_ENABLED = true;
 const SHADOW_SAMPLE_RATE = 0.1;
 
 type ResultRow = { word: string; similarity: number };
 
-/**
- * Upper bound on `k`. It flows straight into `LIMIT $2`, and before RD-18 it was
- * unvalidated — a client could ask for the whole index. 100 is well above what
- * the UI requests (10, then +10 per "load more") and above /explain's shortlist.
- */
+/** Most results anyone may ask for at once, so nobody can request the whole index. */
 const MAX_K = 100;
 
-/** Token vectors returned to the debug payload before it starts costing real bytes. */
+/** How many word-parts /explain gets back, before the response gets fat. */
 const MAX_DEBUG_TOKENS = 64;
 
-/**
- * The debug payload behind `{ debug: true }` — RD-18's /explain page.
- *
- * **Opt-in per request, and that is the whole safety property.** With `debug`
- * absent this route takes the identical branch it always has: `searchGloss()`,
- * whose SQL is byte-identical to the pre-RD-12 query. Nothing about the serving
- * path changes for the 100% of requests that do not ask for this.
- *
- * The debug branch does not reimplement retrieval — it calls the same
- * `searchGlossSynsets()` + `expandSynsets()` that `searchGloss()` composes, so
- * `results` is the same list of words either way. It only declines to throw the
- * synsets away.
- */
+/** The extra working-out sent back when a request asks for it, for /explain. */
+// A request has to ask; a normal search takes the same path it always has.
+// This branch reuses the real search rather than repeating it — the words that
+// come back are identical, it just keeps the details instead of discarding them.
 type DebugPayload = {
   queryVector: number[];
-  /**
-   * The real per-token vectors the query vector was pooled from — `/explain`
-   * animates them averaging into one. Capped: a 500-character query can reach
-   * ~130 tokens, and 130 x 384 floats is a response nobody asked for.
-   */
+  /** The numbers for each word-part, which /explain animates averaging into one. */
   tokenVectors: number[][];
   tokenVectorsTruncated: boolean;
   synsets: {
@@ -120,12 +93,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Timed separately so a cold-start model download (seconds) is
-    // distinguishable from an instant failure in the logs.
+    // Timed on its own, so a slow start is distinguishable from a fast failure.
     const embedStartedAt = Date.now();
-    // The debug branch takes ONE forward pass and derives the pooled vector from
-    // the per-token output; `embedTokens()` documents why that is identical to
-    // `embed()`. The serving path below is the untouched original call.
+    // The /explain branch gets the same answer in one pass, keeping the
+    // per-word-part detail. Normal search uses the plain call below.
     let tokenVectors: number[][] = [];
     let embedding: number[];
     if (debug) {
@@ -143,19 +114,12 @@ export async function POST(request: NextRequest) {
     let rows: ResultRow[];
     let debugPayload: DebugPayload | undefined;
     try {
-      // RD-02 cutover: search the synset-keyed gloss index rather than the bare
-      // lemma index. Expansion semantics live in lib/glossSearch.ts and mirror
-      // the eval cell this decision was made on — see that file's header before
-      // changing anything about how synsets become words.
-      //
-      // VocabEmbedding is deliberately left populated and indexed as the
-      // rollback path: reverting this call is the whole rollback, no data
-      // migration involved.
+      // Search by meaning. The old word-by-word index is still there and still
+      // filled, so switching this one call back is the whole way to undo it.
       if (debug) {
-        // RD-18: same two calls `searchGloss()` composes, with the synsets kept
-        // instead of discarded. `GLOSS_PROBES` is passed only because the extra
-        // columns live in the 5th positional argument — it is the same default
-        // constant, not a tuned value, so this stays the served configuration.
+        // The same search, keeping the details instead of dropping them. The
+        // setting passed here is the normal default, only spelled out because
+        // the extra options come after it.
         const hits = (await searchGlossSynsets(prisma, vectorLiteral, k, GLOSS_PROBES, {
           withGloss: true,
           withVector: true,
@@ -165,8 +129,8 @@ export async function POST(request: NextRequest) {
           queryVector: embedding,
           tokenVectors: tokenVectors
             .slice(0, MAX_DEBUG_TOKENS)
-            // 4 decimals is well inside what a 384-cell column can render and
-            // roughly halves the payload.
+            // Rounding roughly halves the response and is far finer than the
+            // page can draw.
             .map((vector) => vector.map((value) => Math.round(value * 1e4) / 1e4)),
           tokenVectorsTruncated: tokenVectors.length > MAX_DEBUG_TOKENS,
           synsets: hits.map((hit) => ({
@@ -174,7 +138,7 @@ export async function POST(request: NextRequest) {
             gloss: hit.gloss,
             lemmas: hit.lemmas,
             similarity: hit.similarity,
-            // halfvec arrives as a "[a,b,...]" literal; the page projects it.
+            // Arrives as text; the page turns it into a position.
             vector: parseVectorLiteral(hit.vector as unknown as string),
           })),
           probes: GLOSS_PROBES,
@@ -190,25 +154,20 @@ export async function POST(request: NextRequest) {
     }
     console.log(`[lookup] db ok ms=${Date.now() - dbStartedAt} rows=${rows.length}`);
 
-    // Fire-and-forget: never awaited, sampled, and never allowed to affect the
-    // response or its latency. rows[0] is now the GLOSS index's top-1 (the new
-    // primary); runShadowLookup queries the old lemma index itself. See
-    // lib/shadowLookup.ts for what's logged and why.
-    // `!debug`: the shadow log exists to compare the two indexes on ORGANIC
-    // traffic. /explain's requests are someone poking at the explainer, so
-    // counting them would quietly change what the log means.
+    // Never waited for, and never allowed to slow the response down.
+    // /explain's requests are skipped: they are someone poking at the demo, and
+    // counting them would quietly change what this log means.
     if (!debug && SHADOW_LOOKUP_ENABLED && rows.length > 0 && Math.random() < SHADOW_SAMPLE_RATE) {
       runShadowLookup(query, vectorLiteral, rows[0]).catch((error) => {
         console.error(`[lookup] shadow log failed (non-fatal): ${formatErrorShape(describeError(error))}`);
       });
     }
 
-    // Embed + db time only. Real elapsed time, including any cold-start
-    // model download: no fixed placeholder number gets shown in its place.
+    // How long the work really took — never a made-up number.
     const timingMs = Date.now() - embedStartedAt;
 
-    // `debug` is added, never substituted: `results` and `timingMs` keep their
-    // existing meaning and shape, so every current client is unaffected.
+    // The extra detail is added alongside the usual answer, never in place of
+    // it, so existing callers see no change.
     return NextResponse.json(
       debugPayload ? { results: rows, timingMs, debug: debugPayload } : { results: rows, timingMs }
     );
@@ -220,10 +179,9 @@ export async function POST(request: NextRequest) {
     console.error(`[lookup] FAILED subsystem=${subsystem} ${formatErrorShape(shape)}`);
     if (shape.stack) console.error(`[lookup] stack: ${shape.stack}`);
 
-    // Name the subsystem and the network code so the client never again sees a
-    // bare "fetch failed". The hostname can identify a private database, so
-    // it is only echoed outside production (the full shape is always in the
-    // server logs regardless).
+    // Say which part failed, so nobody is left with a bare "fetch failed".
+    // The server address is held back in production, since it identifies a
+    // private database. The full details are always in the logs.
     const detailParts = [
       `${subsystem}: ${shape.message}`,
       shape.code ? `code=${shape.code}` : undefined,

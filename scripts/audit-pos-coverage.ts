@@ -1,15 +1,13 @@
 /**
- * Coverage diff: WordNet 3.0 lemma set vs. what is actually in VocabEmbedding,
- * broken down by part of speech.
+ * Which dictionary words are missing from the index, broken down by word type.
  *
- * Prompted by finding `loiterer` in the index while `loiter` is absent. WordNet
- * 3.0 contains `loiter`, so the original seeding dropped it — which means
- * `VocabEmbedding` is not the WordNet lemma set in the way assumed since
- * Phase 1. If verbs are systematically underrepresented, that caps recall on an
- * entire class of query ("when you hang around somewhere with no purpose") and
- * no amount of re-indexing fixes it.
+ * Prompted by finding `loiterer` indexed while `loiter` was not. The dictionary
+ * has `loiter`, so the original build dropped it — meaning the index is not the
+ * dictionary's word list in the way everyone assumed. If verbs are missing
+ * systematically, that caps how well a whole class of question can ever do, and
+ * no amount of rebuilding the index fixes it.
  *
- * Read-only against the database.
+ * Read-only.
  *
  *   npx tsx scripts/audit-pos-coverage.ts
  */
@@ -21,7 +19,7 @@ loadEnv();
 
 const prisma = new PrismaClient();
 
-/** Common derivational suffixes, for the base-verb / derived-noun spot check. */
+/** Common word endings, for the base-verb versus derived-noun spot check. */
 const DERIVATIONS: { suffix: string; strip: number; add: string }[] = [
   { suffix: "er", strip: 2, add: "" },
   { suffix: "er", strip: 3, add: "e" }, // loiterer -> loiter handled via "er" on stem
@@ -58,8 +56,8 @@ async function main(): Promise<void> {
     console.log(`  index.${pos.padEnd(5)} ${lemmas.length.toLocaleString()} lemmas`);
   }
 
-  // WordNet lemmas are not unique across parts of speech ("run" is noun and
-  // verb), so the union is what VocabEmbedding could contain at most.
+    // A word can be both a noun and a verb, so the combined list is the most the
+    // index could possibly contain.
   const union = new Set<string>();
   for (const lemmas of byPos.values()) for (const l of lemmas) union.add(l);
 
@@ -96,17 +94,15 @@ async function main(): Promise<void> {
       `${pct(union.size - unionMissing.length, union.size).padStart(7)}`
   );
 
-  // Rows in VocabEmbedding that WordNet 3.0 does not have at all. Compared
-  // case-insensitively: WordNet's index files are lowercased while
-  // VocabEmbedding preserves case, so an exact-case diff is meaningless.
+    // Indexed words the dictionary does not have at all. Compared ignoring case,
+    // since the dictionary is all lowercase and the index is not.
   const unionLower = new Set([...union].map((l) => l.toLowerCase()));
   const extra = [...vocabLower].filter((w) => !unionLower.has(w));
   console.log(`\n  VocabEmbedding rows not in any WordNet index: ${extra.length.toLocaleString()}`);
   if (extra.length) console.log(`    e.g. ${extra.slice(0, 12).join(", ")}`);
 
-  // Numeric lemmas ("0", "1728", ".22-caliber") dominate the raw missing
-  // counts and are junk for a reverse dictionary either way. Strip them to see
-  // what is actually being lost.
+    // Numbers dominate the raw missing counts and are useless for a reverse
+    // dictionary anyway. Strip them to see what is really being lost.
   const isNumeric = (l: string) => /\d/.test(l);
   heading("Missing lemmas, excluding anything containing a digit");
   console.log(
@@ -156,10 +152,9 @@ async function main(): Promise<void> {
   }
 
   heading("Is the CONCEPT still reachable when the word is missing?");
-  // The practical question for a reverse dictionary is not whether a lemma is
-  // indexed, but whether any word naming that sense is. If "capsize" is absent
-  // but its synset-mate "turn turtle" is present, the concept can still be
-  // found — just not by the word the user wanted.
+    // What actually matters is not whether a word is indexed, but whether any
+    // word for that idea is. If `capsize` is missing but `turn turtle` is there,
+    // the idea is still findable — just not by the word the user wanted.
   for (const pos of POS_LIST) {
     const senses = readSenses(pos);
     const missing = new Set(missingByPos.get(pos)!.filter((l) => !isNumeric(l)));

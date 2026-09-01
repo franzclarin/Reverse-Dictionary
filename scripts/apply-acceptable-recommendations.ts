@@ -1,20 +1,19 @@
 /**
- * Write approved recommendations into the `acceptable` column of the draft TSV.
+ * Write approved alternative answers into the draft question file.
  *
- * This is the ONLY script in the repo that edits `eval/sets/v1-draft.tsv`, and
- * it runs only on an explicit decision. Defaults to a dry run; `--apply` is
- * required to touch the file, and a timestamped backup is written first.
+ * The only script that edits that file, and it runs only on an explicit
+ * decision. It reports by default; writing needs a flag, and a timestamped
+ * backup is taken first.
  *
- * WHAT IT PRESERVES. Comment lines, the header, column order, and every other
- * field are passed through untouched. Rows shorter than the header are padded
- * rather than reshaped. The `acceptable` column is MERGED, never overwritten:
- * anything already there is kept and comes first, and new entries are appended
- * only if not already present (case-insensitively). Running it twice is a no-op.
+ * Comments, the header and every other column pass through untouched. The
+ * alternatives column is merged, never overwritten: what is already there is
+ * kept and comes first, and new entries are added only if not already present.
+ * Running it twice changes nothing.
  *
- * By default only `accept` rows are applied. `unsure` rows are deliberately left
- * out: lenient R@1 is the metric the pre-committed decision rule resolves on
- * (METHODS section 9a), so an over-accepted entry silently inflates the number
- * that decides the experiment. Under-accepting costs a manual override instead.
+ * Only clearly accepted rows are applied. Uncertain ones are deliberately left
+ * out: decisions are made on the forgiving score, so an over-accepted entry
+ * silently inflates the very number that decides the experiment. Being too
+ * cautious costs a manual override instead.
  *
  *   npx tsx scripts/apply-acceptable-recommendations.ts
  *   npx tsx scripts/apply-acceptable-recommendations.ts --apply

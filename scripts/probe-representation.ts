@@ -1,15 +1,13 @@
 /**
- * Phase A2 — representation probe.
+ * What is actually stored in the index?
  *
- * What is actually stored in `VocabEmbedding`? The seeding chain in
- * `_model_tmp/` reconstructs vectors from a FAISS index built in Colab
- * (`vocab.index`, one vector per entry of `vocab_words.pkl`), so the scripts
- * that survive locally show the *transport*, not the *content*. The only way
- * to know what was encoded is to re-encode candidates and compare.
+ * The scripts that built it show how the numbers were moved around, not what
+ * they represent. The only way to find out is to measure candidates again and
+ * compare.
  *
- * If cos(embed(word), stored[word]) ~ 0.99, the index holds bare-lemma
- * embeddings, and every search matches a 12-word description against a
- * 1-token document.
+ * If measuring a bare word matches what is stored for it almost exactly, the
+ * index holds bare words — meaning every search compares a twelve-word
+ * description against a single word.
  *
  * Read-only.  npx tsx scripts/probe-representation.ts
  */
@@ -21,7 +19,7 @@ loadEnv();
 
 const prisma = new PrismaClient();
 
-/** Spans frequency (rain/dog vs betatron/aglet), length, and token count. */
+/** Spans common and rare words, short and long. */
 const PROBE_WORDS = [
   "rain",
   "dog",
@@ -49,12 +47,10 @@ const PROBE_WORDS = [
   "deja vu",
 ];
 
-/**
- * Descriptions written from the concept, for the alternative hypothesis: if
- * the index held gloss embeddings, these would score far higher than the bare
- * lemma does. Rough paraphrases are sufficient — we are separating ~0.99 from
- * ~0.4, not measuring gloss fidelity.
- */
+/** Descriptions written from the idea, to test the other possibility. */
+// If the index held definitions, these would score far higher than the bare
+// word does. Rough paraphrases are enough — this separates "almost identical"
+// from "barely related", not fine degrees of accuracy.
 const PROBE_DESCRIPTIONS: Record<string, string> = {
   rain: "water falling in drops from clouds in the sky",
   cemetery: "a place where dead people are buried under headstones",
@@ -94,8 +90,8 @@ async function main(): Promise<void> {
   console.log("Warming the embedder...");
   await embed("warm up");
 
-  // Stored vectors should be L2-normalised if they came from the
-  // sentence-transformers Normalize layer; check before trusting cosines.
+    // The stored numbers should already be scaled to a standard length; check
+    // that before trusting any comparison against them.
   const [{ v }] = await prisma.$queryRawUnsafe<{ v: string }[]>(
     `SELECT embedding::text AS v FROM "VocabEmbedding" WHERE word = 'rain'`
   );
@@ -130,8 +126,8 @@ async function main(): Promise<void> {
       descCol = descSim.toFixed(4).padStart(24);
     }
 
-    // Print the deviation too: the seed JSONL rounded to 5 decimals, so an
-    // exact re-encode lands a hair below 1.0 rather than at it.
+        // Print the difference too: the original data was rounded, so an exact
+        // re-measurement lands a hair below a perfect match rather than on it.
     const dev = (1 - lemmaSim).toExponential(1);
     console.log(
       `${word.padEnd(18)} ${lemmaSim.toFixed(6).padStart(14)} (1-cos=${dev.padStart(8)})  ${descCol}`

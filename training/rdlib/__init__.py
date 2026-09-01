@@ -1,27 +1,25 @@
 """
-rdlib -- the shared library behind RD-22's notebooks.
+The shared library behind the notebooks.
 
-Notebooks stay thin and every rule lives here exactly once. That is the repo's
-existing convention rather than a preference: `scripts/lib/probes.ts` carries
-the instruction "Change the rule here or not at all", and `cellText.ts` sits
-apart from both its builder and its verifier specifically so the two cannot
-drift. Five notebooks each holding their own copy of the echo rule would
-reintroduce precisely that failure.
+Notebooks stay thin and every rule lives here exactly once. That is this repo's
+existing habit rather than a preference: the echo rule already says "change it
+here or not at all", and the text rule sits apart from both its builder and its
+checker so the two cannot drift. Five notebooks each holding their own copy
+would reintroduce exactly that failure.
 
-Start with `parity.report()`. Nothing else in this package is trustworthy until
-it passes -- see parity.py for why.
+Start with `parity.report()`. Nothing else here is trustworthy until it passes.
 
-  paths      where everything lives, resolved from the repo root
-  evalset    the frozen set, its sha256 gate, and the disjointness gate
-  metrics    port of scripts/lib/metrics.ts (score, percentile, mcnemar)
-  echo       port of scripts/lib/probes.ts (the lexical-echo rule)
-  wordnet    port of scripts/lib/wordnet.ts (latin1, WordNet member order)
-  cells      the .vec/.json interop format with scripts/eval.ts
-  retrieval  exact scan, synset expansion, scoring
-  runs       eval/runs/*.json and the RD-12 shortlist sidecars
-  build      WordNet -> cell with any sentence-transformers encoder
-  pairs      training-pair recipes and the train/val split
-  wiktionary the Kaikki dump, for training pairs ONLY (not the index filter)
+  paths      where everything lives
+  evalset    the frozen question set and the gates that keep it frozen
+  metrics    the scores
+  echo       the word-echoing rule
+  wordnet    reading the dictionary
+  cells      the file format shared with the TypeScript harness
+  retrieval  exhaustive search and scoring
+  runs       the saved runs and their shortlists
+  build      dictionary to experiment file, with any model
+  pairs      training-example recipes and the train/check split
+  wiktionary the second dictionary, for training examples ONLY
   parity     the gate
 """
 

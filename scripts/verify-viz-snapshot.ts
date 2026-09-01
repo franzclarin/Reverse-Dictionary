@@ -1,31 +1,19 @@
 /**
- * Check the three properties /explain's honesty rests on (RD-18).
+ * Checks the things /explain's honesty rests on.
  *
- * 1. THE SERVING QUERY IS UNCHANGED. With `withGloss`/`withVector` both off,
- *    `searchGlossSynsets()` must emit character-identical SQL to the pre-RD-18
- *    query. This is asserted against a literal copy of that string, so a future
- *    edit to the SELECT breaks this test rather than silently changing what
- *    every measurement in CLAUDE.md describes.
- *
- * 2. THE DEBUG BRANCH RETURNS THE SAME WORDS. `{debug:true}` must not be a
- *    second retrieval path. Same query, both branches, identical `results`.
- *
- * 3. THE BROWSER TOKENIZER IS THE REAL ONE. `lib/viz/wordpiece.ts` reimplements
- *    WordPiece so the page need not ship ~1 MB of Transformers.js. That is only
- *    honest if it agrees with `AutoTokenizer` exactly, so it is run against the
- *    real tokenizer over every query in the frozen eval set plus a set of
- *    deliberately awkward strings, and the token ids must match.
- *
- * 4. THE POOLED VECTOR REALLY IS THE MEAN OF THE TOKEN VECTORS. /explain
- *    animates each token becoming numbers and those numbers averaging into one.
- *    `embedTokens()` derives the pooled vector itself from a `pooling: "none"`
- *    pass, so this asserts it matches `embed()` elementwise. If it stops
- *    holding, the animation is asserting something false and this fails first.
- *
- * 5. THE PROJECTION IS EXACT. A synset present in the sampled cloud must land
- *    on its snapshot coordinate when projected from the vector the API returns.
- *    This is the check that catches a position faked from neighbours — the
- *    failure mode RD-18 names as the one that would make the page a lie.
+ * 1. The live search query is unchanged. Asserted against a literal copy of it,
+ *    so a future edit breaks this test rather than quietly changing what every
+ *    recorded measurement describes.
+ * 2. Asking for the extra detail returns the same words. It must not become a
+ *    second, separate search.
+ * 3. The browser's own word-splitter matches the real one, exactly, over every
+ *    question in the frozen set plus a batch of deliberately awkward strings.
+ * 4. The averaged result really is the average of the parts shown. The page
+ *    animates that happening, so if it stops being true the page is asserting
+ *    something false and this fails first.
+ * 5. Positions are exact. A meaning already drawn in the cloud must land on its
+ *    saved spot when placed from the numbers the search returns. This is the
+ *    check that catches a position faked from its neighbours.
  *
  *   npx tsx scripts/verify-viz-snapshot.ts
  */
@@ -55,12 +43,8 @@ const EVAL_SET = path.resolve(process.cwd(), "eval/sets/v1.jsonl");
 const MODEL_ROOT = path.resolve(process.cwd(), "models");
 const MODEL_ID = "franzclarin/ReverseDictionary";
 
-/**
- * Strings chosen to hit the parts of BertNormalizer/WordPiece a naive
- * reimplementation gets wrong: accents, punctuation splitting, casing, an
- * out-of-vocabulary word, CJK, a word past max_input_chars_per_word, and the
- * 256-token truncation boundary.
- */
+/** Strings picked to break a careless copy: accents, punctuation, casing, an
+ *  unknown word, Chinese characters, and both length limits. */
 const AWKWARD = [
   "café naïve résumé",
   "don't — really?!",
@@ -74,11 +58,9 @@ const AWKWARD = [
   "emoji 🌧 and symbols ± § ¶",
 ];
 
-/**
- * The serving SELECT, verbatim, as it stood before RD-18 added `withVector`
- * (and before RD-12 added `withGloss`). Do not "fix" this string to match a
- * change — if they diverge, the change is what needs justifying.
- */
+/** The live query, word for word, as it stood before the extra options existed. */
+// Do not "fix" this to match a change — if they diverge, the change is what
+// needs justifying.
 const FROZEN_SELECT =
   `SELECT "synsetKey", "lemmas", 1 - (embedding <=> $1::halfvec) AS similarity\n` +
   `         FROM "${GLOSS_INDEX}"\n` +
@@ -98,10 +80,7 @@ function check(label: string, ok: boolean, detail = "") {
   if (!ok) failures++;
 }
 
-/**
- * Rebuild the SELECT the way `searchGlossSynsets()` does, from its own
- * constants, so this mirrors the real construction rather than guessing at it.
- */
+/** Rebuild the query from the same pieces the real one uses, rather than guessing. */
 function buildSelect(withGloss: boolean, withVector: boolean): string {
   const glossColumn = withGloss ? `"gloss", ` : "";
   const vectorColumn = withVector ? `embedding::text AS vector, ` : "";
@@ -156,9 +135,8 @@ async function main() {
     const config = JSON.parse(fs.readFileSync(WORDPIECE, "utf8")) as WordPieceConfig;
     const tokenize = createTokenizer(config);
 
-    // `env` is a PROCESS-WIDE singleton (see lib/embedder.ts) and this script is
-    // its fourth consumer. Configure immediately before the call, never at module
-    // scope — lib/embedder.ts sets the same values for its own pipeline() call.
+        // These settings are global, so set them right before use, never at the top
+        // of a file: whichever file loads last would silently win.
     env.allowLocalModels = true;
     env.allowRemoteModels = false;
     env.localModelPath = MODEL_ROOT;
@@ -177,8 +155,7 @@ async function main() {
       const mine = tokenize(text).tokens.map((t) => t.id);
       const theirs = Array.from(reference(text, {
         add_special_tokens: true,
-        // Match the feature-extraction pipeline `embed()` runs, which passes
-        // `truncation: true` and lets model_max_length (256) apply.
+                // Match exactly what the real measuring code does.
         truncation: true,
       }).input_ids.data as ArrayLike<bigint | number>)
         .map(Number);
@@ -237,7 +214,7 @@ async function main() {
       `${serving.length} words, top=${serving[0]?.word}`
     );
 
-    // 6 · exact placement, for any returned synset that is also in the cloud.
+        // Exact placement, for any result that is also drawn in the cloud.
     for (const hit of hits) {
       const row = index.get(hit.synsetKey);
       if (row === undefined) continue;
@@ -253,14 +230,12 @@ async function main() {
     }
   }
 
-  // Sampled synsets, fetched directly. The loop above only sees a projection to
-  // check when a probe query happens to retrieve a synset that is also in the
-  // cloud, and RD-17 made that coincidence rare: the sample is 6,028 rows of
-  // 693,325 (0.9%) where it used to be 6,200 of 117,791 (5.3%). The property
-  // under test has not changed — a stored vector must project onto its stored
-  // coordinate — so it is now sourced deterministically instead of by luck.
-  // The opportunistic check above is kept because it additionally proves the
-  // *serving* path hands back the same vector the snapshot was built from.
+    // Fetched directly rather than waiting for a coincidence. The check above only
+    // gets to run when a test question happens to return something also drawn in
+    // the cloud, and the cloud is now a much smaller share of the index, so that
+    // is rare. The property being tested is unchanged; it is just no longer left
+    // to luck. The opportunistic check stays, because it also proves the live path
+    // hands back the same numbers the cloud was built from.
   const sampledKeys = (snap.keys as string[]).filter((_, i) => i % 601 === 0).slice(0, 25);
   const sampledRows = await prisma.$queryRawUnsafe<{ synsetKey: string; vector: string }[]>(
     `SELECT "synsetKey", embedding::text AS vector FROM "${GLOSS_INDEX}" WHERE "synsetKey" = ANY($1::text[])`,
@@ -289,7 +264,7 @@ async function main() {
     check("at least one synset was available to project", false,
       "no overlap and no sampled rows — the snapshot does not match this index");
   } else {
-    // The snapshot rounds coordinates to 4dp, so 1e-4 is the floor.
+        // The saved positions are rounded, so this is as close as they can get.
     check(
       `${projectionsChecked} projections match to 4dp`,
       worstDelta < 2e-4,

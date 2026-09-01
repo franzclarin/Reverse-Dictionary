@@ -1,29 +1,24 @@
 /**
- * Emit reference query vectors from the PRODUCTION embedder, for the parity gate.
+ * Produce numbers from the LIVE model, so the Python side can be checked
+ * against it.
  *
- * RD-22's Python notebooks encode with sentence-transformers while production
- * serves ONNX through Transformers.js. Those are two runtimes loading two
- * artifacts of the same weights, and if they ever diverge, every Python number
- * silently stops describing production. `rdlib.parity.check_encoder()` shells
- * out to this file and compares.
+ * Python and production load the same model two different ways. If they ever
+ * drift apart, every Python number quietly stops describing production, and
+ * this is what catches that.
  *
- * It imports `lib/embedder.ts` rather than re-deriving anything: the point is to
- * measure the encoder that actually serves `/api/lookup`, so a copy of its
- * settings here would defeat the check.
+ * It imports the real serving code rather than repeating its settings: copying
+ * them here would defeat the check.
  *
- * Writes JSON to argv[2] rather than stdout, because `lib/embedder.ts` logs a
- * load line to stdout and mixing the two would make the output unparseable.
+ * Writes to a file rather than the screen, because the serving code prints a
+ * line of its own and mixing the two would make the output unreadable.
  *
  *   npx tsx training/tools/embed_reference.ts /tmp/ref.json [text ...]
  */
 import fs from "node:fs";
 import { embed } from "../../lib/embedder";
 
-/**
- * Defaults span the three registers the project actually cares about: a
- * user-voice description, a long one, and a raw WordNet gloss. A single short
- * string would not exercise pooling over a realistic token count.
- */
+/** Three kinds of text: a user's phrasing, a long one, and a dictionary
+ *  definition. A single short string would not exercise enough of the model. */
 const DEFAULT_TEXTS = [
   "the smell of rain on dry earth",
   "when you say a word so many times it stops sounding like a word",

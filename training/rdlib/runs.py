@@ -1,18 +1,17 @@
 """
-Reading `eval/runs/*.json` -- the committed evidence.
+Reading the saved runs -- the committed evidence.
 
-Every run file carries per-query `rank`, `lenientRank` and `echo` already
-computed by the TypeScript harness. Reading those is not a second scoring
-implementation; it is reading the harness's own output, and it is the safest
-thing this package does. `metrics.score()` over these rows reproduces the
-published tables exactly -- see `parity.py`.
+Every run file already carries, per question, where the answer came and how much
+of the result echoed the question, all computed by the TypeScript harness.
+Reading those is not a second scoring implementation; it is reading the
+harness's own output, and it is the safest thing this package does.
 
-WHICH RUNS MEAN WHAT (CLAUDE.md, "Committed eval artifacts"):
+Which runs mean what:
   prod_wikt_shipped ... the CURRENT production path. Compare against this.
-  prod_gloss_shipped .. the pre-RD-17 path -- "versus what we replaced".
-  baseline/exact/filtered ... the pre-cutover LEMMA index, now the rollback path.
-  rd17_*, full_gloss_* ...... local exact-scan cells, not production numbers.
-  rerank_* .................. RD-12's rejected experiment. Not search quality.
+  prod_gloss_shipped .. the previous path -- "versus what we replaced".
+  baseline/exact/filtered ... the old word-by-word index, now the rollback path.
+  rd17_*, full_gloss_* ...... local experiments, not production numbers.
+  rerank_* .................. a rejected experiment. Not search quality.
 """
 
 from __future__ import annotations
@@ -91,15 +90,14 @@ def load_all_runs(runs_dir: Path = EVAL_RUNS_DIR) -> dict[str, Run]:
 @dataclass(frozen=True)
 class ShortlistRow:
     """
-    One query's retrieved shortlist, with gloss text. RD-12's sidecar format.
+    One question's shortlist, with the definitions attached.
 
-    This is the richest artifact in the repo for reranking work: 405 queries x
-    100 candidates, each carrying `synsetKey`, the `gloss` text that was
-    indexed, its `lemmas`, the bi-encoder `sim`, and the baseline cross-encoder
-    `ce` score.
+    The richest record in the repo for re-sorting work: every question with a
+    hundred candidates, each carrying its key, the definition that was indexed,
+    its words, and both models' scores.
 
-    IT IS BUILT FROM THE EVAL SET. It is a dev set and a format template, and it
-    is NEVER training data -- see `evalset.assert_disjoint`.
+    It is built FROM the test set. It is a development aid and a format
+    template, and it is never training data.
     """
 
     id: str
@@ -158,12 +156,10 @@ def load_shortlist(ref: str | Path, *, runs_dir: Path = EVAL_RUNS_DIR) -> list[S
 
 def to_dataframe(run: Run):
     """
-    Flatten a run into a DataFrame, with `meta` promoted to columns.
+    Flatten a run into a table, with the per-question details as columns.
 
-    Slice columns available: source, style, zipf, token_count, lexical_overlap,
-    reachable, sense_hint. Frequency BANDS are deliberately derived at analysis
-    time rather than stored, so their boundaries can be redrawn without
-    rebuilding the set.
+    Frequency bands are deliberately worked out at analysis time rather than
+    stored, so their boundaries can be redrawn without rebuilding the set.
     """
     import pandas as pd
 

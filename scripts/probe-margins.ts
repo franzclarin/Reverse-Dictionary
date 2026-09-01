@@ -1,17 +1,13 @@
 /**
- * Phase A3 — do the echo neighbours actually outscore the truth?
+ * Do the echoed words actually beat the right answer, or only just edge it out?
  *
- * Phase A established that 34.4% of top-10 results are morphological relatives
- * of the query's own words, and Phase A2 established that the correct answer
- * sits at ~0.53 cosine from a natural description of itself. What neither
- * measured is the *margin*: are the echoes far above the target, or just
- * barely ahead of it?
+ * We already know a third of results merely repeat words from the question, and
+ * that the right answer scores only moderately against a natural description of
+ * itself. What neither measured is the gap between them.
  *
- * Two worlds:
- *   - echoes ~0.75 vs target ~0.53  -> structural. Only a representation
- *     change (Phase E) closes a gap that size.
- *   - echoes ~0.56 vs target ~0.53  -> ordering. Cheap interventions (a
- *     reranker, an echo penalty, score calibration) become live.
+ * Two worlds. A wide gap means the problem is structural, and only a change in
+ * how words are represented closes it. A narrow gap means it is merely an
+ * ordering problem, and cheap fixes become worth trying.
  *
  * Read-only.  npx tsx scripts/probe-margins.ts
  */
@@ -33,7 +29,7 @@ function fmt(n: number): string {
   return Number.isNaN(n) ? "   n/a" : n.toFixed(4);
 }
 
-/** Cosine of the query against a lemma's stored vector, via pgvector. */
+/** How close the question is to a word's stored numbers. */
 async function similarityTo(vectorLiteral: string, word: string): Promise<number | null> {
   const rows = await prisma.$queryRawUnsafe<{ similarity: number }[]>(
     `SELECT 1 - (embedding <=> $1::vector) AS similarity
@@ -55,12 +51,9 @@ async function main(): Promise<void> {
   const margins: number[] = [];
   let rankedWithin10 = 0;
   let unreachable = 0;
-  /**
-   * Targets that outscore results the index *did* return, yet were not
-   * returned themselves. The index surfaced strictly worse candidates — an
-   * approximate-recall failure, not a ranking failure. `--exact` in Phase D
-   * settles the exact size; this counts the cases.
-   */
+    /** Answers that beat what the index returned, yet were not returned at all.
+   *  The index surfaced strictly worse candidates — a search failure, not a
+   *  ranking one. This counts the cases. */
   const indexMisses: { answer: string; sim: number; beaten: number }[] = [];
   const rankingFailures: string[] = [];
 

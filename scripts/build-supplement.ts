@@ -1,31 +1,27 @@
 /**
- * RD-17 step 3 — apply the Wiktionary filter and emit the candidate rows.
+ * Apply the Wiktionary filter and write out the candidate rows.
  *
- * Streams the 3.2 GB Kaikki extraction once per arm, never holding it whole,
- * and writes one JSONL row per surviving sense in the exact shape a
- * `GlossEmbedding` row has. Nothing here embeds anything and nothing here
- * writes to the database — the output is a candidate list, and RD-17 step 4
- * says the numbers come from a local cell before any table is touched.
+ * Streams the multi-gigabyte source once per variant, never holding it whole,
+ * and writes one row per surviving entry in the shape the index uses. Nothing
+ * here measures anything and nothing here writes to the database — this is a
+ * candidate list, and the numbers come from a local file first.
  *
- * TWO ARMS, because the filter's aggressiveness is the parameter this ticket
- * lives or dies on and guessing it would be the same mistake RD-12 and RD-16
- * were built to avoid:
+ * Two variants, because how aggressive the filter should be is the question this
+ * work lives or dies on, and guessing it would be the mistake earlier
+ * experiments were built to avoid:
  *
- *   wikt_new   index a sense only when its headword is not ALREADY answerable
- *              from the live index. Adds capability, adds the fewest possible
- *              distractors to the 117,791 senses that already work.
- *   wikt_all   index every sense that survives the filter, including new senses
- *              of words WordNet already covers. Maximum coverage, maximum
- *              distractor risk.
+ *   wikt_new   add an entry only for words the index cannot already answer.
+ *              Adds new ability, adds the fewest possible wrong answers.
+ *   wikt_all   add every entry that survives the filter, including new meanings
+ *              of words already covered. Most coverage, most risk.
  *
- * The difference between the two arms' scores IS the distractor cost of the
- * extra senses. That is the number, and it is why both are built.
+ * The gap between the two scores IS the cost of those extra wrong answers. That
+ * is the number, and it is why both are built.
  *
- * THE PAYLOAD CHECK. The run reports how many of the eval set's 23 unreachable
- * targets survive the filter. This is NOT the filter being tuned per word — the
- * rules are chosen a priori from tag semantics, and no rule references a target.
- * It is reported because a filter that kills the payload is a filter that is
- * wrong in general, which is exactly how the frequency gate was rejected.
+ * The run also reports how many of the words this work exists to add survive the
+ * filter. The rules are chosen in advance and none of them mentions a specific
+ * word — it is reported because a filter that kills the payload is a filter that
+ * is wrong in general.
  *
  *   npx tsx scripts/build-supplement.ts                  # both arms
  *   npx tsx scripts/build-supplement.ts --arm wikt_new
@@ -62,7 +58,7 @@ function arg(flag: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
-/** The eval set's coverage slice — the words this ticket exists to add. */
+/** The words this work exists to add. */
 function unreachableTargets(): string[] {
   return fs
     .readFileSync(EVAL_SET, "utf8")
@@ -73,7 +69,7 @@ function unreachableTargets(): string[] {
     .map((r) => r.target.toLowerCase());
 }
 
-/** Lemmas the live index can already return. The honest "already covered" set. */
+/** Words the live index can already return — the honest "already covered" list. */
 async function answerableLemmas(prisma: PrismaClient): Promise<Set<string>> {
   const rows = await prisma.$queryRawUnsafe<{ w: string }[]>(
     `SELECT DISTINCT lower(unnest(lemmas)) AS w FROM "GlossEmbedding"`
@@ -105,18 +101,16 @@ async function buildArm(
   const words = new Set<string>();
   const targetSet = new Set(targets);
   const covered = new Set<string>();
-  // Structurally guaranteed by `senseIndex`, and checked anyway: a colliding key
-  // is silent data loss on the way into Postgres, where `ON CONFLICT
-  // ("synsetKey") DO UPDATE` turns the second row into an overwrite of the
-  // first. The first version of this filter numbered senses within an entry
-  // rather than across them and produced 5,925 collisions from homographs with
-  // separate etymologies (`cat` the animal, `cat` the Unix command). The cell
-  // would have been measured with rows the table could never hold.
+    // Guaranteed by construction, and checked anyway: a clashing key is silent
+    // data loss on the way into the database, where the second row would overwrite
+    // the first. An earlier version of this filter produced thousands of clashes
+    // from words with more than one origin, and the experiment would have been
+    // measured with rows the table could never actually hold.
   const keys = new Set<string>();
   let collisions = 0;
 
-  // Buffered rather than one write() per row: 300k+ syscalls otherwise, and the
-  // stream backpressure dance costs more than the memory this holds.
+    // Buffered rather than one write per row: hundreds of thousands of separate
+    // writes cost far more than the memory this holds.
   let buffer: string[] = [];
   const flush = (): void => {
     if (buffer.length) out.write(buffer.join(""));
@@ -240,8 +234,7 @@ async function main(): Promise<void> {
       `      -> ${r.rows.toLocaleString()} rows, ${r.words.toLocaleString()} distinct words, ` +
         `${(fs.statSync(r.file).size / 1e6).toFixed(0)} MB`
     );
-    // 1.85 KB per row is the measured GlossEmbedding figure: 213 MB over
-    // 117,791 rows, heap plus indexes.
+        // Per-row size measured from the live table, data and indexes together.
     console.log(
       `      -> projected in Postgres at 1.85 KB/row: ${((r.rows * 1.85) / 1e3).toFixed(0)} MB`
     );
@@ -253,10 +246,10 @@ async function main(): Promise<void> {
     console.log("");
   }
 
-  // Merge rather than replace. `--arm wikt_new` is the natural way to rebuild one
-  // side, and a whole-file rewrite would silently drop the other arm's record
-  // while the file still looked complete — the manifest is the committed
-  // artifact, so a half-written one is worse than a missing one.
+    // Merge rather than overwrite. Rebuilding one variant is normal, and a full
+    // rewrite would silently drop the other's record while the file still looked
+    // complete. This file is the committed record, so a half-written one is worse
+    // than a missing one.
   const previous = fs.existsSync(MANIFEST)
     ? (JSON.parse(fs.readFileSync(MANIFEST, "utf8")) as { arms?: { arm: string }[] })
     : { arms: [] };

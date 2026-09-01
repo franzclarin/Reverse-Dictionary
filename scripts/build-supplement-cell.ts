@@ -1,33 +1,19 @@
 /**
- * RD-17 step 4 — the expanded index, as a local cell rather than a table.
+ * Build the expanded index as a local file, not a database table.
  *
- * "Do not touch GlossEmbedding until the numbers exist." `build-encoder-cell.ts`
- * already produces full-scale cells outside Postgres and RD-16's cells
- * cross-validated against a live production run to the digit, so a cell is
- * enough to reach a decision with zero database writes and no rollback path.
+ * Nothing touches the live table until the numbers exist. A local file is enough
+ * to reach a decision, with no database writes and nothing to roll back.
  *
- * TWO THINGS THIS SHARES RATHER THAN REBUILDS, and both are the same argument:
- * a delta is only attributable if everything except the thing under test is
- * bit-identical.
+ * Two things are copied rather than rebuilt, for the same reason: a difference
+ * is only attributable if everything except the thing being tested is identical.
+ * The original half is copied verbatim from the verified control rather than
+ * re-measured, and the two variants share one set of numbers, since the narrower
+ * one is a strict subset of the wider one. So the only difference between them
+ * is the extra entries, which is the number they exist to produce.
  *
- *   1. THE WORDNET HALF. Rows 0..117,790 are copied verbatim out of
- *      `full_gloss_ft.vec` — RD-16's verified control, the same encoder over the
- *      same gloss text in the same order. Not re-embedded. So the control and
- *      the expanded cells hold *the same floats* for every WordNet synset, and
- *      any measured difference is the added rows and nothing else.
- *
- *   2. THE SUPPLEMENT VECTORS. `wikt_new`'s rows are a verified strict subset of
- *      `wikt_all`'s (0 rows differ), so the superset is embedded ONCE and the
- *      narrow arm is a selection out of it. The two arms therefore share
- *      bit-identical vectors wherever they share a row, and the arm difference
- *      is purely the extra senses — which is the number the arms exist to
- *      produce.
- *
- * RESUMABLE. Half a million ONNX forward passes is hours, and a run that dies at
- * 90% must not start over. Vectors append to `<cache>.vec` and a sidecar records
- * how many rows are complete; a restart truncates to that boundary and carries
- * on. The count is written AFTER the flush, so a crash mid-write costs one batch
- * and never leaves a half-row.
+ * Resumable, because half a million measurements takes hours and a run that dies
+ * at 90% must not start over. The count of finished rows is written after the
+ * data, so a crash costs one batch and never leaves half a row behind.
  *
  *   npx tsx scripts/build-supplement-cell.ts --benchmark 500
  *   npx tsx scripts/build-supplement-cell.ts --embed
@@ -43,15 +29,15 @@ import { sourcePath } from "./lib/sources";
 import { FILTER_VERSION, LICENCE, type SupplementRow } from "./lib/wiktionary";
 import { POS_LIST, readSenses } from "./lib/wordnet";
 
-/** RD-16's control cell. Its WordNet half is copied, never re-embedded. */
+/** The control. Its original half is copied, never re-measured. */
 const BASE_CELL = "full_gloss_ft";
 const EXPECTED_BASE_ROWS = 117_791;
 
-/** The superset arm. `wikt_new` is selected out of this one's vectors. */
+/** The wider variant. The narrower one is picked out of this one's numbers. */
 const SUPERSET_ARM = "wikt_all";
 const CACHE = "supplement_wikt_all";
 
-/** Rows per flush. Large enough that the write cost disappears, small enough to lose little. */
+/** Rows per save: big enough that writing costs nothing, small enough to lose little. */
 const FLUSH_ROWS = 2_000;
 
 type Arm = "wikt_new" | "wikt_all";
@@ -81,15 +67,11 @@ async function readSupplement(arm: Arm): Promise<SupplementRow[]> {
 
 type WordNetRow = { key: string; words: string[]; gloss: string };
 
-/**
- * The base cell's rows, in the order `build-encoder-cell.ts` wrote them.
- *
- * Recomputed from `wordnet-db` rather than stored, exactly as
- * `verify-encoder-cell.ts` does — and for the same reason: if the order here
- * drifted from the order the vectors were written in, row i would describe
- * synset j and nothing downstream would say so. The hash check in
- * `verify-supplement-cell.ts` is what turns that from an assumption into a test.
- */
+/** The control's rows, in the order they were written. */
+// Recomputed from the dictionary rather than stored. If this order ever drifted
+// from the order the numbers were written in, row 5 would describe entry 9 and
+// nothing downstream would notice. The fingerprint check is what turns that from
+// an assumption into a test.
 function readWordNetRows(): WordNetRow[] {
   const out: WordNetRow[] = [];
   for (const pos of POS_LIST) {
@@ -121,8 +103,8 @@ async function embedSuperset(benchmark: number): Promise<void> {
   if (benchmark === 0 && fs.existsSync(progress) && fs.existsSync(vec)) {
     const saved = JSON.parse(fs.readFileSync(progress, "utf8")) as { rows: number };
     done = Math.min(saved.rows, total);
-    // Trust the counter, not the file length: a crash between the write and the
-    // counter update leaves trailing bytes that belong to no completed batch.
+        // Trust the counter, not the file's length: a crash between writing the data
+        // and updating the counter leaves trailing bytes belonging to no finished batch.
     fs.truncateSync(vec, done * DIM * 4);
     console.log(`  resuming at ${done.toLocaleString()}/${total.toLocaleString()}`);
   } else if (benchmark === 0) {
@@ -147,7 +129,7 @@ async function embedSuperset(benchmark: number): Promise<void> {
     fs.appendFileSync(vec, Buffer.from(buffer.buffer, 0, buffered * DIM * 4));
     done += buffered;
     buffered = 0;
-    // After the append, never before — see the header note on ordering.
+        // After the data is written, never before — see the note at the top.
     fs.writeFileSync(progress, JSON.stringify({ rows: done, of: total }), "utf8");
   };
 
@@ -197,10 +179,10 @@ async function composeArm(arm: Arm, base: WordNetRow[], baseVectors: Float32Arra
   const { vec } = cachePaths();
   const supVectors = loadFloats(vec, superset.length);
 
-  // `wikt_new` is a verified strict subset of `wikt_all`, so selecting rather
-  // than re-embedding gives the two arms bit-identical vectors wherever they
-  // overlap. Identity is by (key, gloss): the key alone would be ambiguous if
-  // the filter ever changed sense ordering under a word.
+    // The narrower variant is a checked subset of the wider one, so picking rows
+    // out rather than re-measuring gives both identical numbers wherever they
+    // overlap. Matched on key and definition together, since the key alone would
+    // be ambiguous if the filter ever reordered a word's meanings.
   let rows: SupplementRow[];
   let sourceIndex: number[];
   if (arm === SUPERSET_ARM) {
@@ -247,8 +229,8 @@ async function composeArm(arm: Arm, base: WordNetRow[], baseVectors: Float32Arra
   const meta: Omit<CellMeta, "dim" | "rows" | "distinctWords" | "builtAt"> = {
     cell: out,
     model: PRODUCTION_MODEL,
-    // The exact string `eval.ts` switches member expansion on. The *vocabulary*
-    // this cell holds lives in `vocabulary` below, never in this field.
+        // The exact label the scorer looks for. Which dictionaries this holds is
+        // recorded in the field below, never in this one.
     variant: "gloss_synset",
     representation: "gloss",
     scale: "full",
@@ -274,9 +256,9 @@ async function composeArm(arm: Arm, base: WordNetRow[], baseVectors: Float32Arra
     synsetMembers: members,
   };
 
-  // The row list, in order, with the exact text each row was built from. The
-  // RD-16 verifier recomputes its input hash from wordnet-db and would correctly
-  // reject a composed cell; this is what a composed cell is checked against.
+    // Every row in order, with the exact text it was built from. The original
+    // checker rebuilds its fingerprint from the dictionary and would rightly
+    // reject a file assembled this way, so this is what it is checked against.
   const manifest = path.join(cellDir(), `${out}.manifest.jsonl`);
   const stream = fs.createWriteStream(manifest, { encoding: "utf8" });
   const lines: string[] = [];

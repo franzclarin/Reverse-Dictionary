@@ -1,33 +1,22 @@
 /**
- * Phase E — select the sampled candidate pool and stage its gloss text.
+ * Choose the pool of candidate words for the experiments, and collect their
+ * definitions.
  *
- * The 2x2 (fine-tune vs base model) x (lemma index vs gloss index) is run on a
- * pool of every word in VocabEmbedding that carries a WordNet gloss. It was
- * originally a ~20k sample, sized to fit Neon's 512 MB ceiling; that constraint
- * vanished when the cells moved to local files, and sampling actively attenuates
- * the effect under study (see METHODS.md §10), so the pool is now full scale.
- * Pass --distractors to rebuild a sampled pool instead.
+ * Every experiment searches exactly the same word list, so none of them can win
+ * simply by covering more words. Any word that cannot appear in all of them
+ * appears in none.
  *
- * MATCHED POOLS. Every cell searches exactly the same word set. Words are
- * drawn from `VocabEmbedding` (so the gloss index cannot win on coverage) and
- * further restricted to words that have at least one WordNet sense (so the
- * lemma index cannot win on coverage either). Any word that cannot appear in
- * all four cells appears in none.
+ * This is deliberately not how the live index is built — that uses the full
+ * dictionary — and each run records which it was.
  *
- * This is deliberately NOT how the production index would be built. For that,
- * the pool would be the full WordNet lemma set, which also repairs the ~5%
- * coverage tax for free (`adore`, `convene`, `doff`, `abrogate` come back).
- * The two builds are kept distinct and the run metadata says which is which.
- *
- * Writes only to new `EvalPool*` tables. `VocabEmbedding` and its IVFFlat index
- * are never touched.
+ * Writes only to its own tables; the live ones are never touched.
  *
  *   npx tsx scripts/build-eval-pool.ts --full          # every eligible word
  *   npx tsx scripts/build-eval-pool.ts --distractors 20000
  *
- * Rebuilding the manifest orphans any cell built from the previous pool.
- * `verify-eval-pool.ts` detects that and refuses to score the stale cells rather
- * than reporting them as misses.
+ * Rebuilding this orphans any experiment built from the previous pool. The
+ * checker spots that and refuses to score them, rather than reporting the
+ * mismatch as a pile of wrong answers.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -53,12 +42,9 @@ export type PoolScale = "sampled" | "full";
 export type PoolManifest = {
   builtAt: string;
   scope: "sampled-2x2" | "full-vocabulary";
-  /**
-   * Which pool a cell was built from. Cells of different scale are NOT
-   * comparable — fewer distractors is a strictly easier task — so this travels
-   * into every cell's metadata and into every run's config, and the tooling
-   * refuses to treat the two as one experiment.
-   */
+    /** Which pool this was built from. Different sizes are not comparable —
+   *  fewer wrong answers to sift is simply an easier task — so this travels
+   *  into every file and every run, and the tooling refuses to merge them. */
   scale: PoolScale;
   note: string;
   scoringNote: string;
@@ -77,7 +63,7 @@ function arg(flag: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
-/** Mulberry32 — deterministic, so the pool is reproducible. */
+/** A fixed random sequence, so the pool comes out the same every time. */
 function rng(seed: number): () => number {
   return () => {
     seed |= 0;
@@ -88,7 +74,7 @@ function rng(seed: number): () => number {
   };
 }
 
-/** lowercased lemma -> every sense naming it, across all parts of speech. */
+/** Each word, and every meaning that names it. */
 function buildSenseMap(): Map<string, Sense[]> {
   const map = new Map<string, Sense[]>();
   for (const pos of POS_LIST) {
@@ -105,14 +91,12 @@ function buildSenseMap(): Map<string, Sense[]> {
 }
 
 async function main(): Promise<void> {
-  // The 20k sample was sized to fit inside Neon's 512 MB ceiling. That
-  // constraint disappeared when the cells moved to local files, and a sample
-  // actively works against the measurement: the failure under investigation is
-  // morphological relatives outranking the true answer, and a 14% sample draws
-  // roughly two of a word's twelve relatives — it strips out most of the
-  // competition that produces the effect. A real gloss advantage could arrive
-  // attenuated below the ~4-6 point detection threshold and read as "no
-  // difference", which is the expensive error here.
+    // A sample was originally needed to fit a storage limit that no longer
+    // applies, and it works against the measurement: the problem being studied is
+    // near-relatives of a word crowding out the real answer, and sampling throws
+    // most of those relatives away. A genuine improvement could arrive shrunk
+    // below the detection threshold and read as "no difference", which is the
+    // expensive mistake here.
   const full = process.argv.includes("--full");
   const distractorCount = full ? Infinity : Number(arg("--distractors") ?? 20000);
   const seed = Number(arg("--seed") ?? 20260818);
@@ -127,7 +111,7 @@ async function main(): Promise<void> {
   ).map((r) => r.word);
   console.log(`  ${vocab.length.toLocaleString()} rows`);
 
-  // Only words that can appear in every cell.
+    // Only words that can appear in every experiment.
   const eligible = vocab.filter((w) => senseMap.has(w.toLowerCase()));
   console.log(`  ${eligible.length.toLocaleString()} of them have a WordNet gloss (eligible)`);
 
@@ -157,19 +141,16 @@ async function main(): Promise<void> {
     ? candidates.slice(0, distractorCount)
     : candidates;
 
-  // ---------------------------------------------------------------- layout
-  // TARGETS MUST NOT OCCUPY PREDICTABLE ROWS. This list becomes the row order of
-  // every cell, and a gloss cell's synset mates hold bit-identical vectors, so
-  // whatever breaks their tie decides rank 1. An earlier version emitted
-  // `[...targets, ...distractors]`, which put all 287 eval targets in the first
-  // 685 rows; a tie-break that fell back to row order was then reading the
-  // answer key, and it inflated every gloss cell's Recall@1 by up to 8.9 points
-  // while leaving the tie-free lemma cells alone (METHODS.md §12).
-  //
-  // Shuffling the union with the same seeded PRNG keeps the pool exactly
-  // reproducible while making row position carry no information about which
-  // words are targets. `searchLocal` no longer breaks ties on row order either
-  // — both fixes are held, so neither one silently becomes load-bearing.
+    // The right answers must not sit in predictable rows. This list becomes the
+    // row order of every experiment, and words sharing a meaning have identical
+    // numbers, so whatever breaks their tie decides the winner. An earlier version
+    // put every right answer in the first few hundred rows; a tie broken by row
+    // order was then reading the answer key, and it inflated the scores.
+    //
+    // Shuffling with a fixed random sequence keeps the pool exactly reproducible
+    // while making row position say nothing about which words are answers. Ties
+    // are no longer broken by row order either — both fixes are kept, so neither
+    // quietly becomes the only thing holding this up.
   const words = [...targets, ...distractors];
   for (let i = words.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));

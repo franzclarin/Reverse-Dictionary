@@ -4,14 +4,9 @@ import { useEffect, useRef } from "react";
 import type { PlacedSynset, Run } from "./types";
 import type { Token } from "@/lib/viz/wordpiece";
 
-/**
- * The parts of the pipeline that are data rather than geometry.
- *
- * RD-18's own judgement, kept: 384 numbers are a strip, not a shape; attention
- * heads are not spatial, so any 3D rendering of them would be decoration that
- * implies structure; and a ranked list is a list. Drawing these flat is the
- * honest choice, not the lazy one.
- */
+// The steps that are lists of data rather than shapes in space. Drawing them
+// flat is the honest choice: 384 numbers are a strip, and a ranked list is a
+// list. Rendering them in 3D would imply a structure that isn't there.
 
 export const LABEL_STYLE: React.CSSProperties = {
   fontSize: 10.5,
@@ -35,7 +30,7 @@ export function PanelLabel({ children, right }: { children: React.ReactNode; rig
   );
 }
 
-/** Stage 2 — the tokenizer's actual output, produced in the browser. */
+/** Step 2 — the real word-pieces, worked out in the browser. */
 export function TokenStrip({ tokens, truncated }: { tokens: Token[]; truncated: boolean }) {
   if (tokens.length === 0) return null;
   return (
@@ -77,14 +72,10 @@ export function TokenStrip({ tokens, truncated }: { tokens: Token[]; truncated: 
   );
 }
 
-/**
- * Stage 3 — six layers, twelve heads, no decoder.
- *
- * Every cell is drawn IDENTICALLY, on purpose. An earlier version varied their
- * opacity and it looked like a heatmap of attention weights — which would have
- * been invented data, since nothing here reads the model's activations. This is
- * a diagram of the architecture's shape and nothing more, and it says so.
- */
+/** Step 3 — a diagram of the model's shape, and nothing more. */
+// Every cell is drawn identically on purpose. Varying them looked like real
+// measurements, but nothing here reads inside the model, so it would be
+// invented data.
 export function EncoderSchematic({ active }: { active: boolean }) {
   return (
     <div>
@@ -123,7 +114,7 @@ export function EncoderSchematic({ active }: { active: boolean }) {
   );
 }
 
-/** Stage 4/5 — the pooled, normalised vector. These are its real 384 numbers. */
+/** Steps 4 and 5 — the averaged, rescaled result. These are its real numbers. */
 export function VectorHeatmap({ vector }: { vector: number[] | null }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -145,8 +136,7 @@ export function VectorHeatmap({ vector }: { vector: number[] | null }) {
     const cellWidth = width / vector.length;
     vector.forEach((value, i) => {
       const magnitude = Math.abs(value) / peak;
-      // Oxblood for positive, ink for negative — sign is real information and
-      // a single-hue ramp would throw it away.
+      // Red for positive, black for negative. One colour would throw the sign away.
       ctx.fillStyle = value >= 0 ? "#7a2e2e" : "#211d19";
       ctx.globalAlpha = 0.12 + magnitude * 0.88;
       ctx.fillRect(i * cellWidth, 0, Math.max(cellWidth, 0.75), height);
@@ -178,14 +168,9 @@ export function VectorHeatmap({ vector }: { vector: number[] | null }) {
   );
 }
 
-/**
- * Stage 7 — the centrepiece.
- *
- * One retrieved node bursting into its member words at IDENTICAL scores. This
- * is the least understood step in the pipeline and the one a stock diagram gets
- * wrong: what was ranked is a sense, not a word, and the words that fall out of
- * it are tied by construction because they share one vector.
- */
+/** Step 7 — one meaning bursting into its words, all on the same score. */
+// The least understood step, and the one a stock diagram gets wrong: what was
+// ranked is a meaning, not a word, and its words tie because they share it.
 export function SynsetExpansion({ synsets }: { synsets: PlacedSynset[] }) {
   const interesting = synsets.find((s) => s.lemmas.length > 1) ?? synsets[0];
   if (!interesting) return null;
@@ -262,7 +247,7 @@ export function SynsetExpansion({ synsets }: { synsets: PlacedSynset[] }) {
   );
 }
 
-/** Stage 8 — a list, drawn as a list, with tied scores visibly tied. */
+/** Step 8 — a list drawn as a list, with tied scores visibly tied. */
 export function RankedList({ run }: { run: Run }) {
   if (run.results.length === 0) return null;
 
@@ -320,7 +305,7 @@ export function RankedList({ run }: { run: Run }) {
   );
 }
 
-/** The retrieved senses, before expansion — what was actually ranked. */
+/** The meanings that came back, before they become words — what was ranked. */
 export function SynsetList({ synsets }: { synsets: PlacedSynset[] }) {
   if (synsets.length === 0) return null;
   return (

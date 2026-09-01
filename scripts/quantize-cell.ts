@@ -1,33 +1,27 @@
 /**
- * Quantize an existing cell to IEEE binary16 — the precision pgvector's
- * `halfvec` stores — and optionally truncate it to fewer dimensions.
+ * Round an experiment's numbers down to half the precision the database can
+ * store, and optionally keep fewer of them.
  *
- * NO RE-EMBEDDING. This rewrites bytes already computed, so the only thing it
- * can measure is what storage precision costs. That is exactly the question:
- * `halfvec` halves the index, and the storage arithmetic for the production
- * cutover only works if it is free.
+ * Nothing is re-measured; this rewrites numbers already computed, so the only
+ * thing it can show is what storing them less precisely costs. That is exactly
+ * the question — halving the precision halves the index, and the storage sums
+ * only work if it is free.
  *
- * TWO SEPARATE LOSSY STEPS, DELIBERATELY NOT CONFLATED.
+ * Two separate lossy steps, deliberately not confused with each other:
  *
- *   --precision half   rounds each component to binary16. Both the documents
- *                      and the query carry the error, because a halfvec column
- *                      casts the query too. Expected to be nearly free: the
- *                      relative error is ~1e-3 and cosine averages over 384
- *                      dimensions.
+ *   --precision half  round every number. Both the entries and the question
+ *                     carry the error, since the database rounds the question
+ *                     too. Expected to be nearly free, because the error is tiny
+ *                     and gets averaged over hundreds of numbers.
  *
- *   --dims <n>         keeps only the first n components. This is TRUNCATION,
- *                      not quantization, and it is a much stronger claim. It is
- *                      free only for a model trained with Matryoshka
- *                      representation learning, where the leading dimensions are
- *                      deliberately made sufficient on their own. Neither model
- *                      here was: `all-MiniLM-L6-v2` and the fine-tune derived
- *                      from it emit 384 dimensions that carry no such ordering,
- *                      so the leading 256 are just an arbitrary two-thirds of an
- *                      entangled representation. Measure it before believing any
- *                      size figure that assumes it.
+ *   --dims <n>        keep only the first n numbers. This is a far bigger claim.
+ *                     It is only free for models built so the leading numbers
+ *                     are deliberately sufficient on their own, and neither
+ *                     model here was — so those are just an arbitrary fraction
+ *                     of a tangled whole. Measure it before believing any size
+ *                     estimate that assumes it.
  *
- * Vectors are renormalised after each step so a dot product remains a true
- * cosine, matching what `<=>` computes over the stored values.
+ * Numbers are rescaled after each step, so comparisons stay exact.
  *
  *   npx tsx scripts/quantize-cell.ts --from eval_gloss_ft --precision half
  *   npx tsx scripts/quantize-cell.ts --from eval_gloss_ft --precision half --dims 256
@@ -76,8 +70,8 @@ function main(): void {
   const outVec = new Float32Array(rows * dims);
   const scratch = new Float16Array(dims);
 
-  // Largest per-component and per-vector deviations, so the report can say how
-  // much the representation actually moved rather than asserting it is small.
+    // The biggest shifts, so the report can say how much things actually moved
+    // rather than asserting it was small.
   let maxComponentErr = 0;
   let minCos = 1;
   let sumCos = 0;
@@ -87,7 +81,7 @@ function main(): void {
     const cut = new Float32Array(dims);
     for (let j = 0; j < dims; j++) cut[j] = src.data[off + j];
 
-    // Renormalise after truncation so the retained subspace is a unit sphere.
+        // Rescale after dropping numbers, so what's left is still comparable.
     let n = 0;
     for (let j = 0; j < dims; j++) n += cut[j] * cut[j];
     n = Math.sqrt(n) || 1;
@@ -106,8 +100,7 @@ function main(): void {
       qn = Math.sqrt(qn) || 1;
       for (let j = 0; j < dims; j++) quantized[j] /= qn;
 
-      // Cosine between the vector before and after rounding: how far the
-      // quantized point moved on the sphere.
+            // How far each entry moved once rounded.
       let dot = 0;
       for (let j = 0; j < dims; j++) dot += quantized[j] * cut[j];
       sumCos += dot;

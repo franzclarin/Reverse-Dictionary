@@ -1,13 +1,11 @@
 /**
- * Error introspection helpers.
+ * Digging the real reason out of an error.
  *
- * Node/undici throws a bare `TypeError: fetch failed` for every network
- * problem and hides the real reason on `error.cause` (an AggregateError or a
- * SystemError carrying `code`/`errno`/`hostname`). Logging `err.message`
- * alone therefore tells us nothing. Everything here exists to dig that out.
+ * Node reports every network problem as the same useless "fetch failed" and
+ * buries the actual cause underneath. Everything here exists to find it.
  */
 
-/** Which outbound dependency blew up. Drives the user-facing message. */
+/** Which outside service failed. Decides what the user is told. */
 export type Subsystem = "model" | "database" | "unknown";
 
 export class SubsystemError extends Error {
@@ -53,9 +51,8 @@ function str(value: unknown): string | undefined {
 }
 
 /**
- * Flatten an error and its `cause` chain (plus any AggregateError `errors`,
- * which is how undici reports "tried every resolved address and all failed").
- * Bounded so a self-referential cause can't spin forever.
+ * Unpack an error and everything nested inside it into one flat list.
+ * Depth-limited, so an error that contains itself can't loop forever.
  */
 function flatten(err: unknown, out: MaybeSystemError[] = [], depth = 0): MaybeSystemError[] {
   if (depth > 6) return out;
@@ -74,8 +71,8 @@ export function describeError(err: unknown): ErrorShape {
   const chain = flatten(err);
   const top = chain[0];
 
-  // The top-level `fetch failed` carries no code; the useful fields live on a
-  // deeper link, so take the first occurrence of each anywhere in the chain.
+  // The outermost error carries nothing useful, so take the first value found
+  // anywhere in the chain.
   const code = chain.map((e) => str(e.code)).find(Boolean);
   const hostname = chain.map((e) => str(e.hostname) ?? str(e.host)).find(Boolean);
   const errnoLink = chain.find((e) => typeof e.errno === "number" || typeof e.errno === "string");
@@ -93,7 +90,7 @@ export function describeError(err: unknown): ErrorShape {
   };
 }
 
-/** True when the failure is a network problem rather than a logic bug. */
+/** True when this was a network problem rather than a bug in our code. */
 export function isNetworkError(shape: ErrorShape): boolean {
   if (shape.message === "fetch failed") return true;
   return Boolean(
@@ -104,7 +101,7 @@ export function isNetworkError(shape: ErrorShape): boolean {
   );
 }
 
-/** Compact one-line form for console.error, so Vercel logs stay greppable. */
+/** Squash it onto one line, so logs stay searchable. */
 export function formatErrorShape(shape: ErrorShape): string {
   const parts = [
     `name=${shape.name}`,

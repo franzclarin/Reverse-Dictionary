@@ -16,19 +16,12 @@ import {
 import { useSound } from "@/context/SoundContext";
 import type { Run, Snapshot } from "./types";
 
-/**
- * The /explain page's one layout.
- *
- * The cloud fills the frame; the transformation plays over it as a film; the
- * prose sits in a card you can put away. Three surfaces, in that order of
- * importance — RD-18's whole argument is that this pipeline is legible if you
- * can *watch* it, and the paragraphs are a fallback rather than the point.
- *
- * What is NOT hideable: the four approximation labels along the bottom. RD-18
- * calls labelling them "the acceptance-critical step, not the polish step", and
- * a control that tucked the caveats away while leaving the persuasive picture
- * running would invert the reason they exist.
- */
+// The layout for /explain: the cloud fills the frame, the animation plays over
+// it, and the written explanation sits in a card you can put away. Watching is
+// meant to be enough; the words are a fallback.
+//
+// The warnings along the bottom cannot be hidden. A control that tucked the
+// caveats away while the persuasive picture kept running would defeat them.
 
 const STEPS_STORAGE_KEY = "rd-explain-steps-open";
 const CARD_WIDTH = 396;
@@ -45,8 +38,7 @@ export default function InstrumentShell({ snapshot, run, search }: Props) {
   const [stepsOpen, setStepsOpen] = useState(true);
   const { play } = useSound();
 
-  // Written by PointCloud every frame, read by the film so the vector's flight
-  // ends on the real projected query position.
+  // The cloud writes the landing spot each frame; the animation aims at it.
   const screenRef = useRef<ScreenRef>({ query: null });
 
   useEffect(() => {
@@ -54,7 +46,7 @@ export default function InstrumentShell({ snapshot, run, search }: Props) {
       const stored = window.localStorage.getItem(STEPS_STORAGE_KEY);
       if (stored !== null) setStepsOpen(stored === "true");
     } catch {
-      // Private mode, or site data blocked. Default open is the right fallback.
+      // Storage unavailable. Opening by default is the right fallback.
     }
   }, []);
 
@@ -64,7 +56,7 @@ export default function InstrumentShell({ snapshot, run, search }: Props) {
       try {
         window.localStorage.setItem(STEPS_STORAGE_KEY, String(!open));
       } catch {
-        // Preference simply does not persist; the control still works.
+        // The setting just won't be remembered; the control still works.
       }
       return !open;
     });
@@ -77,9 +69,8 @@ export default function InstrumentShell({ snapshot, run, search }: Props) {
     setPlaying(true);
   }, [run.phase, run.query]);
 
-  // The updater stays PURE — no setPlaying inside it. React StrictMode invokes
-  // updaters twice to surface exactly this, and a state write hidden in one is
-  // a render-phase side effect.
+  // This must only compute, never trigger other changes — React deliberately
+  // runs it twice to catch exactly that mistake.
   const advance = useCallback(() => {
     setStage((current) => (current >= STAGES.length - 1 ? current : current + 1));
   }, []);
@@ -109,8 +100,8 @@ export default function InstrumentShell({ snapshot, run, search }: Props) {
         emphasiseHits={past(6)}
         theme={PLATE_THEME}
         screenRef={screenRef}
-        // The film has custody of the vector until it flies into the cloud;
-        // two markers for one query would read as two queries.
+        // The animation holds the marker until it lands, so one query never
+        // appears to be two.
         hideQueryMarker={hasRun && stage < 5}
         controlsBottom={196}
         style={{ position: "absolute", inset: 0 }}
@@ -128,8 +119,7 @@ export default function InstrumentShell({ snapshot, run, search }: Props) {
           screenRef={screenRef}
           leftInset={0}
           rightInset={stepsOpen ? CARD_WIDTH + 40 : 0}
-          // Clears the query card above and the scrubber below, so the band
-          // never tucks under either.
+          // Keeps clear of the card above and the timeline below.
           topInset={210}
           bottomInset={186}
         />

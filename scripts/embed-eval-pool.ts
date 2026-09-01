@@ -1,25 +1,14 @@
 /**
- * Phase E — embed one cell of the 2x2 into the sampled pool tables.
+ * Measure one experiment's entries into a local file.
  *
- * Cells:
- *   lemma-ft        fine-tune  x lemma index   (the production representation)
- *   lemma-base      base model x lemma index   (did the fine-tune buy anything?)
- *   gloss-ft        fine-tune  x gloss index   (may be off-distribution: the
- *                                               fine-tune was trained
- *                                               query_to_doc, not gloss-to-gloss)
- *   gloss-base      base model x gloss index   (symmetric model, symmetric task)
+ * The experiments cross two choices: our fine-tuned model against the
+ * off-the-shelf one it came from, and indexing bare words against indexing their
+ * definitions. Two extra variants test what text to index — definitions with
+ * example sentences, and definitions with the word itself prefixed.
  *
- * Gloss-text variants, tested on the base model only to keep the budget sane:
- *   gloss-base-ex   definition + WordNet's quoted example sentences
- *   gloss-base-lem  "<lemma>: <definition>"
- *
- * Cells are written to LOCAL FILES, not to Postgres. The Neon project has a
- * 512 MB size limit and `VocabEmbedding` plus its IVFFlat index already takes
- * 451 MB of it, so there is no room for ~100k experiment vectors and making
- * room would mean touching production data. Storing them locally means the
- * experiment performs no database writes at all, and a brute-force scan over
- * the pool is exact by construction — which isolates the representation
- * change from any approximate-index effect.
+ * Written to local files rather than the database, so the experiments write
+ * nothing to the real thing, and searching a file checks every row — which keeps
+ * index shortcuts out of the comparison entirely.
  *
  * Search them with `eval.ts --index-file <cell>`.
  *
@@ -63,14 +52,13 @@ function arg(flag: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
-/** Text to encode for each row of this cell. */
+/** The text to measure for each row. */
 function textsFor(cell: Cell, manifest: PoolManifest): { key: string; word: string; text: string }[] {
   if (cell.representation === "lemma") {
     return manifest.words.map((word) => ({ key: "lemma", word, text: word }));
   }
-  // Text derivation lives in lib/cellText.ts so the verifier uses the exact
-  // same definition — a checker with its own copy could drift and pass a wrong
-  // cell.
+    // Decided in one shared place, so the checker uses the identical rule — a
+    // checker with its own copy could drift and pass a wrong file.
   return manifest.glosses.map((g) => ({
     key: g.senseKey,
     word: g.word,
@@ -107,8 +95,8 @@ async function main(): Promise<void> {
   console.log(`${Date.now() - warmStart}ms
 `);
 
-  // One flat buffer rather than an array of arrays: 29,583 x 384 floats is
-  // 45 MB contiguous, versus several hundred MB of boxed JS numbers.
+    // One flat block of memory: the same numbers held as ordinary nested arrays
+    // would take several times the space.
   const vectors = new Float32Array(items.length * DIM);
   const words: string[] = [];
   const senseKeys: string[] = [];

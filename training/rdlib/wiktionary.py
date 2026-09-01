@@ -1,26 +1,23 @@
 """
-Reading the Kaikki Wiktionary extraction, FOR TRAINING PAIRS ONLY.
+Reading the Wiktionary download, FOR TRAINING EXAMPLES ONLY.
 
-READ THIS BEFORE USING IT. This module is deliberately NOT a port of
-`scripts/lib/wiktionary.ts`, and it must never be used to reproduce the shipped
-index. That filter (`FILTER_VERSION = "rd17.2"`) is what built the 575,534
-senses currently in `GlossEmbedding`, its per-rule kill counts are a committed
-artifact (`eval/data/supplement-manifest.json`), and a second implementation of
-it would be a real drift hazard for a real production table.
+Read this before using it. This is deliberately NOT a copy of the TypeScript
+filter, and must never be used to reproduce the shipped index. That filter is
+what built the entries currently in the live table, its per-rule counts are a
+committed record, and a second version of it would be a real drift hazard for a
+real production table.
 
-What this module does instead is much narrower: pull (word, pos, gloss) triples
-out of the raw dump so training PAIRS can be built from them. Nothing here
-decides what is indexed, so nothing here can silently change what users search.
+What this does is much narrower: pull (word, part of speech, definition) out of
+the raw file so training examples can be built. Nothing here decides what gets
+indexed, so nothing here can silently change what users search.
 
-It does mirror the TS filter's *categorical* rules -- form-of senses, dead
-registers, junk surfaces, a minimum gloss length -- because those exclusions are
-as right for training data as for index rows: a pair whose "definition" is
-"plural of cat" teaches nothing. Where it differs, it differs by being stricter,
-never looser.
+It does mirror the same categorical exclusions -- pointers to other words, dead
+usages, junk spellings, a minimum length -- because those are as right for
+training data as for index rows: an example whose "definition" is "plural of
+cat" teaches nothing. Where it differs, it is stricter, never looser.
 
-SOURCE: kaikki.org's English extraction, ~3.2 GB, fetched by
-`npm run supplement:fetch` into RD_SOURCE_DIR (default ~/rd_sources).
-LICENCE: CC BY-SA -- see `eval/data/supplement-manifest.json`.
+The source is a multi-gigabyte download, fetched separately, and share-alike
+licensed.
 """
 
 from __future__ import annotations
@@ -46,8 +43,8 @@ FORM_TAGS = frozenset(
     }
 )
 
-# Registers nobody would be describing. `rare` is deliberately NOT here:
-# `petrichor` and `limerence` are rare in exactly that sense.
+# Usages nobody would be describing. "Rare" is deliberately absent: `petrichor`
+# and `limerence` are rare in exactly that sense.
 DEAD_TAGS = frozenset({"obsolete", "archaic", "dated", "dialectal"})
 
 SHELL_GLOSS = re.compile(
@@ -64,7 +61,7 @@ INFLECTION_GLOSS = re.compile(
     re.IGNORECASE,
 )
 
-# Multi-word lemmas are KEPT on purpose -- `deja vu` and `stiff upper lip` are
+# Multi-word entries are kept on purpose -- `deja vu` and `stiff upper lip` are
 # legitimate answers.
 _JUNK_SURFACE = re.compile(r"^[A-Z]|[0-9]|[^A-Za-z '-]")
 
@@ -91,11 +88,10 @@ def is_junk_surface(word: str) -> bool:
 
 def clean_gloss(sense: dict) -> str:
     """
-    First gloss, whitespace-collapsed.
+    The first definition, tidied up.
 
-    `glosses` rather than `raw_glosses` because the latter keeps the
-    parenthesised tag prefix ("(transitive) To look up in a dictionary"), and
-    that prefix is register metadata, not meaning.
+    Uses the plain text, not the version prefixed with "(transitive)" and the
+    like: that prefix is a label, not meaning.
     """
     glosses = sense.get("glosses") or []
     return _WS.sub(" ", glosses[0]).strip() if glosses else ""
@@ -115,7 +111,7 @@ def iter_senses(
     progress_every: int | None = 500_000,
 ) -> Iterator[WiktSense]:
     """
-    Stream surviving senses. The dump is 3.2 GB, so this never loads it whole.
+    Read surviving entries one at a time; the file is far too big to load whole.
 
     A full pass takes a few minutes. Pass `limit_entries` while developing.
     """
@@ -139,8 +135,8 @@ def iter_senses(
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError:
-                # The dump has occasional malformed lines; skipping is correct
-                # and the count is immaterial at this scale.
+                                # The file has the odd broken line; skipping is correct and the
+                                # count is immaterial at this scale.
                 continue
 
             if entry.get("lang_code") != "en":
@@ -174,10 +170,10 @@ def glosses_by_word(
     path: Path | None = None, *, limit_entries: int | None = None
 ) -> dict[tuple[str, str], list[str]]:
     """
-    `{(word, pos): [gloss, ...]}` -- the shape the paraphrase recipe needs.
+    Definitions grouped by word and part of speech.
 
-    Keyed by (word, pos) rather than word alone so a noun sense is never paired
-    against a verb definition of the same spelling.
+    Keyed by both, so a noun meaning is never paired against a verb definition
+    of the same spelling.
     """
     out: dict[tuple[str, str], list[str]] = {}
     for sense in iter_senses(path, limit_entries=limit_entries):

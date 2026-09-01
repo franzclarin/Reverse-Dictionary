@@ -1,19 +1,18 @@
 /**
- * RD-17 step 2 — is Open English WordNet enough on its own?
+ * Would the newer dictionary be enough on its own?
  *
- * The cheap source before the expensive one. OEWN is the maintained successor
- * to Princeton WordNet 3.0 with the same synset/gloss structure, so adopting it
- * would change only the reader inside `scripts/lib/wordnet.ts` and cost roughly
- * zero extra storage. If it carries the `petrichor` class, that is the entire
- * ticket and the 3.2 GB Wiktionary path never has to be walked.
+ * The cheap source before the expensive one. It is the maintained successor to
+ * the dictionary we use, with the same structure, so adopting it would change
+ * only the reader and cost roughly no extra storage. If it carries the missing
+ * words, that is the whole job and the multi-gigabyte alternative is never
+ * needed.
  *
- * This measures the delta rather than assuming it, and prints the one slice
- * that decides: how many of the eval set's `reachable: false` targets OEWN can
- * actually answer.
+ * This measures the difference rather than assuming it, and prints the one part
+ * that decides: how many of the words the test set cannot currently answer it
+ * would actually cover.
  *
- * Read-only. Reads the live GlossEmbedding lemma set for the comparison, so the
- * "already answerable" side is what production really holds, not a rebuild of
- * what it should hold.
+ * Read-only. Compares against the live index, so "already answerable" means what
+ * production really holds, not a rebuild of what it should hold.
  *
  *   npx tsx scripts/probe-oewn-delta.ts
  *   npx tsx scripts/probe-oewn-delta.ts --file ~/rd_sources/oewn.xml.gz
@@ -63,7 +62,7 @@ async function main(): Promise<void> {
   const oewnWords = oewnLemmas(oewn);
   const oewnLower = new Set([...oewnWords].map((w) => w.toLowerCase()));
 
-  // WordNet 3.0 as shipped, which is what build-gloss-index.ts reads.
+    // The dictionary as shipped, which is what the index is built from.
   const pwn = readSenses(POS_LIST[0]).length
     ? POS_LIST.flatMap((pos) => readSenses(pos))
     : [];
@@ -78,8 +77,8 @@ async function main(): Promise<void> {
     `\n  delta vs WordNet 3.0       +${added.length.toLocaleString()} lemmas   -${dropped.length.toLocaleString()} lemmas`
   );
 
-  // The live index is the honest baseline for "already answerable": it is what
-  // a user's query is actually matched against.
+    // The live index is the honest baseline for "already answerable": it is what
+    // a user's question is really matched against.
   const prisma = new PrismaClient();
   try {
     const rows = await prisma.$queryRawUnsafe<{ w: string }[]>(
@@ -91,7 +90,7 @@ async function main(): Promise<void> {
       `  OEWN lemmas not yet live   ${[...oewnLower].filter((w) => !live.has(w)).length.toLocaleString()}`
     );
 
-    // The decisive slice. Everything above is a row count; this is capability.
+        // The part that decides. Everything above is just a row count.
     const targets = unreachableTargets();
     const covered = targets.filter((t) => oewnLower.has(t.target.toLowerCase()));
     const stillLive = targets.filter((t) => live.has(t.target.toLowerCase()));

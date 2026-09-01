@@ -1,27 +1,20 @@
 /**
- * Does fusing the cross-encoder with retrieval rank rescue RD-12?
+ * Does combining the two rankings work better than either alone?
  *
- * Recorded as a control for the RD-12 write-up (METHODS §13). The off-the-shelf
- * cross-encoder LOST to plain retrieval on lenient R@1, and the obvious
- * objection is that reranking replaced a good signal rather than adding to it —
- * so this checks whether combining the two orders does better than either.
+ * The second model lost to plain search, and the obvious objection is that it
+ * replaced a good signal rather than adding to it. So this blends the two
+ * orderings and checks.
  *
- * Reciprocal Rank Fusion, deliberately:
+ * The blending rule has no setting to tune — its one constant comes from the
+ * paper that introduced it — and it uses only positions, so it cannot be
+ * flattered by the two scores being on different scales. A weighted blend of the
+ * raw scores would need a weight, and fitting that weight on this many questions
+ * is exactly the benchmark-fitting this project flags itself for elsewhere. A
+ * control has to be untunable to be worth anything.
  *
- *   score(candidate) = 1/(60 + retrievalRank) + 1/(60 + crossEncoderRank)
- *
- * RRF has NO free parameter to fit (60 is the constant from the original paper,
- * not something tuned here) and it consumes only ranks, so it cannot be
- * flattered by the two scores living on different scales. A weighted blend of
- * cosine and logit would need a weight, and fitting that weight on a 287-query
- * set is exactly the benchmark-fitting this project already flags itself for
- * elsewhere (CLAUDE.md, on the expansion-order tie-break). A control has to be
- * unfittable to be worth anything.
- *
- * Reads a PERSISTED shortlist and nothing else — no database, no model. That is
- * the whole argument for having persisted it: this question arrived after the
- * runs were finished, and answering it cost one file read instead of another
- * 405 embeddings and 40,500 forward passes.
+ * Reads a saved shortlist and nothing else — no database, no model. That is the
+ * whole argument for having saved it: this question arrived after the runs were
+ * finished, and answering it cost one file read instead of hours of recomputing.
  *
  *   npx tsx scripts/probe-rerank-fusion.ts eval/runs/<tag>.shortlist.jsonl
  */
@@ -49,7 +42,7 @@ function readSet(file: string): Map<string, EvalRow> {
   );
 }
 
-/** Candidates carry `sim`, not `similarity` — restore the shape expandSynsets wants. */
+/** Rename the score field to the one the expansion helper expects. */
 function asHits(candidates: Candidate[]): SynsetHit[] {
   return candidates.map((c) => ({
     synsetKey: c.synsetKey,
@@ -58,7 +51,7 @@ function asHits(candidates: Candidate[]): SynsetHit[] {
   }));
 }
 
-/** Descending by `key`, ties broken by retrieval order — the same policy as eval.ts. */
+/** Best first, ties broken by search order — the same rule the scorer uses. */
 function reorder(
   candidates: Candidate[],
   depth: number,
@@ -92,7 +85,7 @@ function main(): void {
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => JSON.parse(line) as ShortlistRow)
-    // Headline scope, matching eval.ts: authored and reachable.
+        // Headline questions only, matching the scorer.
     .filter((r) => {
       const meta = set.get(r.id);
       return meta?.source === "authored" && meta.meta.reachable !== false;
@@ -116,7 +109,7 @@ function main(): void {
     );
   };
 
-  // The un-reranked order the shortlist was retrieved in — the number to beat.
+    // The original search order — the number to beat.
   report("retrieval", 100, (r) => asHits(r.candidates));
 
   for (const depth of DEPTHS) {
@@ -125,7 +118,7 @@ function main(): void {
 
   for (const depth of DEPTHS) {
     report("rrf", depth, (r) => {
-      // Cross-encoder RANK per candidate, keyed by its retrieval position.
+            // Each candidate's position according to the second model.
       const ceRank = new Map<number, number>();
       r.candidates
         .slice(0, depth)

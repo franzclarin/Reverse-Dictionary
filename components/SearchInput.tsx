@@ -7,7 +7,7 @@ interface SearchInputProps {
   onSearch: (description: string) => void;
   isLoading: boolean;
   variant?: "landing" | "compact";
-  /** Seeds the field on mount — the results page pre-fills the query that produced the current list. */
+  /** Fills the box on load, so the results page shows the query behind the list. */
   initialValue?: string;
 }
 
@@ -19,7 +19,7 @@ const PLACEHOLDER_EXAMPLES = [
   "fear of long words",
 ];
 
-/** Thin cursor appended to the placeholder while the typewriter is animating. */
+/** The blinking cursor shown while the placeholder types itself out. */
 const CURSOR = "▏";
 
 const TYPE_SPEED_MS = 45;
@@ -27,14 +27,9 @@ const DELETE_SPEED_MS = 25;
 const PAUSE_AFTER_TYPE_MS = 1800;
 const PAUSE_AFTER_DELETE_MS = 400;
 
-/**
- * Types/pauses/deletes through PLACEHOLDER_EXAMPLES while `active`, freezing
- * (not clearing) the current text when `active` goes false — the box is
- * empty and unfocused, or the box has a cursor in it but browsers only show
- * placeholder text while the value is empty, so freezing vs. clearing only
- * matters for that one case, and freezing reads as "paused" rather than "reset".
- * Renders the first example statically under prefers-reduced-motion.
- */
+/** Types the example prompts in and out, like a typewriter. */
+// Stopping freezes the text rather than clearing it, which reads as "paused"
+// instead of "reset". Viewers who ask for less motion get the first one, still.
 function useTypewriterPlaceholder(active: boolean): string {
   const [text, setText] = useState("");
   const reducedMotion = useRef(false);
@@ -122,8 +117,8 @@ export default function SearchInput({
     }
   };
 
-  // Fires on the keys that actually change the field's text — a typewriter
-  // key strike per character, not per event (ignores modifiers, arrows, etc).
+  // Only on keys that actually change the text — one click per character typed,
+  // not per key pressed.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete") {
       play("key");

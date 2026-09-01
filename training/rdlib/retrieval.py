@@ -1,24 +1,15 @@
 """
-Exact retrieval over a local cell, and scoring against the frozen set.
+Search a local experiment file exactly, and score it against the frozen set.
 
-This is the Python half of RD-22's inner loop: encode, scan, rank, score --
-without a database and without the TypeScript harness, so an experiment can be
-judged in seconds rather than minutes.
+The Python half of the fast inner loop, so an idea can be judged in seconds
+rather than minutes.
 
-IT IS A SECOND RETRIEVAL PATH, which METHODS warns about in as many words. Two
-things keep it honest, and both matter:
+This IS a second search path, normally the thing to avoid. Two things keep it
+honest: the measuring model is the very one the live site serves, not a copy;
+and the ranking rules are ported line for line, tie-break included, because ties
+are not an edge case here -- words sharing a meaning have identical numbers.
 
-  1. The ENCODER is not a second implementation. `SentenceTransformer(
-     "franzclarin/ReverseDictionary")` and the ONNX model lib/embedder.ts serves
-     were measured agreeing at cos = 1.0000001, max abs difference 1.3e-07 --
-     float32 rounding. `parity.check_encoder()` re-runs that.
-  2. The RANKING RULES below are ported line for line from
-     scripts/lib/localIndex.ts, tie-break included, because on a gloss index
-     ties are not an edge case: synset mates hold bit-identical vectors, and
-     which mate surfaces first is worth 2.5 points of lenient R@1.
-
-Anything that would change a decision still gets confirmed through
-`npx tsx scripts/eval.ts`. See notebook 04.
+Anything that would change a decision still goes through the TypeScript harness.
 """
 
 from __future__ import annotations
@@ -43,16 +34,10 @@ class _TieBreak:
 
 def _tie_break(cell: Cell) -> _TieBreak:
     """
-    Lexicographic rank of each row's word and senseKey.
+    Each row's alphabetical position, worked out once instead of per question.
 
-    `np.unique(..., return_inverse=True)` returns sorted uniques plus the index
-    of each element within them -- which IS its lexicographic rank, computed
-    once per cell instead of per query.
-
-    Caveat worth knowing: JavaScript's `<` on strings compares UTF-16 code
-    units and numpy compares code points. They agree on everything ASCII, which
-    is every lemma in WordNet; a non-ASCII headword could in principle order
-    differently, and only among rows whose scores are exactly equal.
+    JavaScript and Python compare text slightly differently. They agree on
+    everything in this dictionary, and only tied rows could ever be affected.
     """
     words = np.asarray(cell.words, dtype=object)
     _, word_rank = np.unique(words.astype(str), return_inverse=True)
@@ -73,19 +58,17 @@ def search_rows(
     tie: _TieBreak | None = None,
 ) -> list[tuple[int, float]]:
     """
-    Top-k rows by cosine, with the harness's tie-break. Ports `searchLocalRows`.
+    The closest rows: best score first, then alphabetically.
 
-    Order is: score descending, then word ascending, then senseKey ascending.
-    The dot product is accumulated in float64 because JavaScript numbers are
-    float64 and the TypeScript loop promotes each float32 as it multiplies.
+    Arithmetic at the wider precision JavaScript uses, so the two agree.
     """
     if tie is None:
         tie = _tie_break(cell)
 
     scores = cell.vectors.astype(np.float64) @ np.asarray(query, dtype=np.float64)
 
-    # lexsort's LAST key is primary, so this reads bottom-up: score desc first,
-    # then word, then senseKey.
+        # The last key listed is the primary one, so read this bottom-up: best score
+        # first, then word, then key.
     order = np.lexsort((tie.sense_rank, tie.word_rank, -scores))[:k]
     return [(int(i), float(scores[i])) for i in order]
 
@@ -97,17 +80,12 @@ def search(
     tie: _TieBreak | None = None,
 ) -> list[tuple[str, float]]:
     """
-    Top-k WORDS for a query vector.
+    The closest words for a question.
 
-    On a synset cell each retrieved row is expanded into its member words in
-    WordNet's own order -- the harness's default `--expansion-order wordnet` --
-    deduped by word, and truncated to k. That order is never sorted: it is the
-    tie-break production actually uses, and alphabetical scores 2.5 points
-    lower on identical vectors.
-
-    NOTE THE SCORING SURFACE on a synset cell: one retrieved synset can occupy
-    several top-k slots, so a 24-member synset at rank 1 fills the entire top 10
-    by itself. These numbers are not a drop-in substitute for a per-sense cell's.
+    Each meaning is expanded into its words in the dictionary's own order. Never
+    sort that: it is the tie-break production uses, and alphabetical is worse on
+    identical numbers. One meaning can fill several slots, so these scores are
+    not interchangeable with the one-row-per-meaning kind.
     """
     if tie is None:
         tie = _tie_break(cell)
@@ -120,7 +98,7 @@ def search(
     out: list[tuple[str, float]] = []
     seen: set[str] = set()
 
-    # Each synset yields at least one word, so k synsets always yield >= k words.
+        # Every meaning yields at least one word, so k meanings yield at least k.
     for row, sim in search_rows(cell, query, k, tie):
         key = keys[row] if row < len(keys) else ""
         for word in members.get(key, [cell.words[row]]):
@@ -142,13 +120,11 @@ def score_row(
     db_ms: float = 0.0,
 ) -> QueryResult:
     """
-    Turn a ranked word list into a scored QueryResult. Ports eval.ts:480-530.
+    Score one question's ranked list.
 
-    `ranked` should be the DEEP list (rank_depth, default 100): `rank` and
-    `lenient_rank` are searched over all of it, while `results` and `echo` are
-    the top-k only. That asymmetry is deliberate and is what lets a run report
-    "target is in the shortlist but not the top 10" -- the 53pp headroom every
-    reranking ticket cites.
+    Pass the DEEP list: where the answer came is searched over all of it, while
+    the results and echo cover the top few. That difference is what lets a run
+    report "in the shortlist but not the top ten".
     """
     words = [w for w, _ in ranked]
     answers = row.answers
@@ -192,13 +168,11 @@ def run_eval(
     progress: bool = True,
 ) -> list[QueryResult]:
     """
-    Score `rows` against `cell`. `encode` takes list[str] -> (n, dim) float32.
+    Score the questions against an experiment file.
 
-    Latency is NOT measured here, deliberately. RD-20 is the standing ticket
-    about how badly a warm sequential burst misrepresents production
-    (61ms warm against 2,678ms cold on the same scan), and a local exact scan
-    with no database in it would be even less meaningful. Use the TypeScript
-    harness if a latency number is wanted, and read RD-20 before believing it.
+    Timing is deliberately not measured: a warm run of many questions back to
+    back badly misrepresents what a user experiences. Use the TypeScript harness
+    if a timing number is wanted.
     """
     queries = [r.query for r in rows]
     vectors = encode(queries)
@@ -231,15 +205,11 @@ def run_eval(
 
 def pull_gloss_index(limit: int | None = None, *, batch: int = 20_000) -> Cell:
     """
-    Build a Cell from the live `GlossEmbedding` table.
+    Pull the live index into a local file. Read-only.
 
-    READ-ONLY, and the notebooks never write to the database. This is how you
-    get the ACTUAL production candidate set (693,325 senses since RD-17) into a
-    local exact scan, which is useful for one specific thing: separating index
-    approximation from representation. The live index is IVFFlat; a scan over
-    the same rows is exact, and the gap between them is what `probes` buys.
-
-    ~1 GB of float32 at full size. Pass `limit` to sample while developing.
+    Useful for one thing: separating what the fast-but-approximate index loses
+    from what the model itself gets wrong. About a gigabyte at full size; pass
+    `limit` to sample while developing.
     """
     import os
 
@@ -252,7 +222,7 @@ def pull_gloss_index(limit: int | None = None, *, batch: int = 20_000) -> Cell:
     if not url:
         raise RuntimeError("DATABASE_URL is not set; expected it in .env.local")
 
-    # Prisma's pooled URL carries params libpq rejects.
+        # The app's connection string carries settings this client rejects.
     url = url.split("?")[0]
 
     vectors: list[np.ndarray] = []

@@ -1,28 +1,15 @@
-/**
- * Retrieval metrics and the paired significance test.
- *
- * Kept apart from the runner so `--compare` can score two saved runs without
- * touching the database or the model.
- */
+// The scores, and the test for whether a difference between two runs is real.
+// Kept apart from the runner so two saved runs can be compared without touching
+// the database or the model.
 
-/**
- * One candidate the cross-encoder saw, in RETRIEVAL order (RD-12).
- *
- * `sim` is the bi-encoder cosine that put it in the shortlist; `ce` is the
- * cross-encoder's raw logit for the pair. Persisted because a run whose
- * shortlist is gone cannot be re-scored at a different depth, or audited at
- * all — before RD-12 every run stored only its top 10 while computing ranks to
- * depth 100, so the shortlist the whole ticket is about was thrown away.
- *
- * Gloss text is deliberately NOT stored here: it is recoverable from
- * `synsetKey`, and inlining it would quadruple the size of a committed
- * reference run. The full detail, gloss included, goes to the sidecar
- * `eval/runs/<tag>.shortlist.jsonl`.
- */
+/** One candidate the re-sorting model saw, in the order search returned it. */
+// Saved because a run that throws its shortlist away cannot be re-scored at a
+// different depth, or checked at all. Definition text is left out — it can be
+// looked up from the key, and inlining it would bloat every saved run.
 export type ShortlistEntry = {
   synsetKey: string;
   sim: number;
-  /** Absent when the entry sat beyond the rerank depth and was never scored. */
+    /** Missing when this entry sat too far down to be re-scored. */
   ce?: number;
 };
 
@@ -31,24 +18,21 @@ export type QueryResult = {
   query: string;
   target: string;
   source: string;
-  /** Returned words, best first. */
+    /** The words returned, best first. */
   results: string[];
   similarities: number[];
-  /** 1-based rank of the target within the deep scan, or null if absent. */
+    /** Where the right answer came, or null if it never appeared. */
   rank: number | null;
-  /** 1-based rank of the best acceptable answer (target included). */
+    /** Where the best acceptable answer came. */
   lenientRank: number | null;
-  /** Share of the top-10 sharing a stem with a query content word. */
+    /** How much of the top ten merely echoes a word from the question. */
   echo: number;
   meta: Record<string, unknown>;
   embedMs: number;
   dbMs: number;
-  /** RD-12, rerank runs only: cross-encoder wall time for this query. */
+    /** Re-sorting runs only: how long the second model took on this question. */
   rerankMs?: number;
-  /**
-   * RD-12, rerank runs only: the candidates the cross-encoder re-sorted, in
-   * retrieval order. Optional so every run committed before RD-12 still loads.
-   */
+    /** Re-sorting runs only: what was re-sorted, in the order search returned it. */
   shortlist?: ShortlistEntry[];
 };
 
@@ -61,7 +45,7 @@ export type Metrics = {
   lenientRecall1: number;
   lenientRecall10: number;
   echoRate: number;
-  /** Share whose target is somewhere in the deep scan but outside the top 10. */
+    /** Share where the right answer was found, but not in the top ten. */
   beyond10: number;
 };
 
@@ -108,20 +92,15 @@ export function percentile(values: number[], p: number): number {
   return sorted[idx];
 }
 
-/**
- * Exact two-sided McNemar test on rank-1 disagreements.
- *
- * Comparing two independent Recall@1 figures at n=300 cannot see a three-point
- * change. The paired test can, because it discards every query both runs get
- * right — which is exactly where the variance lives — and looks only at the
- * discordant pairs. The exact binomial form is used rather than the chi-square
- * approximation because b + c is often small.
- */
+/** Tests whether two runs really differ, by looking only at where they disagree. */
+// Comparing two overall percentages at this sample size cannot see a
+// three-point change. Comparing them question by question can, because it
+// throws away every question both runs get right — which is where the noise is.
 export function mcnemar(b: number, c: number): { p: number; n: number } {
   const n = b + c;
   if (n === 0) return { p: 1, n: 0 };
 
-  // Two-sided: 2 * P(X <= min(b,c)) under X ~ Binomial(n, 0.5).
+    // Two-sided: how likely a split this lopsided would be from coin flips.
   const lo = Math.min(b, c);
   let logC = 0; // log of the binomial coefficient, kept in logs for large n
   let sum = 0;

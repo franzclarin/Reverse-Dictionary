@@ -1,19 +1,17 @@
 /**
- * Emit `eval/sets/v1-draft.tsv` from the hand-authored pairs, for review.
+ * Write out the hand-written question set for review.
  *
- * This validates and annotates; it does not author. Every row is checked
- * against the exclusion rules before it is written, and the script refuses to
- * emit anything if a row violates them:
- *   - the query must not contain the target
- *   - the query must be at least three words
- *   - no duplicate targets
+ * This checks and annotates; it does not write questions. Every row is tested
+ * against the rules before it is written, and nothing is emitted if one fails:
+ * the question must not contain its own answer, must be at least three words,
+ * and no answer may appear twice.
  *
- * Reachability, frequency band and token count are looked up here rather than
- * hand-declared, so the metadata cannot drift from the database.
+ * Whether a word is findable, how common it is and how long the question is are
+ * all looked up here rather than typed by hand, so they cannot drift.
  *
- * The `acceptable` column is emitted empty, for the reviewer to fill in with a
- * comma-separated list of other answers that should count as correct. That is
- * what makes the lenient Recall@1 figure possible.
+ * The "acceptable" column is left empty for the reviewer to fill in with other
+ * answers that should count as correct. That is what makes the more forgiving
+ * score possible.
  *
  *   npx tsx scripts/build-draft-tsv.ts
  */
@@ -44,19 +42,14 @@ const COLUMNS = [
 ] as const;
 
 /**
- * How much of the answer the query already hands over.
+ * How much of the answer the question already gives away: nothing, a shared word
+ * stem ("open metal cans" / "can opener"), or one word of a multi-word answer
+ * ("the round hard black hat" / "bowler hat").
  *
- *   none        the query shares no vocabulary with the target
- *   stem_shared the query shares a stem ("open metal cans" / "can opener")
- *   head_noun   a multi-word target whose component word appears verbatim
- *               ("the round hard black hat ..." / "bowler hat")
- *
- * None of these are excluded. A person asking about a bowler hat says "hat",
- * and scrubbing that would make the set measure a distribution that does not
- * exist. The freebie is partial anyway: "hat" narrows the space but does not
- * supply "bowler", which is the part retrieval has to do. Tagging lets the
- * harness report recall with and without these rows, which matters because
- * echo is the phenomenon under study — a controlled sample of it is an asset.
+ * None of these are thrown out. A person asking about a bowler hat says "hat",
+ * and scrubbing that would measure a way of asking that nobody uses. The
+ * giveaway is partial anyway — "hat" narrows things down but does not supply
+ * "bowler". Labelling them lets scores be reported with and without.
  */
 export type LexicalOverlap = "none" | "stem_shared" | "head_noun";
 
@@ -68,14 +61,10 @@ function normalise(text: string): string {
   return ` ${text.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim()} `;
 }
 
-/**
- * Hard violation: the query hands over the target outright — the full phrase,
- * or a single-word target as an exact token. A *component* of a multi-word
- * target is not a violation; it is tagged `head_noun` instead.
- */
+/** A real violation: the question contains its answer outright. */
+// One word of a multi-word answer is not a violation; it gets labelled instead.
 function queryContainsTarget(query: string, target: string): boolean {
-  // One test covers both cases: for a single-word target the "phrase" is the
-  // word itself.
+    // One test covers both: for a one-word answer, the phrase is the word.
   return normalise(query).includes(` ${normalise(target).trim()} `);
 }
 
@@ -146,8 +135,8 @@ async function main(): Promise<void> {
     const z = zipf.get(pair.target.toLowerCase());
     return {
       ...pair,
-      // Raw Zipf is the stored truth; `band` is a derived convenience so the
-      // boundaries can be redrawn at analysis time without rebuilding the set.
+            // The raw frequency is what's stored; the band is worked out from it, so
+            // the boundaries can be redrawn later without rebuilding the set.
       zipf: z,
       band: bandOf(z),
       tokens: /[ _-]/.test(pair.target) ? "multi" : "single",

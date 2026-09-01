@@ -1,17 +1,8 @@
-/**
- * Minimal WordNet 3.0 reader over the `wordnet-db` data files.
- *
- * Build-time only: this parses the dictionary files shipped by `wordnet-db` to
- * build the gloss index and to audit coverage. It is never imported by the app,
- * and it never touches `eval/sets/` — the eval set is hand-authored and stays
- * blind to every gloss in here.
- *
- * File formats (see `wndb(5)`):
- *   index.POS : lemma pos synset_cnt p_cnt [ptr...] sense_cnt tagsense_cnt offset...
- *   data.POS  : offset lex_filenum ss_type w_cnt word lex_id [...] | gloss
- * Both use `_` where a lemma contains a space, and both open with 29 licence
- * lines starting "  ".
- */
+// Reads the WordNet dictionary files that ship with this project.
+//
+// Build-time only: used to build the search index and to check coverage. The
+// app never imports it, and it never touches the test set — those questions are
+// written by hand and stay blind to every definition in here.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -32,7 +23,7 @@ function readDataLines(file: string): string[] {
     .filter((line) => line.length > 0 && !line.startsWith("  "));
 }
 
-/** Lemmas for one part of speech, spaces restored from underscores. */
+/** Every word for one part of speech. */
 export function readIndex(pos: Pos): string[] {
   const lines = readDataLines(path.join(dictDir(), `index.${pos}`));
   const lemmas: string[] = [];
@@ -45,24 +36,20 @@ export function readIndex(pos: Pos): string[] {
 }
 
 export type Sense = {
-  /** WordNet synset offset, unique within a part of speech. */
+    /** This meaning's id, unique within its part of speech. */
   offset: string;
   pos: Pos;
-  /** Every lemma in this synset, spaces restored. */
+    /** Every word that shares this meaning. */
   words: string[];
-  /** Definition text, with any example sentences stripped off. */
+    /** The definition, without any example sentences. */
   gloss: string;
-  /** Quoted example sentences that followed the definition, if any. */
+    /** The example sentences that followed the definition, if any. */
   examples: string[];
 };
 
-/**
- * All synsets for one part of speech.
- *
- * A WordNet gloss is `definition; "example one"; "example two"`. The examples
- * are split out rather than dropped so Phase E can test indexing with and
- * without them.
- */
+/** Every meaning for one part of speech. */
+// The examples are split off rather than thrown away, so indexing with and
+// without them can both be tested.
 export function readSenses(pos: Pos): Sense[] {
   const lines = readDataLines(path.join(dictDir(), `data.${pos}`));
   const senses: Sense[] = [];
@@ -76,7 +63,7 @@ export function readSenses(pos: Pos): Sense[] {
     const wordCount = parseInt(fields[3], 16);
     if (!Number.isFinite(wordCount)) continue;
 
-    // Words start at field 4, each followed by a lex_id.
+        // The words start at the fourth field, each followed by an id.
     const words: string[] = [];
     for (let i = 0; i < wordCount; i++) {
       const w = fields[4 + i * 2];

@@ -1,25 +1,20 @@
 /**
- * Fetch the ONNX embedding model into `models/` at BUILD time, so the serverless
- * function never downloads it at REQUEST time.
+ * Download the model into `models/` when the app is BUILT, so the live site
+ * never downloads it while someone is waiting.
  *
- * Why this exists (RD-11): the model is 86MB, and pulling it from the HF CDN on
- * every cold start cost ~39s, of which the actual ONNX session init is ~70ms.
- * The cold start was 99.8% network. Shipping the file inside the function bundle
- * removes the download from the request path entirely.
+ * It is 86MB, and fetching it on first use took about 40 seconds against 70
+ * milliseconds of actual start-up work — so almost all of that wait was the
+ * download. Shipping the file with the app removes it entirely.
  *
- * Plain .mjs, not .ts, on purpose: this runs ahead of `next build`, and must not
- * depend on `tsx` resolving.
+ * Plain JavaScript rather than TypeScript on purpose: this runs before the build
+ * and must not depend on anything that needs compiling.
  *
- * Contract with lib/embedder.ts:
- *   - Layout MUST mirror the HF repo id — models/<org>/<name>/... — because
- *     Transformers.js resolves `pathJoin(env.localModelPath, "<org>/<name>/file")`.
- *   - Only the 4 files below are fetched. The HF repo has 14; the rest
- *     (model.safetensors, the sentence-transformers configs) are never requested
- *     by the feature-extraction pipeline and would just inflate the bundle.
- *   - A failure here MUST fail the build. lib/embedder.ts runs with
- *     `allowRemoteModels = false`, so a missing file is a hard 500 in production
- *     rather than a silent fallback to the slow path — that tradeoff is only safe
- *     if this script is strict.
+ * What the app expects of it: the folder layout must mirror the model's name,
+ * because that is how the library looks it up. Only four of the fourteen
+ * published files are fetched; the rest are never read and would only bloat the
+ * app. And a failure here MUST fail the build, because the app refuses to
+ * download anything at run time — so a missing file is a loud error rather than
+ * a quiet fallback to the slow path.
  */
 import { createWriteStream } from "node:fs";
 import { mkdir, rename, stat, unlink } from "node:fs/promises";
@@ -31,13 +26,12 @@ const MODEL_ID = "franzclarin/ReverseDictionary";
 const BASE_URL = `https://huggingface.co/${MODEL_ID}/resolve/main`;
 const OUT_DIR = path.join(process.cwd(), "models", MODEL_ID);
 
-// Exact byte sizes, verified against the HF repo on 2026-08-27. These are the
-// integrity check: a truncated download, an LFS pointer, or an HTML error page
-// served with a 200 all fail here instead of shipping a corrupt model.
+// Exact file sizes, which act as the integrity check: a cut-off download, a
+// placeholder file, or an error page served as if it were fine all fail here
+// instead of shipping a broken model.
 //
-// `onnx/model.onnx` is the fp32 model — there is NO quantized artifact in this
-// repo (onnx/model_quantized.onnx returns a 15-byte "Entry not found"), which is
-// why lib/embedder.ts pins `quantized: false`.
+// There is only one version of this model published — the smaller, faster
+// variant does not exist — which is why the app never asks for one.
 const FILES = [
   { name: "config.json", bytes: 746 },
   { name: "tokenizer.json", bytes: 711649 },
@@ -55,11 +49,9 @@ async function sizeOf(file) {
   }
 }
 
-/**
- * Download one file, verifying its size. Writes to `<dest>.part` and renames on
- * success so an interrupted run can never leave a truncated file in place that
- * a later run would have to catch.
- */
+/** Download one file and check its size. */
+// Written to a temporary name and renamed on success, so an interrupted run can
+// never leave a half-finished file that a later run would have to notice.
 async function fetchFile({ name, bytes }) {
   const dest = path.join(OUT_DIR, name);
 
@@ -108,8 +100,8 @@ async function fetchFile({ name, bytes }) {
 
 async function main() {
   console.log(`[fetch-model] model=${MODEL_ID} -> ${OUT_DIR}`);
-  // Sequential, not parallel: the 86MB file dominates, so concurrency buys
-  // nothing and only makes a failure harder to read in build logs.
+    // One at a time: the large file dominates anyway, so downloading in parallel
+    // buys nothing and only makes a failure harder to read in the build log.
   for (const file of FILES) {
     await fetchFile(file);
   }

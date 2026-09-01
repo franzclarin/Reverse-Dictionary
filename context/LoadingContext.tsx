@@ -28,12 +28,12 @@ export function LoadingProvider({ children }: { children: React.ReactNode }) {
   const [messageIndex, setMessageIndex] = useState(0);
   const pathname = usePathname();
 
-  // Auto-stop when route changes
+  // Stop automatically when the page changes.
   useEffect(() => {
     setIsLoading(false);
   }, [pathname]);
 
-  // Cycle messages while loading
+  // Rotate through the messages while waiting.
   useEffect(() => {
     if (!isLoading) return;
     const interval = setInterval(() => {

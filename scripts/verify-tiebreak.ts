@@ -1,29 +1,21 @@
 /**
- * GUARD: assert that no run's Recall@1 is being propped up by its tie-break.
+ * Guard: check that no run's score is being propped up by how it breaks ties.
  *
- * HISTORY, BECAUSE THE ROLE CHANGED. This began as `audit-tiebreak.ts`, a
- * correction applied to numbers after the fact: the pool emitted
- * `[...targets, ...distractors]`, so eval targets sat in the first 685 rows of
- * every cell, and `searchLocal` broke ties on row order — the target won every
- * synset tie it was in, inflating gloss cells by up to 8.9 points of Recall@1
- * while leaving the tie-free lemma cells untouched (METHODS.md §12).
+ * This began as a correction applied to numbers after the fact. Every right
+ * answer used to sit in the first few hundred rows of the pool, and ties were
+ * broken by row order — so the right answer won every tie it was in, inflating
+ * scores substantially. Both causes are now fixed in the pipeline, so this no
+ * longer corrects anything. It checks, and it fails.
  *
- * Both causes are now fixed in the pipeline: `build-eval-pool.ts` shuffles
- * targets into the pool, and `localIndex.ts` breaks ties alphabetically via
- * `compareWord`. A correction applied after the fact is the wrong shape for a
- * fixed pipeline, so this no longer corrects anything. It CHECKS, and fails.
+ * The check: under a tie rule that cannot see the answer key, the odds of a
+ * correct word landing first are simply its share of the tied group. Adding
+ * those up gives exactly what a neutral tie rule should score. A run sitting far
+ * above that is winning ties for reasons connected to the answer key, which is
+ * the bug coming back.
  *
- * THE CHECK. Under a tie order that cannot see the answer key, slot 1 holds an
- * acceptable word with probability `a/g` — `g` the size of the bit-identical
- * group at the top, `a` how many of its members are acceptable. Summing that is
- * the expected recall of a neutral tie-break, exactly. A run whose actual
- * Recall@1 sits far ABOVE it is winning ties for reasons connected to the answer
- * key, which is the bug returning.
- *
- * The threshold is one-sided and generous on purpose. A deterministic policy is
- * one draw, not the mean: with ~140 tied queries the sampling deviation is about
- * 2.1 points (1 s.d.), so a few points either way is noise. Sitting below the
- * expectation is harmless. Only a large EXCESS is evidence of contamination.
+ * The threshold is one-sided and generous on purpose. A fixed rule is one roll
+ * of the dice, not the average, so a few points either way is noise. Sitting
+ * below expectation is harmless; only a large excess is evidence of trouble.
  *
  *   npx tsx scripts/verify-tiebreak.ts
  *   npx tsx scripts/verify-tiebreak.ts --runs cell_gloss_ft,cell_lemma_ft
@@ -34,7 +26,7 @@ import path from "node:path";
 const RUNS = path.resolve(process.cwd(), "eval/runs");
 const norm = (s: string) => s.trim().toLowerCase();
 
-/** Points of Recall@1 a run may exceed the neutral expectation by. ~2.5 s.d. */
+/** How far above the neutral expectation a run may sit before this complains. */
 const TOLERANCE = 0.05;
 
 function arg(flag: string): string | undefined {

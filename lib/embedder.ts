@@ -7,31 +7,15 @@ import {
   isNetworkError,
 } from "@/lib/errors";
 
-// RD-11: the model ships INSIDE the function bundle and is read from local
-// disk. It used to be pulled from the HF CDN on every cold start, which cost
-// ~39s against ~70ms of actual ONNX session init — the cold start was 99.8%
-// network. `scripts/fetch-model.mjs` downloads it at build time and
-// `next.config.js` traces `models/**` into the function.
-//
-// localModelPath must be set explicitly: Transformers.js defaults it relative
-// to its OWN module directory (node_modules/@xenova/transformers), not cwd.
+// The model is shipped with the app and read from disk. It used to be
+// downloaded on first use, which took about 40 seconds.
 const MODEL_ROOT = path.join(process.cwd(), "models");
 
-/**
- * Point Transformers.js at the bundled model directory.
- *
- * `env` is a PROCESS-WIDE SINGLETON, so this is applied at the call site rather
- * than at module scope. `scripts/lib/embedModel.ts` needs the opposite settings
- * (remote base models, for the eval cells) and configures itself the same way;
- * when both were set at module scope, whichever module body happened to
- * evaluate last silently won and broke the other. Import order is not a
- * contract — configure immediately before use.
- *
- * `allowRemoteModels = false` is the load-bearing half. Without it, a
- * file-tracing miss would silently degrade back to the 39s download in
- * production and nobody would ever notice; with it, the same miss is a loud
- * `model` SubsystemError that surfaces in preview instead.
- */
+/** Point the model loader at our own copy on disk. */
+// These settings are global, so set them right before use, never at the top of
+// a file: whichever file loads last would silently win and break the other.
+// Turning off downloads matters — otherwise a packaging mistake quietly falls
+// back to the slow download instead of failing loudly.
 function configureLocalModelEnv(): void {
   env.allowLocalModels = true;
   env.allowRemoteModels = false;
@@ -47,30 +31,19 @@ type Embedder = (
   options: { pooling: "mean" | "none"; normalize: boolean }
 ) => Promise<{ data: Float32Array; dims: number[] }>;
 
-// Store the loading promise on globalThis so it survives module re-eval and
-// dev hot-reloads (one ONNX session init per warm instance).
+// Kept on globalThis so it survives reloads and the model is only started once.
 const g = globalThis as typeof globalThis & {
   _embedderPromise?: Promise<Embedder>;
 };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/**
- * Load the ONNX pipeline from the bundled model directory.
- *
- * Since RD-11 there is no network in this path, so the expected failure is a
- * missing/corrupt file rather than a CDN blip — and `isNetworkError()` breaks
- * out of the loop on attempt 1 for exactly that case, so a tracing miss fails
- * fast instead of burning the function's 60s budget on three identical retries.
- *
- * The retry loop is kept anyway: it costs nothing on the happy path and still
- * covers a genuinely transient filesystem fault on a cold instance.
- */
+/** Load the model from disk. */
+// Retries only help a passing glitch; a missing file fails the same way every
+// time, so give up at once rather than spend the time budget on repeats.
 async function loadEmbedder(): Promise<Embedder> {
   let lastError: unknown;
-  // Actual attempts made, which is NOT MAX_LOAD_ATTEMPTS: a non-network
-  // failure breaks out after the first. Reporting the constant instead made
-  // a single fast failure read as three slow ones.
+  // Tries actually made, which may be fewer than the maximum.
   let attemptsMade = 0;
 
   for (let attempt = 1; attempt <= MAX_LOAD_ATTEMPTS; attempt++) {
@@ -79,10 +52,9 @@ async function loadEmbedder(): Promise<Embedder> {
     try {
       configureLocalModelEnv();
       const pipe = (await pipeline("feature-extraction", MODEL_ID, {
-        quantized: false, // load onnx/model.onnx (not model_quantized.onnx)
+        quantized: false, // there is only one version of this model on disk
       })) as unknown as Embedder;
-      // Log the resolved root: if file tracing ever drops models/, this line is
-      // the whole diagnosis rather than a guess about where it looked.
+      // Log where it looked, so a packaging mistake diagnoses itself.
       console.log(
         `[embedder] model loaded model=${MODEL_ID} root=${MODEL_ROOT} ` +
           `attempt=${attempt} ms=${Date.now() - startedAt}`
@@ -97,8 +69,6 @@ async function loadEmbedder(): Promise<Embedder> {
       );
       if (shape.stack) console.error(`[embedder] stack: ${shape.stack}`);
 
-      // A non-network failure (bad model id, ONNX runtime missing) will fail
-      // identically on every retry — don't burn the function's 60s budget.
       if (!isNetworkError(shape)) break;
       if (attempt < MAX_LOAD_ATTEMPTS) {
         const backoff = BASE_BACKOFF_MS * 3 ** (attempt - 1);
@@ -122,9 +92,8 @@ async function loadEmbedder(): Promise<Embedder> {
 
 function getEmbedder(): Promise<Embedder> {
   if (!g._embedderPromise) {
-    // Assign the *guarded* promise, then clear the slot on rejection. Caching
-    // a rejected promise would make every later request on this warm instance
-    // fail instantly with the same stale error, even after the network heals.
+    // Forget a failed load. Remembering one would make every later request fail
+    // instantly with the same stale error, even after the problem is fixed.
     const promise = loadEmbedder();
     g._embedderPromise = promise;
     promise.catch(() => {
@@ -137,35 +106,19 @@ function getEmbedder(): Promise<Embedder> {
   return g._embedderPromise;
 }
 
+/** Turn a piece of text into the numbers that represent its meaning. */
 export async function embed(text: string): Promise<number[]> {
   const pipe = await getEmbedder();
-  // pooling + normalize reproduce the sentence-transformers pipeline the DB
-  // embeddings were generated with (mean Pooling + Normalize).
+  // These two settings have to match how the stored words were measured, or
+  // the question and the answers end up on different scales.
   const output = await pipe(text, { pooling: "mean", normalize: true });
   return Array.from(output.data);
 }
 
-/**
- * The same embedding, with the per-token vectors it was pooled from (RD-18).
- *
- * `/explain` animates each token becoming numbers and those numbers averaging
- * into one. That is only worth drawing if the token vectors are the REAL ones,
- * so this returns what the encoder actually produced rather than anything
- * synthesised to look plausible.
- *
- * `pooling: "none"` returns `last_hidden_state` at dims `[1, seq, 384]`, and
- * Transformers.js's own `mean_pooling()` is an attention-masked mean — for a
- * single un-padded input, a plain arithmetic mean down the sequence. So the
- * mean-then-normalise below reproduces `embed()` exactly from one forward pass,
- * rather than costing a second one.
- *
- * **That equivalence is asserted, not assumed**: `scripts/verify-viz-snapshot.ts`
- * checks `embedTokens(q).pooled` against `embed(q)` elementwise. If it ever
- * stops holding, the page is claiming something false and the check fails first.
- *
- * NOT used by the serving path. `/api/lookup` calls `embed()` unless a request
- * explicitly asks for the debug payload.
- */
+/** The same, plus the numbers for each individual word part. Not used by search. */
+// /explain animates those parts averaging together, so they must be the real
+// ones. Averaging them here gives exactly what `embed()` returns, and
+// `scripts/verify-viz-snapshot.ts` proves that stays true.
 export async function embedTokens(
   text: string
 ): Promise<{ tokenVectors: number[][]; pooled: number[] }> {
@@ -193,8 +146,8 @@ export async function embedTokens(
     tokenVectors.push(vector);
   }
 
-  // Mean, then L2 normalise — the two layers that sit after the transformer in
-  // the sentence-transformers pipeline that seeded the database.
+  // Average the parts, then scale to a standard length — the same two steps the
+  // stored words went through.
   let norm = 0;
   for (let i = 0; i < dim; i++) {
     sum[i] /= sequence;

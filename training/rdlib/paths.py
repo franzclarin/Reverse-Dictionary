@@ -1,10 +1,10 @@
 """
-Where everything lives, resolved once.
+Where everything lives, worked out once.
 
-Notebooks run from `training/notebooks/`, scripts from the repo root, and a
-stray `Path("eval/sets/v1.jsonl")` resolves differently in each. Every path in
-this package is derived from `REPO_ROOT`, which is found by walking up for a
-marker rather than by counting `..` segments.
+Notebooks run from one directory and scripts from another, so a relative path
+means different things in each. Every path here is built from the repo root,
+which is found by walking up until a marker appears rather than by counting
+directories.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from pathlib import Path
 def _find_repo_root() -> Path:
     here = Path(__file__).resolve()
     for parent in here.parents:
-        # `training/` alone is not enough of a marker; CLAUDE.md plus prisma/
-        # pins it to this repo specifically.
+                # `training/` alone is not a distinctive enough marker; these two
+                # together pin it to this repo specifically.
         if (parent / "CLAUDE.md").is_file() and (parent / "prisma").is_dir():
             return parent
     raise RuntimeError(
@@ -29,8 +29,8 @@ def _find_repo_root() -> Path:
 REPO_ROOT = _find_repo_root()
 TRAINING_DIR = REPO_ROOT / "training"
 
-# Artifacts written by the notebooks: checkpoints, generated pairs, cells built
-# locally. Gitignored — see .gitignore. Never commit anything from here.
+# What the notebooks write: checkpoints, generated examples, locally built
+# files. Not tracked in version control. Never commit anything from here.
 ARTIFACTS_DIR = TRAINING_DIR / "artifacts"
 
 EVAL_DIR = REPO_ROOT / "eval"
@@ -40,28 +40,26 @@ EVAL_DATA_DIR = EVAL_DIR / "data"
 
 FROZEN_SET = EVAL_SETS_DIR / "v1.jsonl"
 
-# The WordNet 3.0 dictionary files, shipped by the `wordnet-db` npm package.
-# Read these rather than nltk's copy: scripts/lib/wordnet.ts reads exactly these
-# bytes, and a second WordNet distribution would silently change gloss text and
-# therefore every `inputsSha256` a cell records.
+# The dictionary files shipped with this project. Read these rather than a
+# library's own copy: the TypeScript side reads exactly these bytes, and a second
+# copy of the dictionary would silently change the text and every fingerprint.
 WORDNET_DICT_DIR = REPO_ROOT / "node_modules" / "wordnet-db" / "dict"
 
-# The bundled ONNX model that lib/embedder.ts serves from (RD-11).
+# The model that ships with the app and is loaded from disk.
 MODELS_DIR = REPO_ROOT / "models"
 
 
 def cell_dir() -> Path:
     """
-    Where local vector cells live.
+    Where local experiment files live.
 
-    Mirrors `cellDir()` in scripts/lib/localIndex.ts so a cell written here is
-    found by `npx tsx scripts/eval.ts --index-file <cell>` without arguments.
+    Matches the TypeScript side, so a file written here is found by the harness
+    without extra arguments.
 
-    The darwin default sits under `os.tmpdir()` and **gets reaped** — it was
-    already empty when RD-22 was planned, which is why nothing on this machine
-    could be scored against RD-16's cells. Set EVAL_CELL_DIR somewhere durable
-    and outside the repo (the working tree is in OneDrive, which would try to
-    sync ~230 MB of derived vectors).
+    The default on a Mac sits in a temporary directory and GETS DELETED -- it was
+    already empty when this was planned, which is why nothing here could be
+    scored against the earlier experiments. Point EVAL_CELL_DIR somewhere
+    durable and outside the repo.
     """
     env = os.environ.get("EVAL_CELL_DIR")
     if env:

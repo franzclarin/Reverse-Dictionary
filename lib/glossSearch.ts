@@ -1,137 +1,38 @@
 import type { PrismaClient } from "@prisma/client";
 
-/**
- * Sense-keyed gloss retrieval — the production search path as of RD-02.
- *
- * TWO SOURCES SHARE ONE TABLE SINCE RD-17, and the key says which:
- *
- *   `<pos>:<offset>`             a WordNet 3.0 synset, 117,791 of them, whose
- *                                `lemmas` are the synonyms sharing that gloss.
- *   `wikt:<word>:<pos>:<n>`      a Wiktionary sense, 575,534 of them. Wiktionary
- *                                has no synsets, so `lemmas` holds exactly one
- *                                word and expansion below is a no-op for it.
- *
- * Retrieval does not distinguish them — the vectors live in one space and the
- * ORDER BY sees one table — which is the point: the expansion semantics are
- * unchanged, and a Wiktionary row is simply a synset of size one.
- *
- * This is a deliberate mirror of `searchLocalSynsets()` in
- * `scripts/lib/localIndex.ts`, which is what produced the `cell_gloss_ft_synset`
- * numbers the cutover was decided on (25.8% lenient R@1, echo 14.4%). The
- * expansion semantics below must not drift from it: take the top-k *synsets*,
- * expand each into its member words in WordNet's own within-synset order,
- * dedupe by word across synsets, and stop at k words. Any change here silently
- * invalidates that measurement.
- *
- * Two differences from the eval cell, both understood and neither a drift:
- *
- *   1. The cell is a brute-force scan over a local file and is therefore EXACT.
- *      This path uses `GlossEmbedding`'s IVFFlat index, so it is approximate.
- *      The equivalent cost measured on `VocabEmbedding` was ~0.3 points of
- *      lenient R@1 (p = 1.0) — small, and the same trade production already made.
- *   2. Expansion order is read from the stored `lemmas` array rather than
- *      recomputed from WordNet at query time. `scripts/build-gloss-index.ts`
- *      writes `lemmas` as `sense.words`, which IS WordNet's order, so the two
- *      agree by construction. **Never sort this array** — alphabetical ordering
- *      measured 2.5 points worse on identical vectors. A `wikt:` row's array has
- *      one element, so no ordering question arises for it.
- */
+// The search itself: find the dictionary entries whose meaning is closest to
+// what the user typed. Entries come from two dictionaries kept in one table,
+// and search treats them identically.
 
+/** One word we found, and how well it matched. */
 export type ResultRow = { word: string; similarity: number };
 
-/**
- * One retrieved synset, before `expandSynsets()` collapses it into words.
- *
- * Exported since RD-12: a cross-encoder scores `(query, gloss)`, so the rerank
- * stage has to see the synset — its gloss text and its stored `lemmas` order —
- * before anything truncates the list to k words.
- */
+/** A group of words that share one meaning, and how well that meaning matched. */
 export type SynsetHit = { synsetKey: string; lemmas: string[]; similarity: number };
 
-/** A `SynsetHit` fetched with `{ withGloss: true }`. */
+/** The same, with the written definition included. */
 export type GlossSynsetHit = SynsetHit & { gloss: string };
 
-/**
- * A `SynsetHit` fetched with `{ withGloss: true, withVector: true }`.
- *
- * Added for RD-18: the /explain page projects each retrieved synset through a
- * fixed PCA basis to place it in the drawn cloud. It needs the stored vector to
- * do that EXACTLY rather than guessing a position from the synset's neighbours,
- * which is the difference between a diagram and a decoration.
- */
+/** The same again, with the raw numbers included, so /explain can draw it. */
 export type VizSynsetHit = GlossSynsetHit & { vector: number[] };
 
-/**
- * IVFFlat probes for the gloss index. **Not 10, and not 40 any more.**
- *
- * `probes` is only meaningful against `GLOSS_LISTS`: a probe scans roughly
- * `rows / lists` candidates, so the two are one setting with two halves. RD-17
- * took the table from 117,791 rows to 693,325 and rebuilt the index at
- * `lists = 833`, which re-scoped every probe — so the value was re-swept rather
- * than carried over. Measured on the live index, frozen set, authored reachable
- * slice (n=287):
- *
- *   probes=10    lenient R@1 25.4%   R@10 51.9%   R@100 78.0%   db p50 579ms
- *   probes=40    lenient R@1 24.7%   R@10 54.7%   R@100 81.9%   db p50 568ms
- *   probes=100   lenient R@1 25.1%   R@10 55.7%   R@100 83.6%   db p50 582ms
- *   probes=200   lenient R@1 25.1%   R@10 55.7%   R@100 83.6%   db p50 687ms
- *   (exact ceiling, brute-force cell: 25.1% / 55.7%)
- *
- * **100 is the knee, and it sits exactly on the exact-scan ceiling** — both R@1
- * and R@10 reproduce the brute-force cell to the digit, and 200 buys nothing at
- * all for ~100ms. probes=10 scores 0.3pp higher on R@1, which is one query out
- * of 287 and inside the noise; picking it for that while giving up 3.8 points of
- * R@10 would be fitting the benchmark rather than reading it.
- *
- * Those p50s are local-to-Neon round trips (~450ms of each is network), so the
- * *scan* cost is what matters in production where both sides sit in iad1 — and
- * it is roughly flat from 10 to 100 because a finer partition (833 lists rather
- * than 115) means each probe covers ~830 rows instead of ~1,000.
- *
- * Re-sweep this if the row count or `lists` ever changes again.
- */
+/** How hard the search looks before settling on an answer. */
+// Re-tune this whenever GLOSS_LISTS changes; the two only make sense together.
 export const GLOSS_PROBES = 100;
 
-/** The one place the gloss table's name is written. */
+/** The one place the table's name is written. */
 export const GLOSS_INDEX = "GlossEmbedding";
 
-/**
- * The IVFFlat `lists` the index was built with — see the migration
- * `20260828000001_gloss_index_retune`, which rebuilt it at `round(sqrt(693325))`
- * after RD-17 grew the table 5.9x. Not used to query (Postgres reads it off the
- * index); recorded here because `GLOSS_PROBES` above is only meaningful as a
- * fraction of it, and because /explain states both on screen. **Re-tune
- * `GLOSS_PROBES` if this ever changes.**
- */
+/** How many chunks the search index is split into. */
 export const GLOSS_LISTS = 833;
 
-/**
- * Interactive-transaction budget for the retrieval query.
- *
- * Prisma defaults to a 2s `maxWait`, and Neon auto-suspends its compute: the
- * first query after an idle period pays several seconds of wake-up before the
- * transaction can even begin, which aborts it with `P2028 Unable to start a
- * transaction in the given time` — a 500 for the user, and nothing wrong with
- * the query. CLAUDE.md records the same failure taking down whole eval runs,
- * where the fix was to warm the database first; a route cannot warm anything,
- * so it waits instead.
- *
- * Both sit well inside the route's `maxDuration = 60`, so a genuinely stuck
- * query still fails as a query rather than as a function timeout.
- */
+// The database sleeps when idle and takes seconds to wake. Wait for it rather
+// than failing the user's search.
 const TRANSACTION_OPTIONS = { maxWait: 15_000, timeout: 20_000 };
 
-/**
- * Expand ranked synsets into ranked words.
- *
- * Each word inherits its synset's similarity, because synset mates carry
- * bit-identical vectors — retrieval genuinely cannot separate `bungle` from
- * `botch`, so their order is a *policy* (sense familiarity), not a result.
- *
- * NOTE THE SCORING SURFACE: one synset can occupy several result slots, so a
- * large synset at rank 1 can fill the whole list by itself. That is the
- * measured behaviour of the variant that was chosen, not a bug to correct.
- */
+/** Turn groups of words into a plain list of words, best first. */
+// Words in a group all score the same, so their order is a deliberate choice,
+// not a result. Never sort it.
 export function expandSynsets(hits: SynsetHit[], k: number): ResultRow[] {
   const out: ResultRow[] = [];
   const seen = new Set<string>();
@@ -147,41 +48,16 @@ export function expandSynsets(hits: SynsetHit[], k: number): ResultRow[] {
   return out;
 }
 
-/**
- * Fetch the top-k *synsets* for a query vector — the raw retrieval result,
- * before expansion into words.
- *
- * `vectorLiteral` must already be the 384-dim L2-normalised vector from
- * `embed()`, formatted as a `[..]` literal. This function never embeds — a
- * second encoder would put query vectors in a different space than the stored
- * ones.
- *
- * Split out of `searchGloss()` for RD-12 so the eval harness's rerank stage can
- * see synsets before they are collapsed, rather than reimplementing this query
- * under `scripts/`. There is one gloss retrieval path, not two that resemble
- * each other; `searchGloss()` below is now a thin composition over this.
- */
+/** Ask the database for the closest meanings, before they become words. */
+// Takes numbers from `embed()`; never measures text itself. Doing that in two
+// places would put the question and the answers on different scales.
 export async function searchGlossSynsets(
   prisma: PrismaClient,
   vectorLiteral: string,
   k: number,
-  /**
-   * Defaults to GLOSS_PROBES. Exposed only so the eval harness can sweep it —
-   * the route must never pass a value here, or the thing being measured stops
-   * being the thing being served.
-   */
+  /** Only the offline test harness passes this, or we stop measuring what we serve. */
   probes: number = GLOSS_PROBES,
-  /**
-   * Extra columns. **Both off by default on purpose**: with both off this emits
-   * byte-identical SQL to the pre-RD-12 query, so the serving path pulls not one
-   * extra byte over the wire. Only a caller that actually reads the extra data
-   * should turn one on — `withGloss` for the cross-encoder (RD-12), `withVector`
-   * for the /explain projection (RD-18).
-   *
-   * `withVector` returns `embedding::text`, i.e. a `"[a,b,...]"` literal, not a
-   * number array — halfvec has no Prisma-native representation. Parse it with
-   * `parseVectorLiteral()` from `lib/viz/projection.ts`.
-   */
+  /** Extra columns for /explain, off by default so a normal search fetches no extra data. */
   {
     withGloss = false,
     withVector = false,
@@ -191,7 +67,7 @@ export async function searchGlossSynsets(
   const vectorColumn = withVector ? `embedding::text AS vector, ` : "";
 
   return prisma.$transaction(async (tx) => {
-    // SET LOCAL inside a transaction so it applies only to this query.
+    // SET LOCAL keeps this setting to just this one query.
     await tx.$executeRawUnsafe(`SET LOCAL ivfflat.probes = ${Number(probes)}`);
     return tx.$queryRawUnsafe<SynsetHit[]>(
       `SELECT "synsetKey", ${glossColumn}${vectorColumn}"lemmas", 1 - (embedding <=> $1::halfvec) AS similarity
@@ -204,15 +80,8 @@ export async function searchGlossSynsets(
   }, TRANSACTION_OPTIONS);
 }
 
-/**
- * Run the gloss-index search exactly as the eval cell did.
- *
- * Fetches k synsets, not k rows: every synset yields at least one word, so k
- * synsets normally yield at least k words. Where several top synsets share
- * their entire membership the result can come back short, which is what the
- * eval measured too — deliberately not padded by over-fetching, since that
- * would append words the measured variant never returned.
- */
+/** The normal search: closest meanings, expanded into a list of words. */
+// Asks for k meanings, not k words, so it can return fewer than k. Intentional.
 export async function searchGloss(
   prisma: PrismaClient,
   vectorLiteral: string,

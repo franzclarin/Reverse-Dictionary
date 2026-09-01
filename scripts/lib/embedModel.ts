@@ -1,46 +1,24 @@
-/**
- * Load an arbitrary Transformers.js model for evaluation only.
- *
- * The production path is `lib/embedder.ts` and is imported unchanged — the
- * harness must never embed queries through a second code path, or every number
- * it produces is fiction. This module exists for exactly one thing the
- * production embedder cannot do: encode with a *different* model, so the
- * fine-tune can be compared against `all-MiniLM-L6-v2` (its own base).
- *
- * The pipeline settings below are copied deliberately from `lib/embedder.ts`
- * and must stay identical to it:
- *   - `{ quantized: false }`         load the full-precision ONNX weights
- *   - `{ pooling: "mean", normalize: true }`  reproduce the
- *     sentence-transformers Transformer -> mean Pooling -> Normalize pipeline
- *
- * If `lib/embedder.ts` ever changes those, change them here too.
- */
+// Loads some *other* model, for comparison experiments only. The real model is
+// always used through `lib/embedder.ts` unchanged, since a second way of
+// measuring the live path would make every number fiction.
+//
+// The settings below are copied from `lib/embedder.ts` and must stay identical
+// to it. If they change there, change them here too.
 import { pipeline, env } from "@xenova/transformers";
 
-/**
- * Point Transformers.js at the HF CDN for this module's models.
- *
- * `env` is a PROCESS-WIDE SINGLETON shared with `lib/embedder.ts`, which since
- * RD-11 pins the opposite settings (local-only, remote disabled) so the
- * production model is read from the bundle. Both used to set this at module
- * scope, and whichever module body evaluated last silently won — that broke
- * `npm run eval:prod` with "both local and remote models are disabled", because
- * this file's `allowLocalModels = false` landed on top of the production
- * module's `allowRemoteModels = false`.
- *
- * Configure immediately before use instead. Safe because the harness embeds
- * sequentially — one model at a time, awaited — so no two loads interleave.
- * If that ever changes, this needs a lock rather than a call-site assignment.
- */
+/** Allow downloading models, which this file needs and the live app forbids. */
+// These settings are global, so set them right before use, never at the top of
+// a file: whichever file loads last would silently win and break the other.
+// Safe only because models are loaded one at a time here.
 function configureRemoteModelEnv(): void {
   env.allowLocalModels = false;
   env.allowRemoteModels = true;
 }
 
-/** The base model the fine-tune started from, per the model card. */
+/** The off-the-shelf model ours was built from. */
 export const BASE_MODEL = "Xenova/all-MiniLM-L6-v2";
 
-/** The fine-tune currently serving production. */
+/** The model the live site uses. */
 export const PRODUCTION_MODEL = "franzclarin/ReverseDictionary";
 
 type Embedder = (
@@ -58,8 +36,7 @@ function getPipeline(modelId: string): Promise<Embedder> {
       quantized: false,
     }) as unknown as Promise<Embedder>;
     cache.set(modelId, existing);
-    // Never leave a rejected promise cached: on a warm process every later
-    // call would fail instantly with the same stale error.
+    // Forget a failed load, or every later call fails with the same stale error.
     existing.catch(() => {
       if (cache.get(modelId) === existing) cache.delete(modelId);
     });
@@ -73,7 +50,7 @@ export async function embedWith(modelId: string, text: string): Promise<number[]
   return Array.from(output.data);
 }
 
-/** Encode many texts, reusing one loaded pipeline. `onProgress` reports counts. */
+/** Measure many texts at once, loading the model only the first time. */
 export async function embedBatch(
   modelId: string,
   texts: string[],

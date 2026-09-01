@@ -1,22 +1,12 @@
 /**
- * Fetch RD-17's dictionary sources into `RD_SOURCE_DIR`.
+ * Download the extra dictionary sources. Neither is committed; both can always
+ * be fetched again.
  *
- * Two files, both re-downloadable and neither committed:
- *
- *   kaikki-english.jsonl   3.2 GB. The Kaikki.org / `wiktextract` machine-
- *                          readable extraction of English Wiktionary, one JSON
- *                          object per (word, pos, etymology). The candidate
- *                          source for the vocabulary expansion.
- *   oewn.xml.gz            13 MB. Open English WordNet 2024, WN-LMF XML. Read
- *                          only by `probe-oewn-delta.ts` — measured and NOT
- *                          adopted, see METHODS §15.
- *
- * RESUMABLE, because 3.2 GB over a home connection is long enough to be
- * interrupted and `curl -C -` exists for exactly this. A partial file is
- * continued from its current length; a complete one is left alone unless
- * `--force` is passed. Completeness is judged against the server's
- * `content-length`, not against "the file exists" — a truncated 3.1 GB file
- * parses perfectly well and would silently produce a smaller vocabulary.
+ * Resumable, because a multi-gigabyte download over a home connection is long
+ * enough to be interrupted. A partial file continues from where it stopped; a
+ * complete one is left alone unless forced. Completeness is judged against the
+ * size the server reports, not against "the file exists" — a cut-off download
+ * reads perfectly well and would quietly produce a smaller vocabulary.
  *
  *   npx tsx scripts/fetch-wiktionary.ts
  *   npx tsx scripts/fetch-wiktionary.ts --force
@@ -31,7 +21,7 @@ const SOURCES = [
     name: "kaikki-english.jsonl",
     url: SOURCE_URL,
     licence: LICENCE,
-    /** Hashing 3.2 GB takes a while and buys little for a file this size. */
+        /** Fingerprinting a file this size takes a while and buys little. */
     hash: false,
   },
   {
@@ -48,7 +38,7 @@ function remoteSize(url: string): number | null {
       encoding: "utf8",
       maxBuffer: 1 << 20,
     });
-    // Follow-redirect responses stack; the last content-length is the real one.
+      // Redirects stack up; the last size reported is the real one.
     const matches = [...head.matchAll(/content-length:\s*(\d+)/gi)];
     return matches.length ? Number(matches[matches.length - 1][1]) : null;
   } catch {
@@ -57,9 +47,9 @@ function remoteSize(url: string): number | null {
 }
 
 function download(url: string, dest: string): void {
-  // `-C -` resumes; the server advertises `accept-ranges: bytes`. Retries are
-  // curl's rather than ours because a mid-transfer reset should continue from
-  // the byte it reached, not restart the file.
+    // Resumes where it left off. Retries are left to the download tool, because a
+    // connection dropped mid-transfer should continue from the byte it reached
+    // rather than start the file again.
   execFileSync(
     "curl",
     ["-sSL", "-C", "-", "--retry", "5", "--retry-delay", "5", "-o", dest, url],
@@ -90,9 +80,9 @@ async function main(): Promise<void> {
 
     const size = fs.statSync(dest).size;
     if (expected !== null && size !== expected) {
-      // Loud, because the failure mode is silent: a truncated extraction still
-      // parses and just yields fewer words, which reads as "Wiktionary has less
-      // than we thought" rather than as a broken download.
+            // Loud, because the failure is otherwise silent: a cut-off download still
+            // reads fine and just yields fewer words, which looks like "this source
+            // has less than we thought" rather than a broken file.
       console.error(
         `    *** ${source.name} is ${size} bytes, server says ${expected}. INCOMPLETE — ` +
           `re-run; do not build from this file.`

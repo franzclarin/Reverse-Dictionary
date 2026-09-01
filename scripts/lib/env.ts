@@ -1,11 +1,6 @@
-/**
- * Minimal .env.local loader for the eval scripts.
- *
- * The app gets its env from Next; these scripts run under plain `tsx`, which
- * loads nothing. Rather than add dotenv (new deps are restricted), parse the
- * file directly. Existing process.env values always win, so
- * `DATABASE_URL=... npx tsx scripts/eval.ts` still works.
- */
+// Reads settings out of .env.local for the scripts, which — unlike the app —
+// get none automatically. Written by hand rather than adding a dependency.
+// Anything already set in the environment wins.
 import fs from "node:fs";
 import path from "node:path";
 

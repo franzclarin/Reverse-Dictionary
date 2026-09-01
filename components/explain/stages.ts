@@ -1,19 +1,7 @@
-/**
- * The eight stages of the real pipeline, in order.
- *
- * Traced from `app/api/lookup/route.ts` -> `lib/embedder.ts` ->
- * `lib/glossSearch.ts` -> `models/franzclarin/ReverseDictionary/config.json`,
- * NOT from a generic retrieval diagram. Two things a stock picture would get
- * wrong about this system and this list gets right:
- *
- *   - there is no reranking stage (RD-12 measured a cross-encoder and rejected
- *     it), and no generative model anywhere (removed 2026-08-18);
- *   - stage 7 ranks SYNSETS, not words, and one synset can fill several result
- *     slots at identical scores.
- *
- * `operation` is the acceptance criterion "captions name the operation": it is
- * the name of the thing being done, not a narration of it.
- */
+// The eight steps the real search takes, in order — read off this app's own
+// code rather than copied from a generic diagram. Two things a stock picture
+// would get wrong: there is no re-sorting step and no writing model anywhere,
+// and step 7 ranks meanings, not words, so one meaning can fill several slots.
 
 export type StageId =
   | "request"
@@ -29,12 +17,12 @@ export type Stage = {
   id: StageId;
   n: number;
   title: string;
-  /** The named operation. Shown verbatim as the caption's lead. */
+  /** What this step does, named. Shown as-is at the head of the caption. */
   operation: string;
   caption: string;
-  /** Where the file lives, so a curious reader can go and check. */
+  /** Where the code lives, so a curious reader can go and check. */
   where: string;
-  /** Whether the 3D view is the subject at this stage, or a supporting frame. */
+  /** Whether the 3D view is the subject of this step or just the backdrop. */
   spatial: boolean;
 };
 
@@ -126,12 +114,8 @@ export const STAGE_INDEX: Record<StageId, number> = STAGES.reduce(
   {} as Record<StageId, number>
 );
 
-/**
- * The four approximations, stated in the interface rather than in the ticket.
- *
- * RD-18 calls labelling these "the acceptance-critical step, not the polish
- * step": a projection is a claim about distance and viewers will believe it.
- */
+/** The four things the picture simplifies, said on the page itself. */
+// A flattened picture is a claim about distance, and viewers will believe it.
 export const APPROXIMATIONS = [
   {
     short: "3D distance is not the ranking",

@@ -1,23 +1,18 @@
 /**
- * The authored eval slice — hand-written, blind to every gloss.
+ * The hand-written test questions, written without ever looking at a definition.
  *
- * PROTOCOL (non-negotiable; this is the only thing that makes the benchmark
- * worth anything):
- *   - Each query was written from the concept alone, knowing only the target
- *     word and its sense. No WordNet gloss, no `Word.definition` row, no
- *     dictionary of any kind was consulted while writing. `sample-targets.ts`
- *     deliberately emits bare words for this reason.
- *   - Queries are written as someone who does NOT know the word would grope
- *     for it: hesitant, concrete, circumlocutory. The register anchor is the
+ * The rules, which are the only thing that makes this benchmark worth anything:
+ *
+ *   - Each question was written from the idea alone, knowing only the word and
+ *     which sense of it was meant. No dictionary of any kind was open. The
+ *     sampling script deliberately prints bare words for this reason.
+ *   - Questions are written the way someone who does NOT know the word would
+ *     grope for it: hesitant, concrete, roundabout. The reference point is the
  *     product's own example, "the smell of rain on dry earth".
- *   - The query must never contain the target; it must be at least three
- *     words. `build-draft-tsv.ts` enforces both and will refuse to emit a
- *     violating row.
+ *   - A question must never contain its own answer, and must be at least three
+ *     words. The draft builder enforces both and refuses to emit a bad row.
  *
- * `hint` is a one-word sense disambiguator, carried into the TSV so the
- * reviewer can tell which sense of a polysemous target was intended.
- *
- * The first 25 entries are the Phase A probe queries, folded in unchanged.
+ * `hint` is a single word saying which sense was meant, so a reviewer can tell.
  */
 
 export type Style = "concrete" | "abstract" | "functional" | "narrative";
@@ -27,7 +22,7 @@ export type AuthoredPair = {
   query: string;
   hint: string;
   style: Style;
-  /** Set where the target is expected to be missing from WordNet 3.0. */
+    /** Set where the word is expected to be missing from the dictionary. */
   expectUnreachable?: boolean;
 };
 

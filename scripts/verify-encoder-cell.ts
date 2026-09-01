@@ -1,31 +1,27 @@
 /**
- * Integrity check for RD-16's full-scale encoder cells.
+ * Integrity check for the full-size experiment files.
  *
- * `verify-eval-pool.ts` does this job for the Phase E cells, but it checks each
- * cell against `eval/data/pool-manifest.json`, and these cells have no manifest
- * — they are built straight from WordNet. Same two criteria, different source of
- * truth:
+ * The other checker does this job for the sampled ones, but it compares each
+ * against a recorded pool, and these have none — they are built straight from
+ * the dictionary. Same criteria, different source of truth:
  *
- *   1. INPUT HASH. Recompute the ordered text list from wordnet-db and compare
- *      it to the cell's stored `inputsSha256`. This is the strong check: it
- *      proves the cell indexes exactly the text WordNet yields today, in the
- *      same order, so row i really does describe synset i.
+ *   1. Fingerprint. Rebuild the ordered text list from the dictionary and
+ *      compare. This is the strong check: it proves the file indexes exactly
+ *      what the dictionary yields today, in the same order, so row 5 really does
+ *      describe entry 5.
  *
- *      It also IDENTIFIES the text variant. Every cell here is stamped
- *      `variant: "gloss_synset"` because that string is what switches on member
- *      expansion in the harness, which means the metadata cannot say whether the
- *      rows hold definitions or definitions-plus-examples. Hashing each
- *      candidate variant and reporting which one matches recovers that from the
- *      artifact rather than from a label — and a cell matching none of them is
- *      stale, which a label would never have revealed.
+ *      It also reveals WHICH text was indexed. Every file here carries the same
+ *      label, because that label is what switches on expansion in the scorer, so
+ *      the label cannot say whether the rows hold definitions or definitions
+ *      plus examples. Fingerprinting each possibility and reporting which one
+ *      matches recovers that from the file itself rather than from a label — and
+ *      a file matching none of them is stale, which a label would never reveal.
  *
- *   2. SELF-RETRIEVAL, BY SYNSET. Embed a sample of the cell's own indexed text
- *      and require a row from THAT SYNSET at rank 1. Not that exact lemma: this
- *      is a synset-keyed cell, so there is one row per synset and the lemma
- *      question does not arise — but the collision the Phase E rule allows for
- *      still does. 482 gloss texts are shared by more than one synset, so a
- *      handful of probes are genuinely indistinguishable and 60/60 is not
- *      required. Below ~57/60 means vectors and keys are misaligned.
+ *   2. Can it find itself? Measure a sample of the file's own text and require a
+ *      row from that meaning back first. A perfect score is not expected: some
+ *      definitions are shared word for word by more than one entry, so a handful
+ *      are genuinely indistinguishable. Well below that means the numbers and
+ *      the keys are out of step.
  *
  *   npx tsx scripts/verify-encoder-cell.ts full_gloss_ft full_gloss_gte
  *   npx tsx scripts/verify-encoder-cell.ts            # every cell in EVAL_CELL_DIR
@@ -38,12 +34,12 @@ import { glossTextFor, inputsSha256 } from "./lib/cellText";
 import { POS_LIST, readSenses } from "./lib/wordnet";
 
 const SAMPLE = 60;
-/** Every text variant a cell in this family could hold, in `cellText.ts`'s vocabulary. */
+/** Every text variant a file in this family could hold. */
 const VARIANTS = ["gloss", "gloss_examples", "lemma_gloss"];
 
 type Synset = { key: string; words: string[]; gloss: string; examples: string[] };
 
-/** Deterministic sampling, so a re-run checks the same rows. */
+/** Fixed sampling, so a re-run checks the same rows. */
 function rng(seed: number): () => number {
   return () => {
     seed |= 0;

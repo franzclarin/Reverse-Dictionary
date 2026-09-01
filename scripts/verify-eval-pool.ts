@@ -1,20 +1,19 @@
 /**
- * Integrity check for the Phase E cells.
+ * Integrity check for the experiment files.
  *
- * Deliberately does NOT touch the eval set — the authored slice is under
- * review and must not be scored until the edited TSV comes back. This checks
- * the machinery instead, using each cell's own indexed text as the query:
+ * Deliberately does not touch the question set, which is under review and must
+ * not be scored yet. This checks the machinery instead, using each file's own
+ * text as the question:
  *
- *   - lemma cells: embed the word itself. Must return that word at rank 1;
- *     anything else means the vectors and the word list are misaligned.
- *   - gloss cells: embed a sense's own gloss text. Must return a row from THAT
- *     SYNSET at rank 1. Not that exact lemma: a synset's words all share one
- *     gloss, so their vectors are identical and rank 1 among them is an
- *     arbitrary tie-break. Scoring the lemma would fail a healthy cell.
+ *   - word-keyed files: look up the word itself, and it must come back first.
+ *     Anything else means the numbers and the word list are out of step.
+ *   - meaning-keyed files: look up a definition, and a row from that meaning
+ *     must come back first. Not that exact word — words sharing a meaning have
+ *     identical numbers, so which one wins is an arbitrary tie-break, and
+ *     demanding a particular one would fail a perfectly healthy file.
  *
- * Also confirms every cell matches the current pool manifest, since a cell
- * built from a different pool would win or lose on coverage rather than
- * representation.
+ * Also confirms every file matches the current pool, since one built from a
+ * different pool would win or lose on coverage rather than on merit.
  *
  *   npx tsx scripts/verify-eval-pool.ts
  */
@@ -53,12 +52,9 @@ async function main(): Promise<void> {
   console.log(`cell dir: ${cellDir()}\n`);
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8")) as PoolManifest;
 
-  // ------------------------------------------------------- matched pools
-  //
-  // Checked against the MANIFEST rather than against each other. Cell-to-cell
-  // agreement would still pass if every cell were built from the same stale
-  // pool, and a rebuild at a different scale is exactly the situation that
-  // produces stale cells.
+    // Checked against the record rather than against each other. Files agreeing
+    // among themselves would still pass if all of them were built from the same
+    // stale pool, which is exactly the situation that produces stale files.
   console.log(`Pool identity — manifest is ${manifest.scale} scale, ${manifest.poolWords.toLocaleString()} words\n`);
   const manifestWords = new Set(manifest.words);
   const fresh: string[] = [];
@@ -78,11 +74,10 @@ async function main(): Promise<void> {
       words.size === manifestWords.size && [...words].every((w) => manifestWords.has(w));
     const scale = scaleOf(idx.meta);
 
-    // Provenance fingerprint: recompute the ordered input text list from the
-    // manifest and compare it against what the cell says it was built from. A
-    // word set can match while the indexed TEXT does not — a gloss cell built
-    // under a different variant, say — and after nine concurrent processes once
-    // wrote overlapping outputs, "the timestamps look right" is not good enough.
+        // Recompute the fingerprint of the texts and compare it to what the file
+        // claims. The word list can match while the indexed TEXT does not, and after
+        // a half-finished parallel rebuild once left overlapping output, "the
+        // timestamps look right" is not good enough.
     let fingerprint = "";
     let hashOk = true;
     if (sameWords) {
@@ -157,10 +152,9 @@ async function main(): Promise<void> {
         continue;
       }
 
-      // Gloss cell. The criterion is the SYNSET, not the lemma: a synset's
-      // words all carry the same gloss, so their vectors are identical and
-      // rank 1 among them is an arbitrary tie-break. Scoring the exact lemma
-      // would measure tie-breaking and call a healthy cell broken.
+            // For meaning-keyed files the test is the meaning, not the word: words
+            // sharing a meaning have identical numbers, so demanding a particular one
+            // would measure the tie-break and call a healthy file broken.
       const g = glossSample[i];
       const text = glossTextFor(idx.meta.variant, g);
 

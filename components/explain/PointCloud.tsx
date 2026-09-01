@@ -3,23 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PlacedSynset, Snapshot } from "./types";
 
-/**
- * The 3D view: a sampled cloud of senses, the query's arrival in it, and the
- * retrieved senses lit up.
- *
- * Canvas 2D rather than WebGL, deliberately. Six thousand points with an orbit
- * camera and a painter's-algorithm depth sort is a small job, and doing it by
- * hand keeps this page from adding a rendering dependency to an app that has
- * five production dependencies in total. It also makes the ink-on-paper
- * treatment straightforward: depth is expressed as radius and alpha, which is
- * two lines here and a custom shader in WebGL.
- *
- * WHAT THE PICTURE IS NOT. These are the first three principal components of a
- * 384-dimensional space, carrying the share of variance the snapshot records
- * (~12%). Distances on screen are not the ranking and are never used for it:
- * every score displayed anywhere on this page came from the database, computed
- * across all 384 dimensions.
- */
+// The 3D view: a cloud of meanings, the query arriving in it, and the results
+// lighting up. Drawn by hand rather than with a 3D library, which would have
+// been a large dependency for a small job in an app that has five in total.
+//
+// The picture keeps only a fraction of the real detail. Distances on screen are
+// not the ranking and are never used as one — every score shown on this page
+// was computed by the database across all 384 numbers.
 
 export type CloudTheme = {
   background: string;
@@ -57,14 +47,9 @@ export const PLATE_THEME: CloudTheme = {
   axis: "#3f3a34",
 };
 
-/**
- * Where things ended up on screen this frame.
- *
- * A MUTABLE REF, deliberately, not state: `TransformFilm` flies the query
- * vector out of its band and into the cloud, and it needs the landing
- * coordinate every frame. Routing 60fps of camera motion through React would
- * re-render the whole page for nothing.
- */
+/** Where things ended up on screen this frame, for the animation to aim at. */
+// Held outside React on purpose: sending 60 updates a second through it would
+// redraw the whole page for nothing.
 export type ScreenRef = { query: { sx: number; sy: number } | null };
 
 type Props = {
@@ -102,13 +87,9 @@ type Rect = { x: number; y: number; w: number; h: number };
 const overlaps = (a: Rect, b: Rect) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
-/**
- * Place a label near its point without colliding with labels already placed.
- *
- * Tries four sides in order of preference and gives up rather than stacking
- * text on text — an unreadable label is worse than a missing one, and the
- * ranked list beside the canvas carries every name anyway.
- */
+/** Put a label near its point without overlapping one already placed. */
+// Tries four sides, then gives up rather than stack text on text. The list
+// beside the picture carries every name anyway.
 function placeLabel(
   sx: number,
   sy: number,
@@ -169,12 +150,8 @@ export default function PointCloud({
     moved: false,
   });
   const screen = useRef<Float32Array>(new Float32Array(0));
-  /**
-   * Hover lives in a REF for the canvas and in state only for the HTML readout.
-   * It used to sit in the render loop's dependency array, so every pointer move
-   * tore the rAF loop down and rebuilt it — a rebuild storm on the one
-   * interaction guaranteed to happen constantly.
-   */
+  /** What the cursor is over. Kept outside React for the drawing, inside it for the text. */
+  // Otherwise every mouse movement tears down and rebuilds the drawing loop.
   const hoverRef = useRef<number | null>(null);
   const [hoverRow, setHoverRow] = useState<number | null>(null);
 
@@ -363,8 +340,8 @@ export default function PointCloud({
         const i = slice[k];
         if (hitRows.has(i)) continue;
         const depth = buf[i * 3 + 2];
-        // Nearer points are larger and darker; this is the only depth cue a flat
-        // canvas gets, and it is doing the work parallax would do in stereo.
+        // Nearer points are larger and darker — the only sense of depth a flat
+        // picture gets.
         const t = Math.min(1, Math.max(0, (depth - near) / (far - near)));
         ctx.globalAlpha = cloudAlpha * (1 - t * 0.78);
         const r = 1.9 - t * 1.15;
@@ -404,8 +381,8 @@ export default function PointCloud({
       ctx.font = '500 11px "DM Mono", ui-monospace, monospace';
       ctx.textBaseline = "middle";
 
-      // Markers first, every one of them, then labels on top — so a label can be
-      // dropped for want of space without also losing the point it names.
+      // All the dots first, then labels on top, so a label can be dropped for
+      // lack of room without losing the dot it names.
       for (const { s, p } of placed) {
         ctx.fillStyle = theme.hit;
         ctx.beginPath();
@@ -429,9 +406,8 @@ export default function PointCloud({
         ctx.fillText(text, rect.x + 2, rect.y + labelHeight / 2);
       };
 
-      // The query itself — a diamond, so it is never mistaken for a sense — and
-      // its label is claimed first, because it is the one point that must be
-      // findable on every frame.
+      // The query is a diamond, never mistaken for a result, and gets first
+      // claim on label space since it must always be findable.
       if (qp && !hideQueryMarker) {
         const size = 7;
         ctx.save();
@@ -449,8 +425,7 @@ export default function PointCloud({
         drawLabel(p.sx, p.sy, `${s.lemmas[0]} · ${s.similarity.toFixed(3)}`, s.rank === 0);
       }
 
-      // Hover readout for any point in the sampled cloud. Drawn last and always
-      // drawn: it is under the cursor, so the reader has asked for it.
+      // Whatever the cursor is over, drawn last and always — it was asked for.
       const hovered = hoverRef.current;
       if (hovered !== null && buf[hovered * 3 + 2] > 0) {
         const hx = buf[hovered * 3];

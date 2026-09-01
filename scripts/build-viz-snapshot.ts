@@ -1,23 +1,21 @@
 /**
- * Build the static snapshot the /explain page draws its cloud from (RD-18).
+ * Build the saved cloud the /explain page draws.
  *
- * Emits `public/viz/pipeline-snapshot.json`: a fixed 384x3 PCA basis, the mean
- * vector it centres on, and a stratified sample of synsets already projected
- * through that basis. The page ships this file and projects live query vectors
- * through the same matrix, so a retrieved synset absent from the sample still
- * lands at its exact position — the property UMAP and t-SNE cannot offer, and
- * the reason RD-18 specified PCA.
+ * Works out a fixed way of flattening 384 numbers down to 3, then writes it out
+ * along with a spread-out sample of meanings already placed. The page ships this
+ * file and places live results the same way, so a result missing from the sample
+ * still lands exactly where it belongs — which is the whole reason this method
+ * was chosen over the prettier alternatives.
  *
- * Read-only against the database. Nothing here touches the search path.
+ * Read-only. Nothing here touches the search path.
  *
- * The sample is a deterministic stride over `id` (`id % stride = 0`) rather
- * than `ORDER BY random()`: reproducible without depending on Postgres's RNG
- * seeding, and because ids follow WordNet's own offset order it spreads evenly
- * across parts of speech instead of clumping.
+ * The sample takes every Nth row rather than picking at random: reproducible
+ * without depending on the database, and it spreads evenly across parts of
+ * speech instead of clumping.
  *
- * `varianceExplained` is MEASURED here and must be displayed on the page. An
- * unlabelled projection invites the viewer to read distances off the picture,
- * which is the one lesson this page exists to prevent.
+ * How much detail the flattening keeps is measured here and must be shown on the
+ * page. An unlabelled picture invites people to read distances off it, which is
+ * the one thing that page exists to prevent.
  *
  *   npx tsx scripts/build-viz-snapshot.ts [--sample 6000] [--out <path>]
  */
@@ -33,10 +31,10 @@ loadEnv();
 const prisma = new PrismaClient();
 const OUT_PATH = path.resolve(process.cwd(), "public/viz/pipeline-snapshot.json");
 
-/** Points in the drawn cloud. Trades payload size against how full it looks. */
+/** How many dots to draw. Trades file size against how full the cloud looks. */
 const DEFAULT_SAMPLE = 6000;
 
-/** Power-iteration budget per component. Converges long before this. */
+/** Iteration limit. It settles long before this. */
 const MAX_POWER_ITERATIONS = 500;
 const CONVERGENCE_EPS = 1e-10;
 
@@ -80,15 +78,11 @@ async function loadSample(sampleSize: number): Promise<Row[]> {
   return rows;
 }
 
-/**
- * Fit three principal components by power iteration with deflation.
- *
- * Rolled by hand rather than pulling a numeric dependency: the covariance is
- * only 384x384 and three components converge in a few hundred cheap iterations.
- * The starting vector is deterministic (not `Math.random`) so two runs of this
- * script produce a byte-identical basis — which matters, because the committed
- * snapshot and any future rebuild have to place points the same way.
- */
+/** Work out the three directions that best spread the meanings apart. */
+// Written by hand rather than adding a maths library: the problem is small and
+// settles in a few hundred cheap steps. The starting point is fixed rather than
+// random, so two runs produce identical output — which matters, because the
+// saved file and any rebuild have to place points the same way.
 function fitPca(
   vectors: Float64Array,
   rows: number,
@@ -137,8 +131,7 @@ function fitPca(
   const next = new Float64Array(dim);
 
   for (let component = 0; component < 3; component++) {
-    // Deterministic, non-degenerate start; sin() is not orthogonal to anything
-    // in particular, which is exactly what a starting vector wants to be.
+        // A fixed, arbitrary starting point — which is exactly what it should be.
     for (let i = 0; i < dim; i++) v[i] = Math.sin(i + 1 + component * 977);
     normalise(v);
 
@@ -161,7 +154,7 @@ function fitPca(
       eigenvalue = norm;
     }
 
-    // Rayleigh quotient — the honest eigenvalue for the converged vector.
+        // The honest strength figure for the direction just found.
     let lambda = 0;
     for (let i = 0; i < dim; i++) {
       const rowOff = i * dim;
@@ -173,7 +166,7 @@ function fitPca(
     basis.push(Array.from(v));
     eigenvalues.push(lambda);
 
-    // Deflate so the next iteration cannot rediscover this direction.
+        // Remove it, so the next round cannot rediscover the same direction.
     for (let i = 0; i < dim; i++) {
       const rowOff = i * dim;
       const vi = v[i];
@@ -217,11 +210,11 @@ async function main() {
 
   console.log("\n  fitting PCA (power iteration, 3 components)…");
   const started = Date.now();
-  // NB: fitPca centres `flat` IN PLACE, so it holds centred vectors afterwards.
+    // Note: the step above rewrites `flat` in place, so it is now centred.
   const { basis, mean, eigenvalues, totalVariance } = fitPca(flat, rows.length, dim);
   console.log(`  fitted in       ${((Date.now() - started) / 1000).toFixed(1)}s`);
 
-  // Orthogonality is the check that deflation actually worked.
+    // Checking the three directions are unrelated proves the removal step worked.
   for (let a = 0; a < 3; a++) {
     for (let b = a + 1; b < 3; b++) {
       let dot = 0;
@@ -241,8 +234,7 @@ async function main() {
       `= ${(varianceExplained * 100).toFixed(1)}% of 384-d variance`
   );
 
-  // Project. `flat` is already centred, so this is a plain dot product — the
-  // same arithmetic `project()` performs after subtracting the mean.
+    // Place each point. Already centred above, so this is a plain multiply.
   const xs: number[] = [];
   const ys: number[] = [];
   const zs: number[] = [];
@@ -283,7 +275,7 @@ async function main() {
     basis: basis.map((axis) => axis.map((v) => round(v, 6))),
     mean: mean.map((v) => round(v, 6)),
     keys: rows.map((r) => r.synsetKey),
-    // One character per point, in point order: n/v/a/r.
+        // Part of speech per point: noun, verb, adjective, adverb.
     pos: rows.map((r) => r.pos[0]).join(""),
     lemmas: rows.map((r) => r.lemmas),
     glosses: rows.map((r) => r.gloss),

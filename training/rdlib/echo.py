@@ -1,25 +1,24 @@
 """
-The lexical-echo rule, ported from scripts/lib/probes.ts.
+The word-echoing rule, ported from the TypeScript.
 
-Echo is a PRIMARY metric in this project, not a diagnostic: CLAUDE.md's standing
-instruction is that "a change that improves recall without moving it needs
-explaining". RD-12's lemma-gloss reranker arm was rejected partly because it
-bought recall by driving echo from 14.5% to 21.4%.
+Echo is a headline measure here, not a diagnostic: the standing instruction is
+that a change improving accuracy without moving echo needs explaining. One
+re-sorting experiment was rejected partly because it bought accuracy by driving
+echo up by half again.
 
-That only works if every tool computes it the same way. probes.ts says so in
-as many words -- "Change the rule here or not at all" -- so this is a verbatim
-port, not a reimplementation, and `verify_against_runs()` in parity.py checks it
-reproduces the `echo` field the TypeScript harness stored.
+That only works if every tool computes it identically. The original says so in
+as many words -- change the rule there or not at all -- so this is a verbatim
+port, and the gate checks it reproduces what the harness stored.
 
-If probes.ts changes, change this and re-run the parity gate.
+If the original changes, change this and re-run the gate.
 """
 
 from __future__ import annotations
 
 import re
 
-# --- verbatim from probes.ts:44 ---------------------------------------------
-# Function words that carry no retrieval signal.
+# --- verbatim from the TypeScript -------------------------------------------
+# Everyday joining words that say nothing about meaning.
 STOPWORDS: frozenset[str] = frozenset(
     (
         "a an the of to in on at for from by with and or but not no is are was were be been "
@@ -31,9 +30,9 @@ STOPWORDS: frozenset[str] = frozenset(
     ).split()
 )
 
-# probes.ts splits on /[^a-z]+/ AFTER lowercasing, so apostrophes are separators
-# and "don't" can never actually match as a single token. Kept exactly as-is:
-# the point is to agree with the harness, not to improve on it.
+# The original treats apostrophes as separators, so "don't" can never match as
+# one word. Kept exactly as-is: the point is to agree with the harness, not to
+# improve on it.
 _NON_ALPHA = re.compile(r"[^a-z]+")
 
 
@@ -48,11 +47,10 @@ def content_tokens(query: str) -> list[str]:
 
 def echoes_query(result_word: str, query_tokens: list[str]) -> bool:
     """
-    Does `result_word` echo a content word of the query? (`echoesQuery`)
+    Does this answer just repeat a word from the question?
 
-    Deliberately crude: a shared 4-character prefix on any token pair. That is
-    enough to catch rain/raininess/raindrop/rainstorm, laugh/laughter/laughing
-    and minute/minuteness, which is the pattern of interest.
+    Crude on purpose -- a shared four-letter opening. Enough to catch
+    rain/raininess/raindrop and laugh/laughter, which is the pattern of interest.
     """
     for rt in filter(None, _NON_ALPHA.split(result_word.lower())):
         for qt in query_tokens:
@@ -64,10 +62,9 @@ def echoes_query(result_word: str, query_tokens: list[str]) -> bool:
 
 def echo_share(query: str, results: list[str]) -> float:
     """
-    Share of `results` echoing the query -- the per-row `echo` field.
+    How much of the result list merely echoes the question.
 
-    Returns 0.0 for an empty result list, matching the harness, which only ever
-    computes this over a non-empty top-k.
+    Returns zero for an empty list, matching the harness.
     """
     if not results:
         return 0.0

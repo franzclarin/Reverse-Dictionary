@@ -1,30 +1,20 @@
 /**
- * Emit `eval/audit/synonym-worklist.txt` — candidate `acceptable[]` entries for
- * the eval targets that sit in a WordNet synset with other pooled words.
+ * List candidate alternative answers for the test questions.
  *
- * WHY THIS EXISTS. The decision rule (METHODS §9a) resolves on lenient R@1,
- * which is scored against `acceptable[]`. Lenient R@1 degrades back into strict
- * R@1 wherever `acceptable[]` is empty — and strict R@1 is tie-deflated for
- * gloss cells, because a synset's words share one gloss and therefore hold
- * identical vectors. 218 of 287 targets are affected, so those rows are the
- * highest-value ones in the review.
+ * Decisions are made on the forgiving score, which counts a listed synonym as
+ * correct. Where no synonyms are listed that score collapses back into the strict
+ * one, which undercounts badly wherever words tie — and most questions are
+ * affected, so these are the highest-value rows in the review.
  *
- * TWO RULES THIS FILE OBEYS.
+ * Two rules this file obeys. It is derived from the dictionary's own structure
+ * and never reads what any search returned: feeding results back into the answer
+ * key would let the system grade its own homework. And it deliberately omits
+ * definitions, because the reviewer is editing questions in the same sitting and
+ * dictionary phrasing in front of them would contaminate that.
  *
- * 1. Derived from WordNet STRUCTURE ONLY — the synset membership recorded in the
- *    pool manifest. It never reads what any cell retrieved. Feeding retrieval
- *    output back into the answer key would let the system grade its own homework
- *    and would destroy the blindness the whole benchmark rests on.
- *
- * 2. Gloss text is deliberately NOT included. The reviewer is editing queries in
- *    the same session; putting definitions in front of them would contaminate the
- *    blind drafting protocol (METHODS §5). Bare words only, exactly as
- *    `sample-targets.ts` does.
- *
- * This is a CANDIDATE list for a human. It writes nothing into `acceptable[]`,
- * and WordNet proposing a synonym is not the same as it being an acceptable
- * answer — `oblivion`/`limbo` are synset-mates; whether one may stand in for the
- * other is a judgement.
+ * This is a candidate list for a person. It writes nothing into the answer key —
+ * the dictionary calling two words synonyms is not the same as one being an
+ * acceptable answer for the other.
  *
  *   npx tsx scripts/build-synonym-worklist.ts
  */
@@ -52,14 +42,14 @@ type Entry = {
 function main(): void {
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8")) as PoolManifest;
 
-  // synset -> the pooled words that belong to it
+    // Each meaning, and the pooled words belonging to it.
   const bySynset = new Map<string, Set<string>>();
   for (const g of manifest.glosses) {
     if (!bySynset.has(g.senseKey)) bySynset.set(g.senseKey, new Set());
     bySynset.get(g.senseKey)!.add(g.word);
   }
 
-  // target -> the synsets it belongs to
+    // Each answer, and the meanings it belongs to.
   const synsetsOf = new Map<string, string[]>();
   for (const g of manifest.glosses) {
     if (!synsetsOf.has(g.word)) synsetsOf.set(g.word, []);
@@ -77,8 +67,8 @@ function main(): void {
     }
   }
 
-  // Largest synsets first: the most tie-exposed rows are where an empty
-  // acceptable[] costs the most.
+    // Biggest groups first: those are the questions where having no alternatives
+    // listed costs the most.
   entries.sort((a, b) => b.mates.length - a.mates.length || a.target.localeCompare(b.target));
 
   const affected = new Set(entries.map((e) => e.target));

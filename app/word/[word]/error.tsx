@@ -3,10 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 
-/**
- * Safety net so a server-side exception renders something legible instead of
- * Next's bare "Application error: a server-side exception has occurred".
- */
+/** Shows a readable message when the page fails, instead of a blank error. */
 export default function WordError({
   error,
   reset,

@@ -1,35 +1,27 @@
 /**
- * Has the register gap survived the gloss cutover? (RD-16)
+ * Does phrasing still matter as much as it used to?
  *
- * METHODS §4 records a **~43-point register gap**: the `gloss_tripwire` slice —
- * paraphrases of dictionary definitions — scored R@10 62.4% while hand-written
- * queries scored roughly 19%. That number is load-bearing well beyond §4. It is
- * the stated justification for the blind drafting protocol (§5), and §9a cites
- * it as the *effect size that would justify a representation change*, which is
- * where the project's ~6-point decision bar comes from.
+ * An early measurement found a huge gap: questions phrased like dictionary
+ * definitions scored far better than questions written the way people talk. That
+ * finding is load-bearing — it justifies writing the test questions blind, and
+ * the size of it is where this project's "worth acting on" bar comes from.
  *
- * It is also a fact about the LEMMA index, measured 2026-08-19, eight days
- * before RD-02 replaced that index. This probe re-derives it on both, because a
- * diagnostic does not automatically survive the change it motivated — the same
- * trap RD-12 recorded when "a reranker has nothing to reorder" quietly became
- * false the moment the cutover shipped.
+ * It is also a fact about the old index, measured days before that index was
+ * replaced. This re-derives it on both, because a diagnostic does not
+ * automatically survive the change it motivated.
  *
- * WHAT IT COMPARES. Two slices of the same frozen set, scored in the same run:
+ * It compares two groups of the same frozen set, scored in one run: the blind
+ * hand-written questions, and the 93 that were paraphrased from dictionary
+ * definitions. That second group is kept out of every headline number and stays
+ * that way — here it is used as an instrument for measuring phrasing
+ * sensitivity, which is the one thing a leaked group is honestly good for.
  *
- *   authored        blind descriptions, no gloss ever consulted (§5)
- *   gloss_tripwire  93 paraphrases of `Word.definition`, `meta.leakage:
- *                   "paraphrase"` — maximum register match PLUS leakage
+ * The two groups have no answers in common, so this is not a like-for-like
+ * comparison and no significance test is reported. That is why the conditional
+ * figure exists: the leaked group's answers are the easier ones, and that line
+ * divides the advantage back out.
  *
- * The tripwire is quarantined from every headline number and stays quarantined:
- * this reads it as an *instrument* for measuring phrasing sensitivity, which is
- * the one thing a leaked slice is honestly good for.
- *
- * WHAT IT IS NOT. The two slices have disjoint targets (0 of 93 shared), so this
- * is not a matched-pairs comparison and no paired test is reported. That is why
- * the conditional line below exists: tripwire targets are the easier ones, and
- * `R@1 | in top 100` divides that advantage back out.
- *
- * Reads committed run artifacts and nothing else — no database, no model.
+ * Reads saved runs and nothing else — no database, no model.
  *
  *   npx tsx scripts/probe-register-gap.ts
  *   npx tsx scripts/probe-register-gap.ts eval/runs/a.json eval/runs/b.json
@@ -38,7 +30,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { QueryResult } from "./lib/metrics";
 
-/** The pre-cutover lemma index, then what serves users today. */
+/** The old index, then what serves users today. */
 const DEFAULT_RUNS = ["eval/runs/baseline.json", "eval/runs/prod_gloss_shipped.json"];
 
 type Run = { tag: string; config?: Record<string, unknown>; results: QueryResult[] };
@@ -47,9 +39,9 @@ type Slice = {
   n: number;
   r1: number;
   r10: number;
-  /** Deep-scan reach: the harness retrieves to `--rank-depth` (100 by default). */
+    /** How deep the run looked for the answer. */
   in100: number;
-  /** R@1 among the queries whose target was retrievable at all. */
+    /** How often it came first, among questions whose answer was found at all. */
   r1GivenIn100: number;
 };
 
@@ -64,7 +56,7 @@ function load(file: string): Run {
   return JSON.parse(fs.readFileSync(full, "utf8")) as Run;
 }
 
-/** Lenient rank throughout: METHODS §9a resolves on it, and §4's figure predates that amendment. */
+/** The forgiving measure throughout, which is what decisions are made on. */
 function measure(rows: QueryResult[]): Slice {
   const n = rows.length;
   const within = (d: number) => rows.filter((r) => r.lenientRank !== null && r.lenientRank <= d).length;
@@ -80,8 +72,8 @@ function measure(rows: QueryResult[]): Slice {
 
 function slicesOf(run: Run): { authored: Slice; tripwire: Slice } {
   return {
-    // The headline slice: authored MINUS the coverage rows, exactly as every
-    // recall figure in this project is defined.
+        // The headline questions: hand-written, minus the ones no dictionary could
+        // answer — exactly how every score in this project is defined.
     authored: measure(
       run.results.filter((r) => r.source === "authored" && r.meta.reachable !== false)
     ),

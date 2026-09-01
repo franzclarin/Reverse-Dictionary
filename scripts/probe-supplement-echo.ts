@@ -1,22 +1,19 @@
 /**
- * RD-17 — where did the extra echo come from?
+ * Where did the extra word-echoing come from?
  *
- * Echo rate is a primary metric precisely so a recall change cannot be read
- * without it. The expansion left lenient R@1 flat (−0.3pp, p = 1.0) and raised
- * echo 14.5% -> 17.5%, and "recall did not move but echo did" is exactly the
- * pattern that needs a mechanism rather than a shrug.
+ * Echo is a headline measure precisely so a change in accuracy cannot be read
+ * without it. The expansion left accuracy flat while echo rose, and "accuracy
+ * didn't move but echo did" needs a mechanism rather than a shrug.
  *
- * Two things this separates, which the headline number cannot:
+ * Two things this separates, which the headline number cannot. First: is the
+ * extra echo coming from the added words, or did the original words start
+ * echoing more? Only the first is explicable — the second would mean something
+ * changed about rows that were copied verbatim, which is impossible and would
+ * mean the build is broken. Second: is echo pushing out correct answers, or
+ * filling slots that were wrong anyway? Echo matters because it crowds out the
+ * right answer; echo at the bottom of a list that never had it costs nothing.
  *
- *   1. Is the extra echo coming from the ADDED words, or did the WordNet words
- *      start echoing more? Only the first is explicable by the expansion; the
- *      second would mean something changed about rows that were copied verbatim,
- *      which is impossible and would indicate a build fault.
- *   2. Is echo displacing correct answers, or filling slots that were wrong
- *      anyway? Echo matters because it crowds out the target — echo in the tail
- *      of a list that never had the answer costs nothing.
- *
- * Reads committed run JSON only. No model, no database.
+ * Reads saved runs only. No model, no database.
  *
  *   npx tsx scripts/probe-supplement-echo.ts
  */
@@ -107,8 +104,7 @@ async function main(): Promise<void> {
       `(${((100 * echoFromWordnet) / Math.max(echoSlots, 1)).toFixed(1)}% of the echo)`
   );
 
-  // Echo per-word among added vs WordNet rows: is the new vocabulary *more*
-  // echo-prone, or simply more numerous?
+    // Are the added words more prone to echoing, or simply more numerous?
   const echoRateAdded = added ? (100 * echoFromAdded) / added : 0;
   const echoRateWordnet = slots - added ? (100 * echoFromWordnet) / (slots - added) : 0;
   console.log(
@@ -116,8 +112,8 @@ async function main(): Promise<void> {
       `      within WordNet words  ${echoRateWordnet.toFixed(1)}%`
   );
 
-  // Does the extra echo cost anything? Split the queries by whether the answer
-  // was found, and by whether the arm moved the rank.
+    // Does the extra echo cost anything? Split the questions by whether the answer
+    // was found at all, and by whether its position moved.
   const worse = arm.filter((r) => {
     const c = byId.get(r.id);
     return c && c.lenientRank === 1 && r.lenientRank !== 1;

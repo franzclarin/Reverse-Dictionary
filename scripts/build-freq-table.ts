@@ -1,19 +1,17 @@
 /**
- * Build the frequency table used to stratify eval targets.
+ * Build the word-frequency table used to group the test questions.
  *
- * Source: hermitdave/FrequencyWords 2018 English (OpenSubtitles). Chosen for
- * register — it is conversational text, which is what reverse-dictionary
- * queries are, rather than the literary/technical skew of a book corpus.
+ * Source is subtitle text, chosen because it is conversational — which is how
+ * people phrase these questions — rather than the literary or technical slant of
+ * a book corpus.
  *
- * Output is a checked-in static artifact, `eval/data/zipf-en.tsv`, restricted
- * to lemmas that exist in `VocabEmbedding`. It is NOT an npm dependency and is
- * not read by the app.
+ * The output is a committed file, limited to words that are in the index. It is
+ * not a dependency and the app never reads it.
  *
- * Zipf scale: log10(occurrences per billion words). ~7 = "the", ~5 = an
- * everyday word, ~3 = fairly rare, ~1 = very rare.
+ * The scale is logarithmic: about 7 for "the", 5 for an everyday word, 3 for
+ * fairly rare, 1 for very rare.
  *
- * Multi-word lemmas take the MINIMUM Zipf of their component tokens: the
- * rarest word gates the phrase ("solar eclipse" is as rare as "eclipse").
+ * A phrase takes the frequency of its rarest word, since that is what gates it.
  *
  *   npx tsx scripts/build-freq-table.ts <path-to-en_full.txt>
  */

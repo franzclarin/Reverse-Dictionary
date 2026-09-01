@@ -1,27 +1,22 @@
 /**
- * Are the frozen set's `reachable` flags still true? (RD-17, acceptance criterion 9)
+ * Are the question set's "is this word findable" flags still true?
  *
- * `meta.reachable` was computed once, against `VocabEmbedding`, before the RD-02
- * cutover moved search to `GlossEmbedding`. It is stored truth inside a FROZEN
- * file, so it does not update itself and must not be edited in place — a new
- * version means a new filename, and RD-05 owns that job. What it can do is be
- * RECOMPUTED AT ANALYSIS TIME, which is this script.
+ * They were worked out once, against the old index, before search moved to the
+ * new one. They live inside a frozen file, so they do not update themselves and
+ * must not be edited in place — a new version means a new filename. What they
+ * can be is recomputed at analysis time, which is what this does.
  *
- * WHY THE STALE FLAGS ARE LOAD-BEARING RATHER THAN COSMETIC. The headline slice
- * is `source === "authored" && meta.reachable !== false`, so every recall figure
- * this project has recorded is scored over whatever that flag said. Two rows are
- * flagged unreachable and are answerable today (RD-02 repaired them as a side
- * effect nobody was looking for), which means the 287-row denominator is two
- * rows smaller than the set can actually support.
+ * This matters rather than being cosmetic: every score this project has recorded
+ * counts only the questions those flags call findable. Two are marked unfindable
+ * and are answerable today, so the total is two smaller than it could be.
  *
- * KEEPING IT AT 287 IS THE RIGHT CALL, and this script exists to make that a
- * decision rather than an oversight. A denominator that moves when the index
- * moves cannot compare two indexes: RD-17's own arithmetic warning is that a
- * strictly better app scores worse when coverage grows the denominator faster
- * than the numerator. Holding the flag fixed is what makes the regression test
- * a regression test. The coverage slice carries the capability separately.
+ * Keeping it as it is remains the right call, and this script exists to make
+ * that a decision rather than an oversight. A total that moves when the index
+ * moves cannot compare two indexes — a strictly better app can score worse when
+ * coverage grows the total faster than the successes. Holding it fixed is what
+ * makes the regression test a regression test; new ability is reported separately.
  *
- * Read-only against both tables and against the set.
+ * Read-only.
  *
  *   npx tsx scripts/probe-reachability.ts
  *   npx tsx scripts/probe-reachability.ts --set eval/sets/v1.jsonl
@@ -81,9 +76,8 @@ async function main(): Promise<void> {
         `VocabEmbedding holds ${lemma.size.toLocaleString()}\n`
     );
 
-    // A row is "reachable" if the target OR any accepted synonym is answerable —
-    // the same disjunction lenient R@1 scores against, so the flag means the same
-    // thing the metric does.
+        // Findable means the answer or any accepted synonym is findable — the same
+        // either/or the forgiving score uses, so the flag means what the score does.
     const answerable = (r: Row): boolean =>
       [r.target, ...(r.meta.acceptable ?? [])].some((w) => gloss.has(w.toLowerCase()));
 

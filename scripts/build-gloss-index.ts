@@ -1,25 +1,14 @@
 /**
- * Populate the production synset-keyed gloss index ("GlossEmbedding",
- * halfvec(384)) — CLAUDE.md's first "Next steps" item.
+ * Fill the live meaning-based search index.
  *
- * Groups WordNet 3.0 senses by synset (pos:offset), embeds each synset's
- * definition text with the SAME production embedder /api/lookup uses (never
- * a reimplementation — a second embedding path would make every number
- * fiction, the same rule the eval harness already enforces), and upserts one
- * row per synset. Mirrors scripts/build-synset-cell.ts's grouping logic, but
- * targets Postgres directly instead of a local eval cell — production only
- * needs the per-synset collapse itself, not a re-proof that it's lossless
- * (Phase E already established that: 0 discordant pairs, mean cosine
- * 0.99999998 against the per-sense version).
+ * Groups the dictionary's entries by meaning, measures each one's definition
+ * with the SAME code the live site uses — never a copy, since a second way of
+ * measuring would make every number fiction — and writes one row per meaning.
  *
- * --dry-run embeds and validates without writing to the database. This is
- * the ONLY mode this migration audit actually ran (see MIGRATION_AUDIT.md).
- * The real insert phase requires GlossEmbedding's table to already exist
- * (prisma/migrations/20260822000000_add_gloss_embeddings/migration.sql) AND,
- * in production, VocabEmbedding's IVFFlat index to already be dropped to fit
- * Neon's 512MB ceiling — both are a deliberate hard-stop this script does not
- * cross unattended. Do not point DATABASE_URL at production and drop the
- * --dry-run flag without explicit confirmation first.
+ * `--dry-run` measures and checks without writing anything. The real insert
+ * needs the table to already exist, and is a deliberate hard stop this script
+ * will not cross unattended. Do not point this at the live database and drop the
+ * flag without confirming first.
  *
  *   npx tsx scripts/build-gloss-index.ts --dry-run
  *   npx tsx scripts/build-gloss-index.ts              # writes to DATABASE_URL — confirm first
@@ -34,15 +23,15 @@ loadEnv();
 const prisma = new PrismaClient();
 
 const BATCH_SIZE = 500;
-// Phase E's build (CLAUDE.md, "Next steps") — a sanity check, not a hard
-// requirement; wordnet-db version drift could legitimately move this.
+// A sanity check rather than a requirement; a dictionary version change could
+// legitimately move this.
 const EXPECTED_SYNSET_COUNT = 114_662;
 
 type SynsetGroup = {
   synsetKey: string;
   pos: string;
   gloss: string;
-  /** WordNet's own within-synset order — see the schema comment on `lemmas`. */
+    /** The dictionary's own word order. Never sort it. */
   lemmas: string[];
 };
 
@@ -110,9 +99,8 @@ async function main(): Promise<void> {
       `not by this script, before running for real.`
   );
 
-  // One multi-row INSERT per batch (not 500 sequential single-row round-trips
-  // inside a $transaction) — the latter measured at ~90s/batch against Neon,
-  // projecting to ~6 hours total; this collapses each batch to one round-trip.
+    // One insert per batch. Doing them one row at a time measured at about a
+    // minute and a half per batch, which projected to roughly six hours.
   for (let i = 0; i < embedded.length; i += BATCH_SIZE) {
     const batch = embedded.slice(i, i + BATCH_SIZE);
     const values: string[] = [];

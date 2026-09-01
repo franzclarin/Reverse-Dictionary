@@ -1,32 +1,19 @@
 /**
- * RD-21 — when the target is retrieved but not first, HOW FAR below first is it?
+ * When the right answer is found but not first, how far behind first is it?
  *
- * WHY THIS IS NOT `probe-margins.ts`. That one is Phase A3: 25 hand-picked
- * queries, top 10, against `VocabEmbedding`, asking whether *echo* neighbours
- * outscore the truth. It answered its question and its numbers (+0.134 echo,
- * +0.094 non-echo) are still quoted in CLAUDE.md — but they describe the LEMMA
- * index, which two cutovers have since replaced. This runs the whole frozen set
- * down the live serving path at depth 100 and asks a different question.
+ * Everything written about this system cites a large "headroom": the answer is
+ * inside the top hundred far more often than it is first, so a perfect re-sorter
+ * would claim the difference. That is arithmetically true and it hides the thing
+ * that decides whether any re-sorter can. An answer sitting a hair behind first
+ * and one sitting far behind produce the same headroom figure and are not the
+ * same problem at all.
  *
- * WHAT IT IS FOR. Every ticket since RD-12 has cited a large "headroom": the
- * target is inside the top 100 far more often than it is at rank 1, so a perfect
- * reranker over that shortlist would claim the difference. That framing is
- * arithmetically true and it hides the thing that decides whether any reranker
- * can: a shortlist where the target sits 0.001 below rank 1 and one where it
- * sits 0.15 below produce the SAME headroom figure and are not the same problem.
+ *   near-ties         the ranking is undecided, and a better scorer might help.
+ *   confident gaps    the model is not undecided, it is wrong, and reordering
+ *                     its scores cannot fix what produced them.
  *
- *   near-ties          -> the ranking is uninformative and a better scorer,
- *                         a calibration, or an echo penalty is live.
- *   confident margins  -> the encoder is not undecided, it is wrong, and
- *                         reordering its scores cannot fix what produced them.
- *
- * Read-only, and it uses the SERVING path (`searchGlossSynsets` + `expandSynsets`
- * from `lib/glossSearch.ts`) rather than a reimplementation — the margins have to
- * be the margins users get, or the number describes a lookalike.
- *
- * Ranks are LENIENT (target plus `acceptable[]`), matching the metric METHODS
- * §9a resolves on. Scoring strict here would count a synonym tie as a miss and
- * inflate the headroom with queries that are already answered.
+ * Read-only, and it uses the live search rather than a copy — these have to be
+ * the gaps users actually get.
  *
  *   npx tsx scripts/probe-rank1-margin.ts
  *   npx tsx scripts/probe-rank1-margin.ts --depth 50
@@ -44,14 +31,10 @@ loadEnv();
 const prisma = new PrismaClient();
 const SET = "eval/sets/v1.jsonl";
 
-/**
- * Gap bands, in cosine.
- *
- * The boundaries are judgement and are stated rather than tuned: 0.01 is below
- * the noise a tie-break decides, and 0.08 is the scale of the *whole* lemma-era
- * echo margin (+0.094), so anything past it is a gap as large as the problem
- * RD-02 was built to fix.
- */
+/** Bands for how big the gap is. */
+// The boundaries are judgement calls, stated rather than tuned: the smallest is
+// below what a tie-break decides, and the largest is the size of the entire
+// problem an earlier rebuild was made to fix.
 const BANDS: { label: string; upto: number }[] = [
   { label: "< 0.01  (effectively a tie)", upto: 0.01 },
   { label: "0.01 - 0.03", upto: 0.03 },
@@ -89,7 +72,7 @@ async function main(): Promise<void> {
 
   console.log(`\nRD-21 · rank-1 margin   depth ${depth}   n=${rows.length} authored reachable\n`);
 
-  // Neon auto-suspends; the first query otherwise pays the wake-up.
+    // Wake the database first, or the first question pays for it.
   await prisma.$queryRawUnsafe("SELECT 1");
 
   const gaps: number[] = [];

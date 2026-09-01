@@ -18,7 +18,7 @@ interface SearchResultsProps {
 const INITIAL_K = 10;
 const LOAD_MORE_STEP = 10;
 
-/** Animates 0 -> target over ~200ms; jumps straight to target under prefers-reduced-motion. */
+/** Counts up to the number, or jumps to it for viewers who want less motion. */
 function useCountUp(target: number, durationMs = 200) {
   const [value, setValue] = useState(0);
 
@@ -58,13 +58,12 @@ export default function SearchResults({ query }: SearchResultsProps) {
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const { play } = useSound();
-  // A ref so the fetch effect doesn't need `play` in its deps — toggling
-  // sound mid-request shouldn't re-trigger the fetch.
+  // Held this way so muting mid-search doesn't restart the search.
   const playRef = useRef(play);
   playRef.current = play;
 
-  // A new query resets pagination — otherwise "load more" on one query would
-  // carry over into a k of 30+ for the next.
+  // A new query starts from the first page again, rather than inheriting how
+  // far the last one was scrolled.
   useEffect(() => {
     setK(INITIAL_K);
   }, [query]);
@@ -95,7 +94,7 @@ export default function SearchResults({ query }: SearchResultsProps) {
           /* empty or non-JSON body */
         }
 
-        // A newer query or "load more" click superseded this request.
+        // A newer request has already replaced this one.
         if (requestIdRef.current !== requestId) return;
 
         if (!response.ok) {

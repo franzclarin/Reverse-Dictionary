@@ -1,7 +1,6 @@
-# The container is the PORTABLE surface, not the fast one. Docker on macOS runs
-# a Linux VM with no Metal passthrough, so torch here is CPU-only. Do the real
-# work on the host with `uv run jupyter lab` (MPS); use this for reproducibility,
-# for handing the environment to someone else, or for learning Docker.
+# The container is the portable surface, not the fast one: Docker on macOS
+# cannot reach the GPU, so this is CPU-only. Do the real work on the host; use
+# this for reproducibility, or for handing the environment to someone else.
 #
 #   docker compose up --build     ->  http://localhost:8888
 
@@ -11,27 +10,26 @@ services:
     container_name: rd-lab
     working_dir: /workspace
     ports:
-      # Bound to loopback on purpose: the server runs with no token (see
-      # Dockerfile), so it must not be reachable from the network.
+            # Local machine only, on purpose: the server runs with no password, so it
+            # must not be reachable from the network.
       - "127.0.0.1:8888:8888"
     volumes:
       - ./notebooks:/workspace/notebooks
       - ./artifacts:/workspace/artifacts
 
-      # --- read-only, and that is the point -------------------------------
-      # The frozen 405-row benchmark plus the committed baseline runs. It is
-      # only a valid benchmark for as long as nothing can rewrite it, so
-      # nothing here can.
+            # --- read-only, and that is the point -------------------------------
+            # The frozen benchmark and its reference runs. It is only a valid
+            # benchmark for as long as nothing can rewrite it, so nothing here can.
       - ../eval:/workspace/eval:ro
 
-      # WordNet 3.0, vendored by the Node app's `wordnet-db` dependency.
-      # NOTE: the files are latin1, not UTF-8. Reading them as UTF-8 mangles
-      # headwords silently.
+            # The dictionary, shipped by the app's own dependencies.
+            # Note: its files are not UTF-8, and reading them as UTF-8 silently
+            # mangles headwords.
       - ../node_modules/wordnet-db/dict:/workspace/data/wordnet:ro
 
-      # Kaikki English Wiktionary extraction (~3.2 GB) and OEWN.
+            # The large downloaded dictionary sources.
       - ${RD_SOURCE_DIR:-${HOME}/rd_sources}:/workspace/data/sources:ro
     environment:
-      # Jupyter's own cache/config inside the container rather than $HOME.
+            # Jupyter's own cache and settings, kept inside the container.
       JUPYTER_PLATFORM_DIRS: "1"
       HF_HOME: "/workspace/artifacts/hf"

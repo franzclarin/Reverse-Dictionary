@@ -1,17 +1,15 @@
 /**
- * Extract the browser-side tokenizer asset for /explain (RD-18).
+ * Pull out the small word-splitting file the /explain page needs in the browser.
  *
- * Reads `models/franzclarin/ReverseDictionary/tokenizer.json` — the file the
- * server actually tokenizes with — and emits the slim subset the page needs:
- * the 30,522-piece vocabulary in id order plus the WordPiece settings.
+ * Reads the same settings file the server splits text with, and writes out just
+ * the vocabulary and the rules.
  *
- * Why a derived asset rather than serving `tokenizer.json` itself: that file is
- * 695 KB of merges, decoder config and post-processor templates the browser has
- * no use for; the vocabulary alone is ~270 KB. The 86 MB `onnx/model.onnx`
- * sitting beside it is never referenced, here or on the page.
+ * The original is mostly configuration the browser has no use for, and is more
+ * than twice the size. The 86 MB model sitting beside it is never touched, here
+ * or on the page.
  *
- * Input lives under the gitignored `models/`, so run `npm run fetch-model`
- * first. The output IS committed — the page cannot render without it.
+ * The input is downloaded, not committed, so run `npm run fetch-model` first.
+ * The output IS committed — the page cannot render without it.
  *
  *   npx tsx scripts/build-tokenizer-asset.ts
  */
@@ -41,7 +39,7 @@ function main() {
   const normalizer = tokenizer.normalizer ?? {};
   const lowercase = normalizer.lowercase !== false;
 
-  // vocab is { piece: id }; invert it into id order so the page can look up by id.
+    // Flip it around into id order, so the page can look a piece up by number.
   const vocab: string[] = new Array(Object.keys(model.vocab).length);
   for (const [piece, id] of Object.entries(model.vocab as Record<string, number>)) {
     vocab[id] = piece;
@@ -55,7 +53,7 @@ function main() {
     maxInputCharsPerWord: model.max_input_chars_per_word,
     maxLength: tokenizer.truncation?.max_length ?? 256,
     lowercase,
-    // null means "follow lowercase" — the same default the Rust normalizer uses.
+        // Unset means "follow lowercasing", the same default the real one uses.
     stripAccents: normalizer.strip_accents ?? lowercase,
     clsToken: "[CLS]",
     sepToken: "[SEP]",
