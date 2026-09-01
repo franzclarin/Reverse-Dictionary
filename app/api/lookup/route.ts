@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { embed, embedTokens } from "@/lib/embedder";
 import { prisma } from "@/lib/prisma";
@@ -40,6 +41,9 @@ type ResultRow = { word: string; similarity: number };
 /** Most results anyone may ask for at once, so nobody can request the whole index. */
 const MAX_K = 100;
 
+/** Longest client-supplied search id accepted; a UUID is 36. */
+const MAX_SEARCH_ID = 64;
+
 /** How many word-parts /explain gets back, before the response gets fat. */
 const MAX_DEBUG_TOKENS = 64;
 
@@ -74,10 +78,11 @@ const SUBSYSTEM_MESSAGES: Record<Subsystem, string> = {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { query, k = 10, debug = false } = body as {
+    const { query, k = 10, debug = false, searchId } = body as {
       query: string;
       k?: number;
       debug?: boolean;
+      searchId?: string;
     };
 
     if (!query || typeof query !== "string") {
@@ -95,6 +100,13 @@ export async function POST(request: NextRequest) {
     if (!Number.isInteger(k) || k < 1 || k > MAX_K) {
       return NextResponse.json(
         { error: `k must be an integer between 1 and ${MAX_K}` },
+        { status: 400 }
+      );
+    }
+    // Comes from the client, so it is checked like anything else that does.
+    if (searchId !== undefined && (typeof searchId !== "string" || searchId.length > MAX_SEARCH_ID)) {
+      return NextResponse.json(
+        { error: `searchId must be a string of at most ${MAX_SEARCH_ID} characters` },
         { status: 400 }
       );
     }
@@ -179,7 +191,10 @@ export async function POST(request: NextRequest) {
     // them: they are someone poking at the demo, not somebody asking for a word.
     if (!debug && QUERY_LOG_ENABLED) {
       try {
-        await logQuery(query, k, rows, timingMs);
+        // The browser sends one id per search, so a search that arrives twice
+        // is recorded once. A caller that sends none — curl, a script — gets a
+        // fresh one, and so is logged every time it asks.
+        await logQuery(searchId ?? randomUUID(), query, k, rows, timingMs);
       } catch (error) {
         console.error(
           `[lookup] query log failed (non-fatal): ${formatErrorShape(describeError(error))}`

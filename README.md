@@ -106,7 +106,9 @@ Response:
 
 Returns a `{ error, subsystem, code, detail }` shape on failure — see CLAUDE.md's "Conventions & gotchas" for why a bare `fetch failed` is never the real error here.
 
-Every request is recorded (RD-24): a `QueryLog` row holds the query as typed, the requested `k`, and the same `results` array sent back, in rank order. The write is awaited so the log is complete, and wrapped so it can never fail a search; `/explain`'s `debug: true` requests are excluded. Set `QUERY_LOG_ENABLED = false` in `app/api/lookup/route.ts` to stop recording.
+Every search is recorded (RD-24): a `QueryLog` row holds the query as typed, the requested `k`, and the same `results` array sent back, in rank order. The write is awaited so the log is complete, and wrapped so it can never fail a search; `/explain`'s `debug: true` requests are excluded. Set `QUERY_LOG_ENABLED = false` in `app/api/lookup/route.ts` to stop recording.
+
+One row per *search*, not per request. Send an optional `searchId` and a search that arrives twice — a retry, or a client that fires twice — is recorded once; omit it and every request is logged separately (RD-25). Asking for more results is a different search and gets its own row.
 
 ### GET /api/word/[word]
 

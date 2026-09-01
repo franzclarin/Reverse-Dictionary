@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import SearchInput from "@/components/SearchInput";
 import ResultListItem from "@/components/ResultListItem";
@@ -58,15 +58,21 @@ export default function SearchResults({ query }: SearchResultsProps) {
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const { play } = useSound();
+  // Names this search, not this request. React runs the effect below twice in
+  // development on purpose, to catch effects that are unsafe to repeat; both
+  // runs read the same id from here, so the server records one search rather
+  // than two. Asking for more results, or asking again, is a different search
+  // and gets a different id.
+  const searchId = useMemo(
+    () => (typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [query, k]
+  );
   // Held this way so muting mid-search doesn't restart the search.
   const playRef = useRef(play);
   playRef.current = play;
-
-  // A new query starts from the first page again, rather than inheriting how
-  // far the last one was scrolled.
-  useEffect(() => {
-    setK(INITIAL_K);
-  }, [query]);
 
   useEffect(() => {
     if (!query) {
@@ -76,6 +82,9 @@ export default function SearchResults({ query }: SearchResultsProps) {
     }
 
     const requestId = ++requestIdRef.current;
+    // Cancels the request if this effect runs again or the page is left, so an
+    // abandoned search stops costing the server a lookup.
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
@@ -84,7 +93,8 @@ export default function SearchResults({ query }: SearchResultsProps) {
         const response = await fetch("/api/lookup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, k }),
+          body: JSON.stringify({ query, k, searchId }),
+          signal: controller.signal,
         });
 
         let data: Record<string, unknown> = {};
@@ -109,13 +119,20 @@ export default function SearchResults({ query }: SearchResultsProps) {
         setTimingMs(typeof data.timingMs === "number" ? data.timingMs : null);
         playRef.current(newResults.length > 0 ? "stamp" : "error");
       } catch (err) {
+        // We cancelled it ourselves — say nothing, and leave the spinner to
+        // whichever search replaced this one.
+        if (err instanceof DOMException && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "An unexpected error occurred");
         playRef.current("error");
       } finally {
-        if (requestIdRef.current === requestId) setLoading(false);
+        if (!controller.signal.aborted && requestIdRef.current === requestId) {
+          setLoading(false);
+        }
       }
     })();
-  }, [query, k]);
+
+    return () => controller.abort();
+  }, [query, k, searchId]);
 
   const count = useCountUp(results.length);
   const canLoadMore = !loading && !error && results.length >= k;

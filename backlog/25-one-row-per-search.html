@@ -1,0 +1,92 @@
+<meta charset="utf-8">
+<title>RD-25 · One row per search, not two</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-25</div>
+
+  <div class="ticket-head">
+    <h1>One row per search, not two</h1>
+    <span class="badge badge-done">&check; Done</span>
+    <span class="badge badge-p1">P1 · instrumentation</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p><b>Today —</b> <a href="24-log-lookups.html">RD-24</a> started writing down every search. Every search typed into the site produced <b>two</b> identical entries.</p>
+    <p><b>Done —</b> one entry per search. The site was sending each search twice; it now sends it once, and the database refuses a second copy even if something sends one anyway.</p>
+    <p><b>Why it matters —</b> a log that double-counts is worse than no log, because it looks like data. But the more interesting part is that <i>the second request was always being sent</i> — for months, costing a full search each time. Writing things down is what made it visible.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Status:</b> <b>done</b> 2026-09-01 &mdash; verified in development <i>and</i> in a production build</span>
+    <span><b>Touches:</b> <code>components/SearchResults.tsx</code>, <code>app/search/page.tsx</code>, <code>lib/queryLog.ts</code>, <code>app/api/lookup/route.ts</code>, one <a href="glossary.html">migration</a></span>
+    <span><b>Does not touch:</b> retrieval &mdash; the <a href="glossary.html">frozen set</a>, every committed run and the serving query are unchanged</span>
+    <span><b>Found by:</b> looking at the table RD-24 had just created</span>
+  </div>
+
+  <p class="lede">The duplicate was not in the code RD-24 added. It was in code that had been sending two requests per search since long before, and had simply never left a trace.</p>
+
+  <section>
+    <h2>The two causes</h2>
+
+    <h3>1 · A side-effecting effect with no cleanup</h3>
+    <p><code>next.config.js</code> sets <code>reactStrictMode: true</code>. In <b>development</b> React mounts, unmounts and remounts every component, running each effect twice &mdash; deliberately, to expose effects that are unsafe to repeat. The effect in <code>components/SearchResults.tsx</code> POSTs to <code>/api/lookup</code> and had <b>no cleanup function at all</b>, so both invocations reached the server.</p>
+    <p>The existing <code>requestIdRef</code> guard looks like it handles exactly this, and does not: it suppresses stale <i>state updates</i>, while the discarded request still travels the network and still costs a full <a href="glossary.html">embedding</a> plus <a href="glossary.html">pgvector</a> lookup. That waste is months old. RD-24 did not introduce it &mdash; it made it <i>observable</i>.</p>
+    <p>The evidence was in the rows rather than in the reasoning: both carried identical <code>k</code> and <code>resultCount</code>, and <code>createdAt &minus; timingMs</code> put the two start times <b>1&nbsp;ms apart</b>. Two rows that start together are one client firing twice, not one server writing twice.</p>
+
+    <h3>2 · Two effects racing over <code>k</code> &mdash; and this one was not development-only</h3>
+    <p>A second effect synced the result count back to 10 whenever the query changed, beside the effect that fetches on <code>[query, k]</code>. After a &ldquo;Load more&rdquo; (<code>k = 20</code>), typing a new query fired the fetch with the <b>stale</b> <code>k = 20</code>, then again with the reset <code>k = 10</code>. Two requests with different counts, in <b>every</b> environment including production. It was absent from the reported symptom only because it needs a Load-more first.</p>
+  </section>
+
+  <section>
+    <h2>The fix, in two layers</h2>
+    <table>
+      <tr><th>layer</th><th>what it does</th></tr>
+      <tr><td><b>Stop sending twice</b></td><td>An <code>AbortController</code> aborted from the effect's cleanup &mdash; the cleanup it never had. Also required: ignoring <code>AbortError</code> in the catch, or a request we cancelled ourselves renders as a user-facing error message and an error sound.</td></tr>
+      <tr><td><b>Reset with a key, not an effect</b></td><td><code>app/search/page.tsx</code> passes <code>key={query}</code>, so a new query is a new component instance with fresh state. The syncing effect is deleted. React's own documented pattern, and it removes code rather than adding it.</td></tr>
+      <tr><td><b>Refuse a second copy</b></td><td>A <code>searchId</code> per search, with a <code>@unique</code> index and <code>ON CONFLICT DO NOTHING</code>. A duplicate arrival is skipped rather than written, whatever the client does.</td></tr>
+    </table>
+
+    <div class="callout">
+      <span class="callout-label">The detail that decides whether any of it works</span>
+      <p>The id must identify the <b>search</b>, not the request. Generating it inside the effect produces a different id on each of StrictMode's two runs and buys nothing at all; it is computed with <code>useMemo</code> keyed on the query and the count, so both runs read the same one. Nor can it be a hash of the query text &mdash; that would silently discard a legitimate repeat of the same search later. Asking for more results is a <i>different</i> search and correctly gets its own id, which is why &ldquo;Load more&rdquo; still logs.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <h3>Why the production build had to be checked separately</h3>
+    <p>StrictMode's double-invocation is a <b>development-only</b> behaviour, so a fix could pass in <code>next start</code> for the wrong reason &mdash; by the bug not being there. Both were run: development first, because that is where the bug reproduces, and a production build afterwards to confirm the result was not an artifact. Cause 2 is environment-independent and was verified in both.</p>
+    <h3>Deliberately not done</h3>
+    <p>The route does not check <code>request.signal</code>. It would save the wasted lookup when an abort loses the race, but the client now rarely sends that request and the unique index makes it harmless if it arrives. Worth its own ticket if the waste ever shows up in practice.</p>
+    <h3>Reading list</h3>
+    <ul>
+      <li><a href="24-log-lookups.html">RD-24</a> &mdash; what the log is for, and the narrow claim its rows support.</li>
+      <li><code>CLAUDE.md</code> &sect;&ldquo;Conventions &amp; gotchas&rdquo; &mdash; both lessons, written where the next person will hit them.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Adding a log is itself a measurement, and the first thing this one measured was a bug in the client.</b> Every search had been costing two full lookups for months. Nothing surfaced it, because nothing wrote anything down &mdash; the duplicate request was invisible precisely because the app was careful never to record queries. Instrumentation pays for itself before it answers the question it was built for.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A guard that looks like it handles the case, and does not.</b> <code>requestIdRef</code> reads as request de-duplication and is really display de-duplication: it stops a stale answer being <i>shown</i>, never a stale request being <i>sent</i>. Worth naming, because the code appeared to have already solved this and that is what makes such a thing survive review.</p></div>
+    <div class="learning"><div class="learning-mark">&check;</div><p><b>The timestamps identified the culprit before any code was read.</b> Two rows, identical <code>k</code>, and start times 1&nbsp;ms apart once <code>timingMs</code> was subtracted from <code>createdAt</code>. That is a client firing twice and cannot be a server writing twice &mdash; a sequential retry would look nothing like it. Recording <i>how long the work took</i> alongside <i>when it finished</i> is what made the arithmetic possible.</p></div>
+    <div class="learning"><div class="learning-mark">&check;</div><p><b>Two layers, because they fail differently.</b> The client fix removes the wasted work but is a race &mdash; an abort can lose. The unique index guarantees the row count but leaves the waste. Neither alone is the fix; the split is what makes the log trustworthy <i>and</i> the app cheaper.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li><s>One search &rarr; exactly one row (was two)</s></li>
+      <li><s>&ldquo;Load more&rdquo; &rarr; exactly one more row, at the larger <code>k</code></s></li>
+      <li><s>A new query straight after a Load-more &rarr; exactly one row, at <code>k = 10</code></s></li>
+      <li><s>No error flash, no stuck spinner, no error sound from a cancelled request</s></li>
+      <li><s>Two requests sharing a <code>searchId</code> &rarr; one row; two without one &rarr; two rows</s></li>
+      <li><s>An over-long <code>searchId</code> is rejected with 400 &mdash; it is client-supplied</s></li>
+      <li><s><code>/explain</code> still writes nothing</s></li>
+      <li><s>All of the above re-verified against a production build, where StrictMode does not double-invoke</s></li>
+      <li><s>Retrieval untouched: <code>npm run verify-viz</code> passes, serving <code>SELECT</code> still byte-identical</s></li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-25 · reverse-dictionary</footer>
+</div>

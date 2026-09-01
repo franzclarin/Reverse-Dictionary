@@ -16,6 +16,12 @@
     <p><b>Why it matters —</b> this improves search by nothing at all. What it buys is the ability to eventually ask a question the project has never been able to ask: <i>do people phrase things the way the test set assumes?</i> Every score in this repo rests on 312 questions one person wrote in one sitting.</p>
   </div>
 
+  <div class="callout">
+    <span class="callout-label">Followed by <a href="25-one-row-per-search.html">RD-25</a> — this shipped double-counting</span>
+    <p>Everything below describes one row per <i>request</i>, and that is what shipped. It was wrong by one word: the site was sending every search <b>twice</b>, so every query wrote two rows. The cause was older than this ticket — an effect with no cleanup, which React's development mode double-invokes on purpose — and it had been costing two lookups per search for months without leaving a trace. This log is what made it visible.</p>
+    <p><a href="25-one-row-per-search.html">RD-25</a> corrects it to one row per <b>search</b>, with a <code>searchId</code> and a unique index. Nothing else here changes.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Status:</b> <b>done</b> 2026-08-31 &mdash; table live in Neon, rows verified end-to-end</span>
     <span><b>Touches:</b> new <code>QueryLog</code> model + <a href="glossary.html">migration</a>, new <code>lib/queryLog.ts</code>, ~12 lines in <code>app/api/lookup/route.ts</code></span>

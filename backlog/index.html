@@ -445,8 +445,18 @@
           <div class="row-tags"><span>instrumentation</span><span>size: S</span><span>impact: retires a stated invariant; unlabelled rows, so not a measurement</span></div>
         </a>
       </li>
+      <li>
+        <a class="row" href="25-one-row-per-search.html">
+          <div class="row-top">
+            <span class="row-title">RD-25 &middot; One row per search, not two</span>
+            <span class="badge badge-done">&check; Done</span>
+          </div>
+          <p class="row-sub">The log RD-24 had just added was double-counting: every search wrote two identical rows. The cause was not in the new code &mdash; the site had been <i>sending</i> every search twice for months, from an effect with no cleanup that React&rsquo;s development mode runs twice on purpose, and nothing had ever recorded enough to notice. Fixed on both sides: the client cancels the duplicate, and a unique id per search means the database refuses a second copy anyway. A second, production-affecting bug fell out of the same file &mdash; after &ldquo;Load more&rdquo;, a new query fired twice with two different result counts.</p>
+          <div class="row-tags"><span>instrumentation</span><span>size: S</span><span>impact: the log is trustworthy, and every search now costs one lookup instead of two</span></div>
+        </a>
+      </li>
     </ul>
   </section>
 
-  <footer class="done">20 tickets · generated from a live repo audit, 2026-08-26 · RD-12…RD-15 added 2026-08-27 · RD-12 and RD-16 closed as null results 2026-08-28 · RD-17 and RD-18 filed 2026-08-28 · RD-18 done 2026-08-28 · RD-23 done 2026-08-31 · RD-24 filed done 2026-08-31</footer>
+  <footer class="done">21 tickets · generated from a live repo audit, 2026-08-26 · RD-12…RD-15 added 2026-08-27 · RD-12 and RD-16 closed as null results 2026-08-28 · RD-17 and RD-18 filed 2026-08-28 · RD-18 done 2026-08-28 · RD-23 done 2026-08-31 · RD-24 filed done 2026-08-31 · RD-25 filed done 2026-09-01</footer>
 </div>
