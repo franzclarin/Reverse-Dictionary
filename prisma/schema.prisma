@@ -87,3 +87,34 @@ model ShadowLookup {
 
   @@index([createdAt])
 }
+
+/// Every real search, as typed, with what came back. Written by /api/lookup
+/// after the response has been computed but before it is returned.
+///
+/// RETIRES the "no query text has ever been logged" property that ShadowLookup
+/// above was built to preserve (2026-08-31, RD-24). That property is why the
+/// eval set is hand-authored blind (RD-10); rows here are the first
+/// real-phrasing sample this project has ever had, and they are UNLABELLED —
+/// they carry no correct answer, so they can measure phrasing and popularity,
+/// never accuracy.
+///
+/// /explain's `debug: true` requests are deliberately excluded: those are
+/// someone poking at the demo, and counting them would change what this means.
+model QueryLog {
+  id          String   @id @default(cuid())
+  /// The description as typed, untrimmed and uncased. At most 500 characters,
+  /// enforced by the route's existing validation.
+  query       String
+  /// How many results were asked for. "Load more" re-runs the same query with a
+  /// larger k, so repeated rows with the same text are expected, not duplicates.
+  k           Int
+  /// [{ word, similarity }, …] in rank order — the exact array returned to the
+  /// client, jsonb so the order survives and the two halves cannot desync.
+  results     Json
+  resultCount Int
+  /// Embed + pgvector time only, matching the `timingMs` the client is shown.
+  timingMs    Int
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}

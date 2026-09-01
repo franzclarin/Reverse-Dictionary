@@ -35,7 +35,7 @@ For how the app is put together — system diagram, data flow, project structure
 
 That is a large improvement on where this app started. Until 2026-08-27 search compared queries against the embedding of each *bare word*, which produced a pronounced "lexical echo" effect — a query about rain returned `raininess`, `rainstorm`, `raindrop` ahead of the actual answer, with ~41% of results sharing a stem with the query. Indexing WordNet's *sense definitions* instead cut echo to 14.5%, roughly doubled Recall@10, and lifted lenient Recall@1 from 10.1% to 24.0% (55 wins / 15 regressions, p < 0.00001).
 
-Two honest caveats. The eval set was written blind by a single author in a single session, so it is single-register and is **not** a sample of real user queries — no query text has ever been logged. And roughly 5% of the vocabulary isn't reachable at all. See CLAUDE.md's "Established facts" and "Headline results" for the full numbers and methodology.
+Two honest caveats. The eval set was written blind by a single author in a single session, so it is single-register and is **not** a sample of real user queries — no query text was logged until 2026-08-31 (RD-24), and at this app's traffic there is not yet enough to draw a set from. And roughly 5% of the vocabulary isn't reachable at all. See CLAUDE.md's "Established facts" and "Headline results" for the full numbers and methodology.
 
 ## Getting Started
 
@@ -105,6 +105,8 @@ Response:
 ```
 
 Returns a `{ error, subsystem, code, detail }` shape on failure — see CLAUDE.md's "Conventions & gotchas" for why a bare `fetch failed` is never the real error here.
+
+Every request is recorded (RD-24): a `QueryLog` row holds the query as typed, the requested `k`, and the same `results` array sent back, in rank order. The write is awaited so the log is complete, and wrapped so it can never fail a search; `/explain`'s `debug: true` requests are excluded. Set `QUERY_LOG_ENABLED = false` in `app/api/lookup/route.ts` to stop recording.
 
 ### GET /api/word/[word]
 

@@ -274,6 +274,15 @@
       </div>
 
       <div class="term">
+        <div class="term-name">labelled / unlabelled</div>
+        <div class="term-def">
+          <p><b>Labelled</b> data comes with the right answer attached; <b>unlabelled</b> data does not. It is the difference between a question you can score and a question you can only describe.</p>
+          <p>Almost every number in these tickets exists because the <b>eval set</b> is labelled — each query is stored next to the word it should have found. Real traffic is not: the app now records what people searched for and what came back (<a href="24-log-lookups.html">RD-24</a>), but nobody ever told it which answer was correct. Those rows can say how people phrase things and which words come up; they can never say whether the search was right. <a href="10-real-phrasing-eval-set.html">RD-10</a> exists because public &ldquo;what's the word for…&rdquo; threads arrive <i>with</i> the answer.</p>
+          <span class="eg">e.g. <b>labelled</b> — &ldquo;the smell of rain on dry earth&rdquo; → <code>petrichor</code>. <b>Unlabelled</b> — the same question with no idea what should have come back.</span>
+        </div>
+      </div>
+
+      <div class="term">
         <div class="term-name">held-out split</div>
         <div class="term-def">
           <p>Data deliberately kept away from training so it can be used to test afterwards. Without one, a model can score well purely by having memorised its training data.</p>
@@ -504,6 +513,14 @@
         <div class="term-name">shadow logging</div>
         <div class="term-def">
           <p>Running a proposed new system alongside the live one and recording where they disagree, without showing anyone the new results. Tried here, and abandoned — it can tell you two systems disagree but never which one was right, and the app had too little traffic to gather enough of it.</p>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-name">query log</div>
+        <div class="term-def">
+          <p>A record of what people actually searched for. This app kept none for its whole history — deliberately: the shadow log above stores a <i>hash</i> of the question, never the words. <a href="24-log-lookups.html">RD-24</a> changed that on 2026-08-31; every search now stores the description as typed alongside every word returned and its score, in rank order.</p>
+          <p>Worth being precise about what that buys, because it is easy to overstate. The rows are <b>unlabelled</b>: they describe how people ask and which words come back, and can never score whether the answer was right.</p>
         </div>
       </div>
 

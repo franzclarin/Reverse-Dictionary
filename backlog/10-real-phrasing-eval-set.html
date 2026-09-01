@@ -16,6 +16,12 @@
     <p><b>Why it matters —</b> this improves search by exactly zero. What it does is tell you whether the numbers claiming search improved mean anything outside the one voice that wrote the test set. Expect lower scores against it — people only post there when already stuck.</p>
   </div>
 
+  <div class="callout">
+    <span class="callout-label">Amended 2026-08-31 — one premise changed, the ticket did not</span>
+    <p>This ticket opens with &ldquo;no real user query has ever been recorded.&rdquo; That stopped being true on 2026-08-31: <a href="24-log-lookups.html">RD-24</a> added a <a href="glossary.html">query log</a>, so <code>/api/lookup</code> now stores every search as typed alongside the words and scores it returned.</p>
+    <p><b>None of the work below changes.</b> Those rows are <a href="glossary.html">unlabelled</a> — they carry no correct answer, so they can characterise phrasing and can never score retrieval, which is the same limitation that made the shadow log the weaker instrument. And there is not yet enough traffic to draw a set from, which is precisely the deadlock <a href="02-embedding-cutover.html">RD-02</a>'s soak gate died of. The public threads are still the right source, for the reason stated below: they arrive with the answer attached.</p>
+  </div>
+
   <div class="meta-row">
     <span><b>Depends on:</b> RD-02's cutover landing first</span>
     <span><b>Touches:</b> <code>eval/sets/</code> (new file, never <code>v1</code>), a new harvest script in <code>scripts/</code></span>

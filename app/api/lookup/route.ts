@@ -11,6 +11,7 @@ import {
 } from "@/lib/glossSearch";
 import { parseVectorLiteral } from "@/lib/viz/projection";
 import { runShadowLookup } from "@/lib/shadowLookup";
+import { logQuery } from "@/lib/queryLog";
 import {
   Subsystem,
   SubsystemError,
@@ -28,6 +29,11 @@ export const maxDuration = 60;
 // Set to false to stop logging without touching anything else.
 const SHADOW_LOOKUP_ENABLED = true;
 const SHADOW_SAMPLE_RATE = 0.1;
+
+// Keep every real search alongside the words and scores it produced — see the
+// QueryLog model for what this changed and why it is worth keeping.
+// Set to false to stop recording without touching anything else.
+const QUERY_LOG_ENABLED = true;
 
 type ResultRow = { word: string; similarity: number };
 
@@ -165,6 +171,21 @@ export async function POST(request: NextRequest) {
 
     // How long the work really took — never a made-up number.
     const timingMs = Date.now() - embedStartedAt;
+
+    // Waited for, so the record is complete rather than whatever happened to
+    // survive the response — but wrapped, because failing to write down a
+    // search must never fail the search itself.
+    // /explain's requests are skipped for the same reason the log above skips
+    // them: they are someone poking at the demo, not somebody asking for a word.
+    if (!debug && QUERY_LOG_ENABLED) {
+      try {
+        await logQuery(query, k, rows, timingMs);
+      } catch (error) {
+        console.error(
+          `[lookup] query log failed (non-fatal): ${formatErrorShape(describeError(error))}`
+        );
+      }
+    }
 
     // The extra detail is added alongside the usual answer, never in place of
     // it, so existing callers see no change.

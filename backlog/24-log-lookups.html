@@ -1,0 +1,98 @@
+<meta charset="utf-8">
+<title>RD-24 · Keep what people searched for</title>
+<link rel="stylesheet" href="style.css">
+<div class="wrap">
+  <div class="crumbs"><a href="index.html">← Tickets</a> · <a href="glossary.html">Glossary</a> / RD-24</div>
+
+  <div class="ticket-head">
+    <h1>Keep what people searched for</h1>
+    <span class="badge badge-done">&check; Done</span>
+    <span class="badge badge-p2">P2 · instrumentation</span>
+  </div>
+  <div class="callout">
+    <span class="callout-label">In plain terms</span>
+    <p><b>Today —</b> the app answered a search and then forgot it completely. The only thing it wrote down was a <a href="glossary.html">shadow-log</a> row holding a <i>fingerprint</i> of the question &mdash; a hash, not the words &mdash; plus the single best answer. That was a deliberate choice, and it held for the app's entire history.</p>
+    <p><b>Done —</b> every real search now stores the description exactly as typed, together with every word it returned and each word's score, in ranked order.</p>
+    <p><b>Why it matters —</b> this improves search by nothing at all. What it buys is the ability to eventually ask a question the project has never been able to ask: <i>do people phrase things the way the test set assumes?</i> Every score in this repo rests on 312 questions one person wrote in one sitting.</p>
+  </div>
+
+  <div class="meta-row">
+    <span><b>Status:</b> <b>done</b> 2026-08-31 &mdash; table live in Neon, rows verified end-to-end</span>
+    <span><b>Touches:</b> new <code>QueryLog</code> model + <a href="glossary.html">migration</a>, new <code>lib/queryLog.ts</code>, ~12 lines in <code>app/api/lookup/route.ts</code></span>
+    <span><b>Does not touch:</b> retrieval &mdash; <code>lib/glossSearch.ts</code>, <code>lib/embedder.ts</code>, the <a href="glossary.html">frozen set</a> and every committed run are unchanged</span>
+    <span><b>Risk carried:</b> a stated invariant was retired, and it was load-bearing in five documents</span>
+  </div>
+
+  <p class="lede">The change is one table and a dozen lines. Most of the work was that the property it removes was quoted as a reason in five separate places.</p>
+
+  <div class="callout">
+    <span class="callout-label">What actually changed</span>
+    <p>&ldquo;<b>No query text has ever been logged</b>&rdquo; was not an accident of a small app. It was a design property, enforced by <code>lib/shadowLookup.ts</code> hashing the query before storing it, and it is cited by name in <code>CLAUDE.md</code> (twice), <code>README.md</code>, <code>ARCHITECTURE.md</code>, and four tickets &mdash; <b>as the reason the eval set is hand-authored</b> (<a href="10-real-phrasing-eval-set.html">RD-10</a>, <a href="14-synthetic-query-training-pairs.html">RD-14</a>, <a href="09-expand-embedding-training-data.html">RD-09</a>, <a href="02-embedding-cutover.html">RD-02</a>). Retiring it without amending those would have left the repo confidently, quietly wrong.</p>
+  </div>
+
+  <section>
+    <h2>What is stored</h2>
+    <p>One row per non-<code>debug</code> request to <code>/api/lookup</code>:</p>
+    <table>
+      <tr><th>column</th><th>what it holds, and why</th></tr>
+      <tr><td><code>query</code></td><td>The description as typed &mdash; untrimmed, uncased. The route already caps it at 500 characters.</td></tr>
+      <tr><td><code>k</code></td><td>How many results were asked for. <b>Not decoration:</b> the results page re-runs the <i>same</i> query with a larger <code>k</code> when &ldquo;Load more&rdquo; is clicked, so repeated rows with identical text are expected, and <code>k</code> is what explains them.</td></tr>
+      <tr><td><code>results</code></td><td><code>[{ word, similarity }, …]</code> in rank order, as <code>jsonb</code>. The <i>same array</i> the client receives, so the log and the answer cannot disagree. Stored as one value rather than two parallel arrays precisely so the words and their scores cannot drift out of step.</td></tr>
+      <tr><td><code>timingMs</code></td><td>Embed + <a href="glossary.html">pgvector</a> time, matching the number the page shows. Excludes the log write itself, which would otherwise make the log a measurement of the log.</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Three decisions worth the space</h2>
+
+    <h3>The write is awaited, not fire-and-forget</h3>
+    <p><code>runShadowLookup</code> is fire-and-forget, and correctly so: it samples 10% of traffic and an occasional lost row costs an agreement rate nothing. A log meant to be <i>complete</i> cannot take that trade. On Vercel, an unawaited promise races the function being frozen after the response &mdash; and Next 14.2 has neither <code>after()</code> nor <code>waitUntil</code>, so there is no correct way to defer it. So it is awaited, and wrapped: a failure prints <code>[lookup] query log failed (non-fatal)</code> and the search still returns 200 with its results. That was tested by forcing the insert to fail, not assumed.</p>
+    <p>The cost is honest and worth stating: <b>~100&nbsp;ms from a laptop</b>, which is a full extra round trip to Neon on top of a query that already costs 800&ndash;3,000&nbsp;ms from here. In production both the function and the database sit in <code>iad1</code>, where a single insert is a fraction of that &mdash; the same distinction <code>CLAUDE.md</code> already draws about the eval harness's <code>dbMs</code>. Measured, not modelled: with logging off, the same requests cost ~12&ndash;30&nbsp;ms over <code>db&nbsp;ok&nbsp;ms</code>; with it on, ~110&ndash;125&nbsp;ms.</p>
+
+    <h3><code>/explain</code>'s requests are excluded</h3>
+    <p>The <code>/explain</code> page calls the same endpoint with <code>debug: true</code>. Those are someone poking at a demonstration, not someone trying to find a word, and counting them would quietly change what the table means. This is the same reasoning the shadow log already applies, written out in the same place.</p>
+
+    <h3>The rows are unlabelled, and that bounds everything they can say</h3>
+    <p>A logged query carries no correct answer. It can characterise <b>phrasing, length, and which words get returned</b>; it can never say whether the answer was right. This is <code>lib/shadowLookup.ts</code>'s &ldquo;agreement is not accuracy&rdquo; argument applied to a richer log, and it is the reason <a href="10-real-phrasing-eval-set.html">RD-10</a>'s Stack Exchange harvest is still the measurement to build. Those threads arrive <i>with the answer attached</i>. This table does not, and no amount of it ever will.</p>
+  </section>
+
+  <section>
+    <h2>Prerequisite knowledge</h2>
+    <h3>Why this is not the same as RD-10</h3>
+    <p>It is tempting to read this ticket as &ldquo;RD-10, but from our own traffic.&rdquo; It is not, for two independent reasons. The rows are unlabelled, as above. And this app has too little traffic to accumulate a set from &mdash; which is the <i>exact</i> deadlock <a href="02-embedding-cutover.html">RD-02</a>'s shadow gate died of, retired at n&nbsp;&asymp;&nbsp;2 rather than satisfied. Building a plan on &ldquo;wait for the log to fill&rdquo; would be that same mistake wearing a new costume.</p>
+
+    <h3>The frozen set is untouched, and stays untouched</h3>
+    <p><code>eval/sets/v1.jsonl</code> is frozen and every recorded run predates the first logged query, so nothing on the results tables moves. The blind-authoring rule that produced it was a response to the <a href="glossary.html">leakage</a> risk of a model fine-tuned on 181,149 WordNet glosses &mdash; that risk is unchanged, and a future set drawn from real phrasing would be a new file with a new sha256, never an edit to this one.</p>
+
+    <h3>Reading list</h3>
+    <ul>
+      <li><code>lib/shadowLookup.ts</code> header comment &mdash; the property this retires, and the accuracy argument that survives it.</li>
+      <li><code>CLAUDE.md</code> &sect;&ldquo;Established facts&rdquo; &mdash; the amended bullet, which now carries both halves.</li>
+      <li><a href="10-real-phrasing-eval-set.html">RD-10</a> &mdash; still open, still the right measurement.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Learnings</h2>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>A one-table change falsified five documents.</b> &ldquo;No query text has ever been logged&rdquo; was quoted in <code>CLAUDE.md</code> twice, <code>README.md</code>, <code>ARCHITECTURE.md</code> and four tickets, and in most of them it was not a fact being reported but a <i>reason being given</i> &mdash; for why the eval set is hand-authored, for why <a href="09-expand-embedding-training-data.html">RD-09</a>'s training pairs must be synthesised. Half this ticket's work was in the prose. Same shape as the stale 512&nbsp;MB ceiling <a href="17-expand-vocabulary-beyond-wordnet.html">RD-17</a> corrected: a claim nobody re-checks is worse than one nobody wrote down.</p></div>
+    <div class="learning"><div class="learning-mark">&check;</div><p><b>The right cost to pay was latency, not completeness.</b> Copying the shadow log's fire-and-forget pattern would have looked consistent and produced a log with silent, unknowable holes in it &mdash; the worst property a record can have, because you cannot tell a quiet day from a dropped write. The two logs answer different questions and correctly make opposite trades.</p></div>
+    <div class="learning"><div class="learning-mark">&check;</div><p><b>Storing the array the client received, rather than rebuilding it, is what makes the log evidence.</b> The row holds the exact object returned. There is no second serialisation to drift &mdash; the same discipline that keeps <code>scripts/lib/retrieval.ts</code> mirroring the route instead of reimplementing it.</p></div>
+    <div class="learning risk"><div class="learning-mark risk">!</div><p><b>Having the data is not having the measurement.</b> The seductive misreading of this table is that it makes <a href="10-real-phrasing-eval-set.html">RD-10</a> unnecessary. It does the opposite: unlabelled rows can raise the question of whether the test set's phrasing is representative and can never answer it, so the labelled harvest is still the work.</p></div>
+  </section>
+
+  <section>
+    <h2>Acceptance criteria</h2>
+    <ul class="check-list">
+      <li><s><code>QueryLog</code> created in Neon with a <code>createdAt</code> index; <code>results</code> is <code>jsonb</code></s></li>
+      <li><s>A real search writes one row, with rank order and scores intact</s></li>
+      <li><s>&ldquo;Load more&rdquo; writes a second row with the larger <code>k</code>, not a duplicate to be deduped away</s></li>
+      <li><s><code>/explain</code>'s <code>debug: true</code> requests write <b>no</b> row</s></li>
+      <li><s>A failing log write returns 200 with results and one non-fatal log line &mdash; forced and observed, not assumed</s></li>
+      <li><s>Added latency measured with logging on and off, and reported rather than absorbed</s></li>
+      <li><s>Retrieval untouched: <code>npm run verify-viz</code> passes, the serving <code>SELECT</code> still byte-identical</s></li>
+      <li><s>Every document quoting &ldquo;no query text has ever been logged&rdquo; amended with the date and what the rows do and do not license</s></li>
+    </ul>
+  </section>
+
+  <footer class="done">RD-24 · reverse-dictionary</footer>
+</div>
